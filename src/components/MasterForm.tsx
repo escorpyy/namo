@@ -4,6 +4,8 @@ import type { FieldDef, MasterDef, Opt } from "../../shared/masters";
 import { visible, type Errors, type FormState, type Row } from "../lib/form";
 import type { Mode } from "../types";
 import { Combobox } from "./Combobox";
+import { DateInput } from "./DateInput";
+import { adToBs } from "../lib/nepaliDate";
 import { OptBadge } from "./OptBadge";
 
 interface Props {
@@ -17,14 +19,15 @@ interface Props {
   dirty: boolean;
   saving: boolean;
   lookups: Record<string, Opt[]>;
+  calendar: "BS" | "AD";
   actions: { save: () => void; clear: () => void; edit: () => void; del: () => void; newRec: () => void; cancel: () => void };
 }
 
-const fmt = (iso: string) => new Date(iso).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
+const fmt = (iso: string | undefined) => iso ? new Date(iso).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "—";
 const Err = ({ msg }: { msg?: string }) => (msg ? <p role="alert" className="mt-0.5 text-[12px] text-red-700">{msg}</p> : null);
 const Kbd = ({ k }: { k: string }) => <span className="kbd">{k}</span>;
 
-export function MasterForm({ def, mode, form, setForm, errors, onBlurField, selected, dirty, saving, lookups, actions }: Props) {
+export function MasterForm({ def, mode, form, setForm, errors, onBlurField, selected, dirty, saving, lookups, calendar, actions }: Props) {
   const formRef = useRef<HTMLDivElement>(null);
   const editable = mode !== "view";
 
@@ -48,6 +51,8 @@ export function MasterForm({ def, mode, form, setForm, errors, onBlurField, sele
     const err = errors[f.name];
     if (f.type === "checkbox")
       return <input data-nav data-field={f.name} type="checkbox" aria-label={f.label} className="h-4 w-4 mt-2 accent-blue-800" checked={!!form[f.name]} onChange={(e) => set(f.name, e.target.checked)} />;
+    if (f.type === "date")
+      return <DateInput fieldName={f.name} value={String(form[f.name])} onChange={(v) => set(f.name, v)} calendar={calendar} hasError={!!err} onBlurField={() => onBlurField(f.name)} />;
     if (f.type === "select" || f.type === "lookup")
       return (
         <Combobox
@@ -81,6 +86,12 @@ export function MasterForm({ def, mode, form, setForm, errors, onBlurField, sele
   const display = (f: FieldDef) => {
     const v = form[f.name];
     if (f.type === "checkbox") return <div className="pt-1.5">{v ? "Yes" : "No"}</div>;
+    if (f.type === "date") {
+      const ad = String(v), bs = ad ? adToBs(ad) : null;
+      if (!ad) return <div className="pt-1.5">—</div>;
+      const [main, alt] = calendar === "BS" && bs ? [`${bs} BS`, `${ad} AD`] : [`${ad} AD`, bs ? `${bs} BS` : ""];
+      return <div className="pt-1.5 font-medium tabular-nums">{main} {alt && <span className="text-[12px] font-normal text-slate-500">({alt})</span>}</div>;
+    }
     if (f.type === "select") return <div className="pt-1"><OptBadge opt={optsOf(f).find((o) => o.value === v) ?? { value: "", label: String(v) }} /></div>;
     if (f.type === "lookup") return <div className="pt-1.5 font-medium">{optsOf(f).find((o) => o.value === v)?.label ?? "—"}</div>;
     return <div className={`pt-1.5 font-medium ${f.name === "code" ? "font-mono" : ""}`}>{String(v) || "—"}</div>;
@@ -99,7 +110,7 @@ export function MasterForm({ def, mode, form, setForm, errors, onBlurField, sele
       </div>
 
       <div className={`px-5 py-2 ${two ? "grid grid-cols-2 gap-x-8" : ""}`}>
-        {def.fields.filter((f) => visible(f, form)).map((f) => (
+        {def.fields.filter((f) => visible(f, form, mode)).map((f) => (
           <Fragment key={f.name}>
             {f.section && (
               <div className="col-span-2 mt-1.5 mb-0.5 border-b border-slate-300 pb-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{f.section}</div>
@@ -119,7 +130,7 @@ export function MasterForm({ def, mode, form, setForm, errors, onBlurField, sele
           <div className="px-3 py-1 text-[12px] font-semibold border-b border-slate-300 bg-slate-100">{def.singular} Information</div>
           <div className="flex divide-x divide-slate-300 text-[12px]">
             <div className="px-3 py-1.5 flex-1"><div className="text-slate-500">Created At</div><div className="tabular-nums">{fmt(selected.createdAt)}</div></div>
-            <div className="px-3 py-1.5 flex-1"><div className="text-slate-500">Updated At</div><div className="tabular-nums">{fmt(selected.updatedAt)}</div></div>
+            {selected.updatedAt && <div className="px-3 py-1.5 flex-1"><div className="text-slate-500">Updated At</div><div className="tabular-nums">{fmt(selected.updatedAt)}</div></div>}
             {def.counts?.map((c) => (
               <div key={c.key} className="px-3 py-1.5 flex-1"><div className="text-slate-500">{c.label}</div><div className="tabular-nums">{selected[c.key] ?? 0}</div></div>
             ))}

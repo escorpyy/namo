@@ -40,8 +40,11 @@ export function MasterList({ def, items, total, selectedId, search, onSearch, on
       case "mono": return <span className="font-mono tabular-nums truncate">{v}</span>;
       case "badge": return <OptBadge opt={def.fields.find((f) => f.name === c.name)?.options?.find((o) => o.value === v)} />;
       case "lookup": return <span className="font-mono truncate text-slate-600">{v == null ? "—" : (lookups[c.name]?.find((o) => o.value === String(v))?.short ?? "")}</span>;
-      case "dot": return <span className="text-center"><span className={`inline-block w-2 h-2 rounded-full ${v ? "bg-green-600" : "bg-slate-400"}`} title={v ? "Active" : "Inactive"} /></span>;
-      default: return <span className="truncate pr-2">{v == null ? "" : String(v)}</span>;
+      case "dot": return <span className="text-center"><span className={`inline-block w-2 h-2 rounded-full ${v ? "bg-green-600" : "bg-slate-400"}`} title={`${c.label}: ${v ? "Yes" : "No"}`} /></span>;
+      case "date": return <span className="tabular-nums truncate">{v ? String(v).slice(0, 10) : ""}</span>;
+      default:
+        if (v == null || v === "") return c.empty ? <span className="truncate pr-2 text-slate-500">{c.empty}</span> : <span />;
+        return <span className="truncate pr-2">{String(v)}</span>;
     }
   };
 

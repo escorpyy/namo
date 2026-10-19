@@ -42,3 +42,22 @@ export const masterApi = (key: string) => ({
   update: (id: number, v: Record<string, unknown>) => req<Row>(`/api/masters/${key}/${id}`, { method: "PUT", body: JSON.stringify(v) }),
   remove: (id: number) => req<{ ok: true }>(`/api/masters/${key}/${id}`, { method: "DELETE" }),
 });
+
+// Opening Balance: grid screen ka alag API (company + branch + fiscal year ke saare ledgers)
+export interface ObRow {
+  key: string; generalLedgerId: number; subLedgerId: number | null; code: string; name: string;
+  subLedgerCode: string | null; subLedgerName: string | null; groupCode: string; subGroupCode: string; groupType: string;
+  normalBalance: "DEBIT" | "CREDIT"; isActive: boolean; requiresSubLedger: boolean; needsSubLedger: boolean; debit: string; credit: string;
+}
+export interface ObData {
+  fiscalYear: { id: number; code: string; startDate: string; endDate: string; isClosed: boolean; isOpeningBalanceLocked: boolean; lockedAt: string | null; lockedByName: string | null };
+  rows: ObRow[];
+  totals: { branch: { debit: string; credit: string }; company: { debit: string; credit: string } };
+}
+export const obApi = {
+  get: (companyId: number, branchId: number, fiscalYearId: number) =>
+    req<ObData>(`/api/opening-balance?companyId=${companyId}&branchId=${branchId}&fiscalYearId=${fiscalYearId}`),
+  save: (body: Record<string, unknown>) => req<{ saved: number; deleted: number }>("/api/opening-balance", { method: "PUT", body: JSON.stringify(body) }),
+  lock: (body: Record<string, unknown>) => req<{ ok: true }>("/api/opening-balance/lock", { method: "POST", body: JSON.stringify(body) }),
+  unlock: (body: Record<string, unknown>) => req<{ ok: true }>("/api/opening-balance/unlock", { method: "POST", body: JSON.stringify(body) }),
+};

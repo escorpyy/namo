@@ -22,9 +22,21 @@ async function main() {
         ...(c.code === "ABC" ? [{ companyId: co.id, code: "BR1", name: "Birgunj Branch" }] : []),
       ]);
       await db.insert(S.fiscalYear).values({
-        companyId: co.id, code: "2082/083", startDate: new Date("2025-07-16"), endDate: new Date("2026-07-15"), isCurrent: true,
+        companyId: co.id, code: "2082/083", startDate: new Date("2025-07-17"), endDate: new Date("2026-07-16"), isCurrent: true,
       });
     }
+    // Demo user access: Neeraj = Admin (sab branches), Sita = Accountant (sirf Head Office, ABC)
+    if (!(await hasRows(S.userCompanyAccess, co.id))) {
+      const [neeraj] = await db.select().from(S.user).where(eq(S.user.email, "neeraj@namoerp.local"));
+      if (neeraj) await db.insert(S.userCompanyAccess).values({ userId: neeraj.id, companyId: co.id, branchId: null, role: "ADMIN" });
+      if (c.code === "ABC") {
+        let [sita] = await db.select().from(S.user).where(eq(S.user.email, "sita@namoerp.local"));
+        if (!sita) [sita] = await db.insert(S.user).values({ name: "Sita Karki", email: "sita@namoerp.local" }).returning();
+        const [ho] = await db.select().from(S.branch).where(and(eq(S.branch.companyId, co.id), eq(S.branch.code, "HO")));
+        if (sita && ho) await db.insert(S.userCompanyAccess).values({ userId: sita.id, companyId: co.id, branchId: ho.id, role: "ACCOUNTANT" });
+      }
+    }
+
     if (c.code !== "ABC") continue; // demo master data sirf ABC me
 
     if (!(await hasRows(S.accountGroup, co.id))) {
@@ -122,6 +134,29 @@ async function main() {
         }).returning();
         if (d.credit) await db.insert(S.customerDetail).values({ partyId: p.id, creditLimit: d.credit[0], creditDays: d.credit[1] });
         if (d.terms != null) await db.insert(S.vendorDetail).values({ partyId: p.id, paymentTermDays: d.terms });
+      }
+    }
+
+    // Demo opening balance (ABC, Head Office, FY 2082/083): balanced. Bank ledger me Sub Ledger breakdown ka demo.
+    if (!(await hasRows(S.openingBalance, co.id))) {
+      const [ho] = await db.select().from(S.branch).where(and(eq(S.branch.companyId, co.id), eq(S.branch.code, "HO")));
+      const [fy] = await db.select().from(S.fiscalYear).where(and(eq(S.fiscalYear.companyId, co.id), eq(S.fiscalYear.code, "2082/083")));
+      const gl = async (code: string) => (await db.select().from(S.generalLedger).where(and(eq(S.generalLedger.companyId, co.id), eq(S.generalLedger.code, code))))[0];
+      const [cash, bank, cap, ram, sita] = [await gl("GL001"), await gl("GL002"), await gl("GL010"), await gl("C001"), await gl("V001")];
+      if (ho && fy && cash && bank && cap && ram && sita) {
+        await db.update(S.generalLedger).set({ requiresSubLedger: true }).where(eq(S.generalLedger.id, bank.id));
+        const subs = await db.insert(S.subLedger).values([
+          { generalLedgerId: bank.id, code: "NB-CUR", name: "Nabil Current A/C" },
+          { generalLedgerId: bank.id, code: "NB-SAV", name: "Nabil Savings A/C" },
+        ]).onConflictDoNothing().returning();
+        const base = { companyId: co.id, branchId: ho.id, fiscalYearId: fy.id };
+        await db.insert(S.openingBalance).values([
+          { ...base, generalLedgerId: cash.id, debit: "50000.00" },
+          ...(subs.length === 2 ? [{ ...base, generalLedgerId: bank.id, subLedgerId: subs[0].id, debit: "200000.00" }, { ...base, generalLedgerId: bank.id, subLedgerId: subs[1].id, debit: "100000.00" }] : []),
+          { ...base, generalLedgerId: ram.id, debit: "100000.00" },
+          { ...base, generalLedgerId: cap.id, credit: "350000.00" },
+          { ...base, generalLedgerId: sita.id, credit: "100000.00" },
+        ]);
       }
     }
 

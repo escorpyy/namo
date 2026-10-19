@@ -13,7 +13,7 @@ const rows: [string, string][] = [
   ["F1 / ?", "This help"],
 ];
 
-export function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
+export function ShortcutsOverlay({ onClose, shortcuts = rows }: { onClose: () => void; shortcuts?: [string, string][] }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/30" onClick={onClose}>
       <div className="w-[520px] bg-paper border border-slate-500 shadow-lg" onClick={(e) => e.stopPropagation()}>
@@ -23,7 +23,7 @@ export function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
         </div>
         <table className="w-full text-[13px] m-1">
           <tbody>
-            {rows.map(([k, d]) => (
+            {shortcuts.map(([k, d]) => (
               <tr key={k} className="border-b border-rule last:border-0">
                 <td className="py-1 px-3 w-[200px]"><span className="kbd">{k}</span></td>
                 <td className="py-1 px-3">{d}</td>

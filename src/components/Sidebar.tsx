@@ -2,9 +2,12 @@ import { useState } from "react";
 import {
   BarChart3, BookOpen, BookText, Boxes, ChevronDown, ChevronRight, ClipboardList, FileText, FolderTree, Landmark,
   LayoutDashboard, Layers, Map, MapPin, Package, PanelLeftClose, PanelLeftOpen, Percent, Ruler, Settings,
-  Tag, UserCheck, UserSquare, Users, Warehouse,
+  Scale, Tag, UserCheck, UserSquare, Users, Warehouse, Building2, Network, CalendarRange, UserCog, KeyRound,
 } from "lucide-react";
 import { MASTERS } from "../../shared/masters";
+
+// Master-engine ke bahar ki custom screens (grid etc.)
+export const CUSTOM_SCREENS = ["opening-balance"];
 
 type Item = { id: string; label: string; icon: React.ElementType };
 type Section = { id: string; label: string; icon: React.ElementType; items: Item[] };
@@ -18,6 +21,7 @@ const sections: Section[] = [
       { id: "account-sub-groups", label: "Account Sub Group", icon: Layers },
       { id: "general-ledger", label: "General Ledger", icon: BookOpen },
       { id: "sub-ledger", label: "Sub Ledger", icon: BookText },
+      { id: "opening-balance", label: "Opening Balance", icon: Scale },
     ],
   },
   {
@@ -38,7 +42,18 @@ const sections: Section[] = [
       { id: "tax-rates", label: "Tax Rate", icon: Percent },
       { id: "stock-categories", label: "Stock Category", icon: Tag },
       { id: "locations", label: "Location", icon: Warehouse },
+      { id: "stock-opening", label: "Stock Opening Balance", icon: Scale },
       { id: "products", label: "Product", icon: Package },
+    ],
+  },
+  {
+    id: "admin", label: "Admin", icon: Settings,
+    items: [
+      { id: "companies", label: "Company", icon: Building2 },
+      { id: "branches", label: "Branch", icon: Network },
+      { id: "fiscal-years", label: "Fiscal Year", icon: CalendarRange },
+      { id: "users", label: "User", icon: UserCog },
+      { id: "user-access", label: "User Access", icon: KeyRound },
     ],
   },
   {
@@ -59,7 +74,7 @@ interface Props {
 }
 
 export function Sidebar({ collapsed, active, onToggle, onNavigate, onNotify }: Props) {
-  const [open, setOpen] = useState<Record<string, boolean>>({ accounts: true, parties: true, inventory: true, vouchers: false });
+  const [open, setOpen] = useState<Record<string, boolean>>({ accounts: true, parties: true, inventory: true, admin: true, vouchers: false });
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
     const btns = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("button[data-sb]"));
@@ -71,7 +86,7 @@ export function Sidebar({ collapsed, active, onToggle, onNavigate, onNotify }: P
 
   const itemBtn = (it: Item, indent: boolean) => {
     const Icon = it.icon;
-    const ready = !!MASTERS[it.id];
+    const ready = !!MASTERS[it.id] || CUSTOM_SCREENS.includes(it.id);
     const isActive = it.id === active;
     return (
       <button

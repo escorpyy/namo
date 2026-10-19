@@ -27,7 +27,7 @@ export function StatusBar({ status, company, branch, fy }: Props) {
       <span>Records: <b className="font-medium">{status.count}</b></span>
       <span className={`flex items-center gap-1 min-w-0 truncate ${color}`} role="status" aria-live="polite"><Icon size={14} /> {status.message}</span>
       <span className="flex-1" />
-      <span className="hidden xl:flex gap-3 text-slate-600">{HINTS[status.mode].map((h) => <span key={h}>{h}</span>)}</span>
+      <span className="hidden xl:flex gap-3 text-slate-600">{(status.hints ?? HINTS[status.mode]).map((h) => <span key={h}>{h}</span>)}</span>
     </footer>
   );
 }

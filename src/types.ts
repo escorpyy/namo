@@ -7,6 +7,7 @@ export interface StatusInfo {
   shown: number;
   message: string;
   kind: MsgKind;
+  hints?: string[]; // custom screens apne shortcuts dikhate hain
 }
 
 export interface CompanyCtx {

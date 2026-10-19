@@ -5,6 +5,7 @@ import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import MasterScreen from "./screens/MasterScreen";
+import OpeningBalanceScreen from "./screens/OpeningBalanceScreen";
 import { MASTERS } from "../shared/masters";
 
 export default function App() {
@@ -24,6 +25,21 @@ export default function App() {
     setBranchId((c.branches.find((b) => b.isHeadOffice) ?? c.branches[0])?.id ?? 0);
     setFyId((c.fiscalYears.find((y) => y.isCurrent) ?? c.fiscalYears[0])?.id ?? 0);
   };
+
+  // Company/Branch/Fiscal Year master me badlav ke baad header ke switcher refresh (screen reset nahi hoti)
+  const sel = useRef({ companyId, branchId, fyId });
+  sel.current = { companyId, branchId, fyId };
+  const refreshCtx = useCallback(() => {
+    api.context().then((d) => {
+      if (!d.companies.length) return setError("Database me koi company nahi hai.");
+      setCtx(d);
+      const cur = sel.current;
+      const co = d.companies.find((c) => c.id === cur.companyId);
+      if (!co) { setCompanyId(d.companies[0].id); pickDefaults(d.companies[0]); return; }
+      if (!co.branches.some((b) => b.id === cur.branchId)) setBranchId((co.branches.find((b) => b.isHeadOffice) ?? co.branches[0])?.id ?? 0);
+      if (!co.fiscalYears.some((y) => y.id === cur.fyId)) setFyId((co.fiscalYears.find((y) => y.isCurrent) ?? co.fiscalYears[0])?.id ?? 0);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     api.context().then((d) => {
@@ -62,6 +78,12 @@ export default function App() {
     pickDefaults(ctx.companies.find((c) => c.id === id)!);
   };
 
+  // Branch / FY badalne se bhi unsaved grid/form ka data jaata hai: wahi guard
+  const guarded = (fn: () => void) => () => {
+    if (dirtyRef.current && !window.confirm("Unsaved changes will be lost. Continue?")) return;
+    fn();
+  };
+
   const navigate = (id: string) => {
     if (id === screen) return;
     if (dirtyRef.current && !window.confirm("Unsaved changes will be lost. Leave this screen?")) return;
@@ -72,13 +94,21 @@ export default function App() {
     <div className="h-full flex flex-col">
       <Header
         companies={ctx.companies} companyId={companyId} branchId={branchId} fyId={fyId} userName={ctx.user.name} calendar={calendar}
-        onToggleSidebar={toggleSidebar} onCompany={changeCompany} onBranch={setBranchId} onFy={setFyId}
+        onToggleSidebar={toggleSidebar} onCompany={changeCompany} onBranch={(id) => guarded(() => setBranchId(id))()} onFy={(id) => guarded(() => setFyId(id))()}
         onCalendar={(c) => { setCalendar(c); localStorage.setItem("cal", c); }}
       />
       <div className="flex-1 min-h-0 flex">
         <Sidebar collapsed={collapsed} active={screen} onToggle={toggleSidebar} onNavigate={navigate} onNotify={(text) => setNote({ text, n: Date.now() })} />
         {/* key: screen ya company badalne par list reload + form reset */}
-        <MasterScreen key={`${screen}:${companyId}`} def={MASTERS[screen]} companyId={companyId} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} />
+        {screen === "opening-balance" ? (
+          <OpeningBalanceScreen
+            key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} fyId={fyId} userId={ctx.user.id}
+            branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
+            setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note}
+          />
+        ) : (
+        <MasterScreen key={`${screen}:${companyId}`} def={MASTERS[screen]} companyId={companyId} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} calendar={calendar} onContextChanged={refreshCtx} />
+        )}
       </div>
       <StatusBar
         status={status} company={co.name}

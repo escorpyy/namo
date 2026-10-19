@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { MASTERS, type MasterDef, type Opt } from "../../shared/masters";
 import { ApiError, masterApi } from "../api";
-import { emptyForm, recordLabel, sameForm, toForm, toPayload, validate, type Errors, type FormState, type Row } from "../lib/form";
+import { emptyForm, recordLabel, recordTitle, sameForm, toForm, toPayload, validate, type Errors, type FormState, type Row } from "../lib/form";
 import type { Mode, MsgKind, StatusInfo } from "../types";
 import { MasterForm } from "../components/MasterForm";
 import { MasterList } from "../components/MasterList";
@@ -11,8 +11,10 @@ import { ShortcutsOverlay } from "../components/ShortcutsOverlay";
 const q = (sel: string) => document.querySelector<HTMLElement>(sel);
 const focusField = (n: string) => q(`[data-field="${n}"]`)?.focus();
 const focusForm = () => setTimeout(() => q("[data-zone=form] [data-nav]")?.focus(), 0);
-const sortRows = (def: MasterDef, a: Row[]) => [...a].sort((x, y) => String(x.code).localeCompare(String(y.code)));
-const optLabel = (def: MasterDef, r: Row) => `${r[def.labelFields[0]]} — ${r[def.labelFields[1]]}`;
+const sortRows = (def: MasterDef, a: Row[]) => {
+  const k = def.sortBy ?? "code", dir = def.sortDir === "desc" ? -1 : 1;
+  return [...a].sort((x, y) => dir * String(x[k] ?? "").localeCompare(String(y[k] ?? "")));
+};
 
 interface Props {
   def: MasterDef;
@@ -20,13 +22,16 @@ interface Props {
   setStatus: (s: StatusInfo) => void;
   dirtyRef: MutableRefObject<boolean>;
   externalMessage: { text: string; n: number } | null;
+  calendar: "BS" | "AD";
+  onContextChanged: () => void;
 }
 
-export default function MasterScreen({ def, companyId, setStatus, dirtyRef, externalMessage }: Props) {
+export default function MasterScreen({ def, companyId, setStatus, dirtyRef, externalMessage, calendar, onContextChanged }: Props) {
   const api = useMemo(() => masterApi(def.key), [def.key]);
   const firstField = def.fields[0].name;
   const [items, setItems] = useState<Row[]>([]);
   const [lookupRows, setLookupRows] = useState<Record<string, Row[]>>({});
+  const [scopedRows, setScopedRows] = useState<Record<string, Row[]>>({}); // lookupScope=record fields ke options
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [mode, setMode] = useState<Mode>("new");
   const [form, setForm] = useState<FormState>(() => emptyForm(def));
@@ -59,7 +64,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
     for (const f of def.fields) {
       if (f.type !== "lookup") continue;
       const target = MASTERS[f.lookup!];
-      const rows = rowsOf(f.lookup!).filter((r) => f.lookup !== def.key || r.id !== selectedId);
+      const rows = (f.lookupScope === "record" ? (scopedRows[f.name] ?? []) : rowsOf(f.lookup!)).filter((r) => (f.lookup !== def.key || r.id !== selectedId) && (!f.lookupWhere || r[f.lookupWhere.field] === f.lookupWhere.value));
       // Child master ho (jaise Sub Group) to label me parent code bhi: "AG01 / SG01 — Cash-in-Hand"
       const pf = target.parent && target.fields.find((x) => x.name === target.parent!.field);
       const parents = pf ? rowsOf(pf.lookup!) : [];
@@ -67,17 +72,17 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
       out[f.name] = rows.map((r) => {
         const par = pf ? parents.find((p) => p.id === r[pf.name]) : null;
         const prefix = par && pTarget ? `${par[pTarget.labelFields[0]]} / ` : "";
-        return { value: String(r.id), label: `${prefix}${optLabel(target, r)}`, short: String(r[target.labelFields[0]]) };
+        return { value: String(r.id), label: `${prefix}${recordTitle(target, r)}`, short: String(r[target.labelFields[0]]) };
       });
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [def, items, lookupRows, selectedId]);
+  }, [def, items, lookupRows, scopedRows, selectedId]);
 
   // ---- load ----
   useEffect(() => {
     let live = true;
-    const keys = [...new Set([...def.fields.filter((f) => f.type === "lookup").map((f) => f.lookup!), ...(def.loads ?? [])])].filter((k) => k !== def.key);
+    const keys = [...new Set([...def.fields.filter((f) => f.type === "lookup" && f.lookupScope !== "record").map((f) => f.lookup!), ...(def.loads ?? [])])].filter((k) => k !== def.key);
     Promise.all([api.list(companyId), ...keys.map((k) => masterApi(k).list(companyId))])
       .then(([own, ...rest]) => {
         if (!live) return;
@@ -89,6 +94,17 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
       .catch((e: Error) => live && flash(e.message, "err"));
     return () => { live = false; };
   }, [companyId, def, api, firstField]);
+
+  // Company screen par: Retained Earnings GL ke options us company ke ledgers se aate hain jo select hai (header wali nahi)
+  useEffect(() => {
+    const fields = def.fields.filter((f) => f.lookupScope === "record");
+    if (!fields.length) return;
+    if (selectedId == null) { setScopedRows({}); return; }
+    let live = true;
+    Promise.all(fields.map((f) => masterApi(f.lookup!).list(selectedId).then((rows) => [f.name, rows] as const)))
+      .then((e) => live && setScopedRows(Object.fromEntries(e))).catch(() => {});
+    return () => { live = false; };
+  }, [selectedId, def]);
 
   useEffect(() => { if (externalMessage) flash(externalMessage.text, "info"); }, [externalMessage]);
   useEffect(() => { dirtyRef.current = dirty; });
@@ -147,6 +163,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
       setItems((prev) => sortRows(def, [...prev.filter((i) => i.id !== rec.id), rec]));
       setSelectedId(rec.id); setMode("view"); setForm(toForm(def, rec)); setErrors({});
       flash(`${wasEdit ? "Updated" : "Saved"} ${recordLabel(def, rec)}`, "ok");
+      if (def.refreshContext) onContextChanged();
       focusForm();
       return true;
     } catch (e) {
@@ -163,7 +180,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
 
   const save = async (): Promise<boolean> => {
     if (mode === "view") return false;
-    const errs = validate(def, form, items, mode === "edit" ? selectedId : null);
+    const errs = validate(def, form, items, mode === "edit" ? selectedId : null, mode);
     const first = def.fields.find((f) => errs[f.name]);
     if (first) {
       setErrors(errs);
@@ -171,7 +188,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
       focusField(first.name);
       return false;
     }
-    const payload = toPayload(def, form);
+    const payload = toPayload(def, form, mode);
     const w = def.warnOnChange;
     if (mode === "edit" && selected && w && String(selected[w.field] ?? "") !== String(payload[w.field] ?? "") && (selected[w.countKey] ?? 0) > 0) {
       const n = selected[w.countKey];
@@ -192,6 +209,11 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
   // ---- delete ----
   const askDelete = () => {
     if (mode !== "view" || !selected) return;
+    if (def.noDelete) {
+      flash(def.noDelete, "err");
+      setDialog({ title: "Cannot delete", body: def.noDelete, buttons: [{ label: "OK", kind: "neutral", autoFocus: true, onClick: () => setDialog(null) }] });
+      return;
+    }
     const blocker = def.counts?.find((c) => (selected[c.key] ?? 0) > 0);
     if (blocker) {
       const text = `Cannot delete: ${selected[blocker.key]} ${blocker.label} linked to this ${def.singular}.`;
@@ -202,7 +224,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
     const target = selected;
     setDialog({
       title: `Delete ${def.singular}?`,
-      body: <><span className="font-mono font-semibold">{target[def.labelFields[0]]}</span> — {target[def.labelFields[1]]}<br /><span className="text-slate-600">This cannot be undone.</span></>,
+      body: <><span className="font-mono font-semibold">{recordTitle(def, target)}</span><br /><span className="text-slate-600">This cannot be undone.</span></>,
       buttons: [
         { label: "Cancel", kind: "neutral", autoFocus: true, onClick: () => setDialog(null) },
         {
@@ -214,6 +236,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
               setItems((p) => p.filter((i) => i.id !== target.id));
               resetToNew();
               flash(`Deleted ${recordLabel(def, target)}`, "ok");
+              if (def.refreshContext) onContextChanged();
             } catch (e) { flash((e as Error).message, "err"); }
           },
         },
@@ -224,7 +247,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
   // ---- field validation ----
   const onBlurField = (name: string) => {
     if (mode === "view") return;
-    const e = validate(def, form, items, mode === "edit" ? selectedId : null);
+    const e = validate(def, form, items, mode === "edit" ? selectedId : null, mode);
     setErrors((prev) => ({ ...prev, [name]: e[name] }));
   };
   // Suggest: ek field chunte hi doosra auto-bharo (sirf NEW mode; user baad me badal sakta hai)
@@ -291,14 +314,14 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
 
   return (
     <>
-      <main className="flex-1 min-w-0 overflow-hidden">
+      <main className="flex-1 min-w-0 overflow-y-auto">
         <div className="px-4 pt-3">
           <h1 className="text-[22px] font-semibold">{def.title}</h1>
           <div className="double-rule mt-1" />
         </div>
         <MasterForm
           def={def} mode={mode} form={form} setForm={onChangeForm} errors={errors} onBlurField={onBlurField}
-          selected={selected} dirty={dirty} saving={saving} lookups={lookups}
+          selected={selected} dirty={dirty} saving={saving} lookups={lookups} calendar={calendar}
           actions={{ save: () => void save(), clear, edit, del: askDelete, newRec, cancel: cancelEdit }}
         />
       </main>
