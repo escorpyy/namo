@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-paper text-slate-800 text-[13px] overflow-hidden;
+    font-family: Inter, "Segoe UI", system-ui, sans-serif;
+  }
+  :focus-visible { outline: 2px solid #1d4ed8; outline-offset: 1px; }
+}
+
+@layer components {
+  .fld {
+    @apply w-full h-8 px-2 border border-slate-400 bg-white rounded-sm text-[13px] outline-none
+      focus:border-blue-700 focus:ring-2 focus:ring-blue-300;
+  }
+  .fld:focus-visible { outline: none; }
+  .fld-err { @apply border-red-600 focus:border-red-600 focus:ring-red-200; }
+  .btn {
+    @apply inline-flex items-center gap-1.5 h-8 px-3 border border-slate-400 bg-white rounded-sm
+      text-[13px] hover:bg-slate-100 disabled:opacity-50;
+  }
+  .btn-primary { @apply bg-blue-800 border-blue-900 text-white hover:bg-blue-900; }
+  .btn-danger { @apply bg-red-700 border-red-800 text-white hover:bg-red-800; }
+  .kbd { @apply text-[10px] px-1 border border-slate-300 rounded-sm bg-slate-50 text-slate-600 font-mono; }
+  .btn-primary .kbd, .btn-danger .kbd { @apply bg-white/15 border-white/30 text-white; }
+  .double-rule { border-bottom: 3px double #94a3b8; }
+}
