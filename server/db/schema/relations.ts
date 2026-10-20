@@ -10,6 +10,13 @@ import {
 } from "./vouchers";
 import { openingBalance, stockOpeningBalance } from "./openingBalances";
 import {
+  billingTerm,
+  billingTermRule,
+  billingTermTemplate,
+  billingTermTemplateLine,
+  documentBillingTerm,
+} from "./billing";
+import {
   productGroup,
   productSubGroup,
   productUnit,
@@ -60,6 +67,9 @@ export const companyRelations = relations(company, ({ one, many }) => ({
   journalVouchers: many(journalVoucher),
   cashBankVouchers: many(cashBankVoucher),
   openingBalances: many(openingBalance),
+
+  billingTerms: many(billingTerm),
+  billingTermTemplates: many(billingTermTemplate),
 }));
 
 export const branchRelations = relations(branch, ({ one, many }) => ({
@@ -765,3 +775,109 @@ export const bundleComponentRelations = relations(bundleComponent, ({ one }) => 
     relationName: "BundleComponentProduct",
   }),
 }));
+
+// ============================================================
+// BILLING TERMS
+// ============================================================
+
+export const billingTermRelations = relations(billingTerm, ({ one, many }) => ({
+  company: one(company, {
+    fields: [billingTerm.companyId],
+    references: [company.id],
+  }),
+  ledger: one(generalLedger, {
+    fields: [billingTerm.ledgerId],
+    references: [generalLedger.id],
+    relationName: "BillingTermLedger",
+  }),
+  taxLedger: one(generalLedger, {
+    fields: [billingTerm.taxLedgerId],
+    references: [generalLedger.id],
+    relationName: "BillingTermTaxLedger",
+  }),
+  debitLedger: one(generalLedger, {
+    fields: [billingTerm.debitLedgerId],
+    references: [generalLedger.id],
+    relationName: "BillingTermDebitLedger",
+  }),
+  creditLedger: one(generalLedger, {
+    fields: [billingTerm.creditLedgerId],
+    references: [generalLedger.id],
+    relationName: "BillingTermCreditLedger",
+  }),
+  rules: many(billingTermRule),
+  templateLines: many(billingTermTemplateLine),
+  documentTerms: many(documentBillingTerm),
+}));
+
+export const billingTermRuleRelations = relations(billingTermRule, ({ one }) => ({
+  company: one(company, {
+    fields: [billingTermRule.companyId],
+    references: [company.id],
+  }),
+  term: one(billingTerm, {
+    fields: [billingTermRule.termId],
+    references: [billingTerm.id],
+  }),
+}));
+
+export const billingTermTemplateRelations = relations(
+  billingTermTemplate,
+  ({ one, many }) => ({
+    company: one(company, {
+      fields: [billingTermTemplate.companyId],
+      references: [company.id],
+    }),
+    lines: many(billingTermTemplateLine),
+    documentTerms: many(documentBillingTerm),
+  }),
+);
+
+export const billingTermTemplateLineRelations = relations(
+  billingTermTemplateLine,
+  ({ one, many }) => ({
+    template: one(billingTermTemplate, {
+      fields: [billingTermTemplateLine.templateId],
+      references: [billingTermTemplate.id],
+    }),
+    term: one(billingTerm, {
+      fields: [billingTermTemplateLine.termId],
+      references: [billingTerm.id],
+    }),
+    ledger: one(generalLedger, {
+      fields: [billingTermTemplateLine.ledgerId],
+      references: [generalLedger.id],
+    }),
+    dependsOn: one(billingTermTemplateLine, {
+      fields: [billingTermTemplateLine.dependsOnLineId],
+      references: [billingTermTemplateLine.id],
+      relationName: "BillingTemplateLineDependency",
+    }),
+    dependents: many(billingTermTemplateLine, {
+      relationName: "BillingTemplateLineDependency",
+    }),
+    documentTerms: many(documentBillingTerm),
+  }),
+);
+
+export const documentBillingTermRelations = relations(
+  documentBillingTerm,
+  ({ one }) => ({
+    company: one(company, {
+      fields: [documentBillingTerm.companyId],
+      references: [company.id],
+    }),
+    term: one(billingTerm, {
+      fields: [documentBillingTerm.termId],
+      references: [billingTerm.id],
+    }),
+    template: one(billingTermTemplate, {
+      fields: [documentBillingTerm.templateId],
+      references: [billingTermTemplate.id],
+    }),
+    templateLine: one(billingTermTemplateLine, {
+      fields: [documentBillingTerm.templateLineId],
+      references: [billingTermTemplateLine.id],
+    }),
+  }),
+);

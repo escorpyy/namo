@@ -5,4 +5,5 @@ export * from "./parties";
 export * from "./vouchers";
 export * from "./openingBalances";
 export * from "./products";
+export * from "./billing";
 export * from "./relations";
