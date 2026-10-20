@@ -5,12 +5,12 @@ React + Vite + Tailwind + TypeScript (frontend) · Express + Drizzle ORM + Postg
 ## Local setup (Postgres docker me)
 
 ```bash
-npm install
+pnpm install
 cp .env.example .env          # DATABASE_URL local wala already set hai
 docker compose up -d          # local Postgres
-npm run db:push               # tables bana do (schema: server/db/schema)
-npm run db:seed               # demo data (dobara chalana safe hai, sirf missing data banta hai)
-npm run dev                   # web http://localhost:5173  |  api http://localhost:4000
+pnpm db:push               # tables bana do (schema: server/db/schema)
+pnpm db:seed               # demo data (dobara chalana safe hai, sirf missing data banta hai)
+pnpm dev                   # web http://localhost:5173  |  api http://localhost:4000
 ```
 
 ## Purani DB hai to (schema badla hai)
@@ -24,13 +24,25 @@ GL ke references ab `ON DELETE RESTRICT` hain (pehle `set null` the). Ek baar `p
 1. `.env` me `DATABASE_URL` ko cloud connection string se replace karo (`.env.example` me example hai).
 2. Supabase pooler (port 6543) ke liye `prepare: false` already set hai (`server/db/index.ts`).
 3. `db:push` ke liye direct string (port 5432) better hai: `DATABASE_URL_DIRECT` me daalo.
-4. `npm run db:push && npm run db:seed`
+4. `pnpm db:push && pnpm db:seed`
 
 ## Production
 
 ```bash
-npm run build && npm start    # Express hi dist/ serve karta hai, ek hi port
+pnpm build && pnpm start    # Express hi dist/ serve karta hai, ek hi port
 ```
+
+## Tests
+
+```bash
+docker compose up -d     # Postgres chahiye
+pnpm test:db             # "namoerp_test" DB banata/reset karta, seed karta, saare tests chalata hai (ek command)
+pnpm test                # sirf tests; TEST_DATABASE_URL (ya DATABASE_URL) local DB hona chahiye jiske naam me "test" ho
+pnpm typecheck           # tsc --noEmit
+```
+
+Integration tests DB me likhte hain, isliye wo sirf **local + naam me "test"** wali DB par chalte hain (apni dev DB par kabhi nahi).
+`pnpm test:db` us test DB ko har baar wipe + re-seed karta hai. GitHub par har push/PR par `.github/workflows/ci.yml` yahi sab chalata hai.
 
 ## Keyboard shortcuts (app me F1 dabao)
 
