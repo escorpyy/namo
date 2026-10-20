@@ -10,11 +10,13 @@ import {
 } from "./vouchers";
 import { openingBalance, stockOpeningBalance } from "./openingBalances";
 import {
-  billingTerm,
-  billingTermRule,
-  billingTermTemplate,
-  billingTermTemplateLine,
-  documentBillingTerm,
+  purchaseTerm,
+  purchaseTermDefault,
+  purchaseDocumentTerm,
+  purchaseDocumentTermAllocation,
+  salesTerm,
+  salesTermDefault,
+  salesDocumentTerm,
 } from "./billing";
 import {
   productGroup,
@@ -68,8 +70,8 @@ export const companyRelations = relations(company, ({ one, many }) => ({
   cashBankVouchers: many(cashBankVoucher),
   openingBalances: many(openingBalance),
 
-  billingTerms: many(billingTerm),
-  billingTermTemplates: many(billingTermTemplate),
+  purchaseTerms: many(purchaseTerm),
+  salesTerms: many(salesTerm),
 }));
 
 export const branchRelations = relations(branch, ({ one, many }) => ({
@@ -780,104 +782,120 @@ export const bundleComponentRelations = relations(bundleComponent, ({ one }) => 
 // BILLING TERMS
 // ============================================================
 
-export const billingTermRelations = relations(billingTerm, ({ one, many }) => ({
+export const purchaseTermRelations = relations(purchaseTerm, ({ one, many }) => ({
   company: one(company, {
-    fields: [billingTerm.companyId],
+    fields: [purchaseTerm.companyId],
     references: [company.id],
   }),
-  ledger: one(generalLedger, {
-    fields: [billingTerm.ledgerId],
+  generalLedger: one(generalLedger, {
+    fields: [purchaseTerm.generalLedgerId],
     references: [generalLedger.id],
-    relationName: "BillingTermLedger",
   }),
-  taxLedger: one(generalLedger, {
-    fields: [billingTerm.taxLedgerId],
-    references: [generalLedger.id],
-    relationName: "BillingTermTaxLedger",
+  baseTerm: one(purchaseTerm, {
+    fields: [purchaseTerm.baseTermId],
+    references: [purchaseTerm.id],
+    relationName: "PurchaseTermBase",
   }),
-  debitLedger: one(generalLedger, {
-    fields: [billingTerm.debitLedgerId],
-    references: [generalLedger.id],
-    relationName: "BillingTermDebitLedger",
-  }),
-  creditLedger: one(generalLedger, {
-    fields: [billingTerm.creditLedgerId],
-    references: [generalLedger.id],
-    relationName: "BillingTermCreditLedger",
-  }),
-  rules: many(billingTermRule),
-  templateLines: many(billingTermTemplateLine),
-  documentTerms: many(documentBillingTerm),
+  dependentTerms: many(purchaseTerm, { relationName: "PurchaseTermBase" }),
+  defaults: many(purchaseTermDefault),
+  documentTerms: many(purchaseDocumentTerm),
 }));
 
-export const billingTermRuleRelations = relations(billingTermRule, ({ one }) => ({
-  company: one(company, {
-    fields: [billingTermRule.companyId],
-    references: [company.id],
-  }),
-  term: one(billingTerm, {
-    fields: [billingTermRule.termId],
-    references: [billingTerm.id],
-  }),
-}));
-
-export const billingTermTemplateRelations = relations(
-  billingTermTemplate,
-  ({ one, many }) => ({
-    company: one(company, {
-      fields: [billingTermTemplate.companyId],
-      references: [company.id],
+export const purchaseTermDefaultRelations = relations(
+  purchaseTermDefault,
+  ({ one }) => ({
+    term: one(purchaseTerm, {
+      fields: [purchaseTermDefault.termId],
+      references: [purchaseTerm.id],
     }),
-    lines: many(billingTermTemplateLine),
-    documentTerms: many(documentBillingTerm),
+    party: one(party, {
+      fields: [purchaseTermDefault.partyId],
+      references: [party.id],
+    }),
+    product: one(product, {
+      fields: [purchaseTermDefault.productId],
+      references: [product.id],
+    }),
   }),
 );
 
-export const billingTermTemplateLineRelations = relations(
-  billingTermTemplateLine,
+export const purchaseDocumentTermRelations = relations(
+  purchaseDocumentTerm,
   ({ one, many }) => ({
-    template: one(billingTermTemplate, {
-      fields: [billingTermTemplateLine.templateId],
-      references: [billingTermTemplate.id],
+    company: one(company, {
+      fields: [purchaseDocumentTerm.companyId],
+      references: [company.id],
     }),
-    term: one(billingTerm, {
-      fields: [billingTermTemplateLine.termId],
-      references: [billingTerm.id],
+    term: one(purchaseTerm, {
+      fields: [purchaseDocumentTerm.termId],
+      references: [purchaseTerm.id],
     }),
-    ledger: one(generalLedger, {
-      fields: [billingTermTemplateLine.ledgerId],
+    generalLedger: one(generalLedger, {
+      fields: [purchaseDocumentTerm.generalLedgerId],
       references: [generalLedger.id],
     }),
-    dependsOn: one(billingTermTemplateLine, {
-      fields: [billingTermTemplateLine.dependsOnLineId],
-      references: [billingTermTemplateLine.id],
-      relationName: "BillingTemplateLineDependency",
-    }),
-    dependents: many(billingTermTemplateLine, {
-      relationName: "BillingTemplateLineDependency",
-    }),
-    documentTerms: many(documentBillingTerm),
+    allocations: many(purchaseDocumentTermAllocation),
   }),
 );
 
-export const documentBillingTermRelations = relations(
-  documentBillingTerm,
+export const purchaseDocumentTermAllocationRelations = relations(
+  purchaseDocumentTermAllocation,
+  ({ one }) => ({
+    documentTerm: one(purchaseDocumentTerm, {
+      fields: [purchaseDocumentTermAllocation.documentTermId],
+      references: [purchaseDocumentTerm.id],
+    }),
+  }),
+);
+
+export const salesTermRelations = relations(salesTerm, ({ one, many }) => ({
+  company: one(company, {
+    fields: [salesTerm.companyId],
+    references: [company.id],
+  }),
+  generalLedger: one(generalLedger, {
+    fields: [salesTerm.generalLedgerId],
+    references: [generalLedger.id],
+  }),
+  baseTerm: one(salesTerm, {
+    fields: [salesTerm.baseTermId],
+    references: [salesTerm.id],
+    relationName: "SalesTermBase",
+  }),
+  dependentTerms: many(salesTerm, { relationName: "SalesTermBase" }),
+  defaults: many(salesTermDefault),
+  documentTerms: many(salesDocumentTerm),
+}));
+
+export const salesTermDefaultRelations = relations(salesTermDefault, ({ one }) => ({
+  term: one(salesTerm, {
+    fields: [salesTermDefault.termId],
+    references: [salesTerm.id],
+  }),
+  party: one(party, {
+    fields: [salesTermDefault.partyId],
+    references: [party.id],
+  }),
+  product: one(product, {
+    fields: [salesTermDefault.productId],
+    references: [product.id],
+  }),
+}));
+
+export const salesDocumentTermRelations = relations(
+  salesDocumentTerm,
   ({ one }) => ({
     company: one(company, {
-      fields: [documentBillingTerm.companyId],
+      fields: [salesDocumentTerm.companyId],
       references: [company.id],
     }),
-    term: one(billingTerm, {
-      fields: [documentBillingTerm.termId],
-      references: [billingTerm.id],
+    term: one(salesTerm, {
+      fields: [salesDocumentTerm.termId],
+      references: [salesTerm.id],
     }),
-    template: one(billingTermTemplate, {
-      fields: [documentBillingTerm.templateId],
-      references: [billingTermTemplate.id],
-    }),
-    templateLine: one(billingTermTemplateLine, {
-      fields: [documentBillingTerm.templateLineId],
-      references: [billingTermTemplateLine.id],
+    generalLedger: one(generalLedger, {
+      fields: [salesDocumentTerm.generalLedgerId],
+      references: [generalLedger.id],
     }),
   }),
 );

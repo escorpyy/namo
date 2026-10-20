@@ -5,423 +5,354 @@ import {
   check,
   index,
   integer,
-  jsonb,
   numeric,
   pgTable,
   serial,
-  timestamp,
   uniqueIndex,
   varchar,
 } from "drizzle-orm/pg-core";
-import { createdAt, updatedAt } from "./_helpers";
+import { createdAt, money, updatedAt } from "./_helpers";
 import {
   billingAllocationBasisEnum,
-  billingApplicabilityEnum,
-  billingCalculationBasisEnum,
-  billingCalculationMethodEnum,
-  billingDocumentTypeEnum,
-  billingPlacementEnum,
-  billingRoundingMethodEnum,
-  billingSignEnum,
-  billingTaxTreatmentEnum,
+  billingCalcBaseEnum,
+  billingCalcTypeEnum,
   billingTermCategoryEnum,
   billingTermNatureEnum,
-  billingTermStatusEnum,
-  billingValuationTreatmentEnum,
+  purchaseTermDocTypeEnum,
+  salesTermDocTypeEnum,
 } from "./enums";
-import { company, user } from "./core";
+import { company } from "./core";
 import { generalLedger } from "./accounting";
+import { party } from "./parties";
+import { product } from "./products";
 
 // ============================================================
 // BILLING TERMS
 //
-// Architecture (see design notes):
-//   BillingTerm              reusable calculation-rule master (versioned)
-//   BillingTermRule          conditional applicability (JSON AND/OR rules)
-//   BillingTermTemplate      reusable, ordered group of terms
-//   BillingTermTemplateLine  one term inside a template (+ overrides)
-//   DocumentBillingTerm      immutable per-document calculation snapshot
+// Purchase and sales terms are deliberately SEPARATE schemas.
 //
-// Amount/rate columns use numeric(20, 8) — wider than `money()` — so that
-// rates, allocations and FX conversions keep precision. Drizzle returns
-// numeric as string; do arithmetic with a decimal library.
+//   *Term                  master: how a term is calculated
+//   *TermDefault           which terms are suggested for a vendor/customer
+//                          or an item (PO/SO terms are copied by the app)
+//   *DocumentTerm          a term as entered on a document (snapshot)
+//   PurchaseDocumentTermAllocation   landed-cost split of a header term
 //
-// Rules that need service-layer enforcement (cannot be expressed here):
-//   - `formula` is a structured AST, never executable code; validate
-//     operators/variables and reject circular dependencies.
-//   - DocumentBillingTerm.documentId is polymorphic (no FK) — validate
-//     documentType + documentId in the service layer.
-//   - Posted documents must never be recalculated from the live master.
-//   - Editing an ACTIVE term should create a new `version` row.
+// Rules enforced here:
+//   - isProductwise = true  -> line level, false -> header level
+//   - nature is fixed in the master
+//   - a term appears once per document (once per line for line terms)
+//   - allocation (distribute to lines) is purchase header terms only
+//
+// Rules left to the service layer:
+//   - calculating in `sequence` order, with SINGLE_TERM bases pointing at an
+//     EARLIER term (no cycles)
+//   - 'mandatory' terms must be present before a document is posted
+//   - polymorphic documentId has no FK (invoice tables don't exist yet)
+//   - linking an additional invoice to a main invoice: add a nullable
+//     self-FK on the invoice header when those tables are built
+//
+// Drizzle returns numeric as string; use shared/decimal.ts for arithmetic.
 // ============================================================
 
-const amount = () => numeric({ precision: 20, scale: 8 });
+const rate = () => numeric({ precision: 9, scale: 4 });
 
-// ------------------------------------------------------------
-// BILLING TERM (master)
-// ------------------------------------------------------------
+// ============================================================
+// PURCHASE
+// ============================================================
 
-export const billingTerm = pgTable(
-  "BillingTerm",
+export const purchaseTerm = pgTable(
+  "PurchaseTerm",
   {
     id: serial().primaryKey(),
     companyId: integer()
       .notNull()
       .references(() => company.id, { onDelete: "restrict" }),
 
-    code: varchar({ length: 30 }).notNull(), // FREIGHT_IN
-    name: varchar({ length: 100 }).notNull(), // Inbound Freight
-    description: varchar({ length: 500 }),
-
+    code: varchar({ length: 20 }).notNull(),
+    name: varchar({ length: 100 }).notNull(),
     category: billingTermCategoryEnum().notNull().default("GENERAL"),
-    nature: billingTermNatureEnum().notNull().default("CHARGE"),
-    applicability: billingApplicabilityEnum().notNull().default("BOTH"),
-    status: billingTermStatusEnum().notNull().default("DRAFT"),
+    nature: billingTermNatureEnum().notNull(),
 
-    // --- Calculation ---------------------------------------------------
-    calculationMethod: billingCalculationMethodEnum().notNull(),
-    calculationBasis: billingCalculationBasisEnum().notNull().default("NET_VALUE"),
-    rate: amount(),
-    fixedAmount: amount(),
-    currencyCode: varchar({ length: 3 }),
-    formula: jsonb(), // structured AST, validated by the formula engine
-    formulaVersion: integer().notNull().default(1),
-
-    // --- Sign & calculation behaviour ---------------------------------
-    sign: billingSignEnum().notNull().default("ADD"),
-    isTaxInclusive: boolean().notNull().default(false),
-    applyBeforeDiscount: boolean().notNull().default(true),
-    allowManualAmount: boolean().notNull().default(false),
-    allowManualRate: boolean().notNull().default(false),
-    isOptional: boolean().notNull().default(true),
-    isCompound: boolean().notNull().default(false),
-
-    // --- Placement & sequence -----------------------------------------
-    defaultPlacement: billingPlacementEnum().notNull().default("HEADER"),
-    defaultSequence: integer().notNull().default(100),
-    dependsOnPrevious: boolean().notNull().default(false),
-    previousTermCode: varchar({ length: 30 }),
-
-    // --- Accounting ----------------------------------------------------
-    ledgerId: integer().references(() => generalLedger.id, {
-      onDelete: "restrict",
-    }),
-    taxLedgerId: integer().references(() => generalLedger.id, {
-      onDelete: "restrict",
-    }),
-    debitLedgerId: integer().references(() => generalLedger.id, {
-      onDelete: "restrict",
-    }),
-    creditLedgerId: integer().references(() => generalLedger.id, {
-      onDelete: "restrict",
-    }),
-    taxTreatment: billingTaxTreatmentEnum().notNull().default("NOT_APPLICABLE"),
-
-    // --- Tax dependency -----------------------------------------------
-    isTaxable: boolean().notNull().default(false),
-    taxGroupCode: varchar({ length: 20 }),
-    taxDependsOnPreviousTerm: boolean().notNull().default(false),
-    compoundTax: boolean().notNull().default(false),
-
-    // --- Discount behaviour -------------------------------------------
-    discountAffectsTax: boolean().notNull().default(true),
-    discountAllocationBasis: billingAllocationBasisEnum(),
-    discountAppliesToPreviousDiscount: boolean().notNull().default(false),
-
-    // --- Stock valuation ----------------------------------------------
-    valuationTreatment: billingValuationTreatmentEnum().notNull().default("NONE"),
-    allocationBasis: billingAllocationBasisEnum(),
-    allocateToStockOnly: boolean().notNull().default(false),
-    excludeServiceItems: boolean().notNull().default(false),
-    excludeNonStockItems: boolean().notNull().default(false),
-    excludeFreeItems: boolean().notNull().default(false),
-    allocationRemainderToLastLine: boolean().notNull().default(true),
-
-    // --- Limits & precision -------------------------------------------
-    minBaseAmount: amount(),
-    maxBaseAmount: amount(),
-    minTermAmount: amount(),
-    maxTermAmount: amount(),
-    minQuantity: amount(),
-    maxQuantity: amount(),
-    minimumRate: amount(),
-    maximumRate: amount(),
-    calculationPriority: integer().notNull().default(100),
-    decimalPlaces: integer().notNull().default(2),
-    roundingMethod: billingRoundingMethodEnum().notNull().default("HALF_UP"),
-
-    // --- Controls ------------------------------------------------------
-    allowNegativeResult: boolean().notNull().default(false),
-    stopIfBaseIsZero: boolean().notNull().default(true),
-    requireApprovalOnOverride: boolean().notNull().default(false),
-
-    // --- Document & display behaviour ---------------------------------
-    showOnDocument: boolean().notNull().default(true),
-    showInPrint: boolean().notNull().default(true),
-    includeInSubtotal: boolean().notNull().default(true),
-    affectsGrandTotal: boolean().notNull().default(true),
-    affectsReceivablePayable: boolean().notNull().default(true),
-
-    // --- Governance ----------------------------------------------------
-    effectiveFrom: timestamp({ precision: 3 }),
-    effectiveTo: timestamp({ precision: 3 }),
-    version: integer().notNull().default(1),
-    isSystem: boolean().notNull().default(false),
-    createdBy: integer().references(() => user.id, { onDelete: "set null" }),
-    updatedBy: integer().references(() => user.id, { onDelete: "set null" }),
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-    deletedAt: timestamp({ precision: 3 }),
-  },
-  (t) => [
-    uniqueIndex("BillingTerm_companyId_code_version_key").on(
-      t.companyId,
-      t.code,
-      t.version,
-    ),
-    index("BillingTerm_companyId_status_applicability_idx").on(
-      t.companyId,
-      t.status,
-      t.applicability,
-    ),
-    index("BillingTerm_companyId_category_idx").on(t.companyId, t.category),
-    index("BillingTerm_ledgerId_idx").on(t.ledgerId),
-    index("BillingTerm_effective_idx").on(t.effectiveFrom, t.effectiveTo),
-    check("BillingTerm_decimalPlaces_check", sql`${t.decimalPlaces} BETWEEN 0 AND 8`),
-    check(
-      "BillingTerm_effective_range_check",
-      sql`${t.effectiveTo} IS NULL OR ${t.effectiveFrom} IS NULL OR ${t.effectiveTo} >= ${t.effectiveFrom}`,
-    ),
-    check(
-      "BillingTerm_rate_range_check",
-      sql`${t.minimumRate} IS NULL OR ${t.maximumRate} IS NULL OR ${t.maximumRate} >= ${t.minimumRate}`,
-    ),
-  ],
-);
-
-// ------------------------------------------------------------
-// BILLING TERM RULE — conditional applicability
-// `conditions` holds a structured AND/OR tree (supplier group, product
-// group, quantity threshold, currency, warehouse, ...), validated by the
-// rule engine. Real master records should still be referenced by FK
-// elsewhere; JSON only holds the flexible condition structure.
-// ------------------------------------------------------------
-
-export const billingTermRule = pgTable(
-  "BillingTermRule",
-  {
-    id: serial().primaryKey(),
-    companyId: integer()
-      .notNull()
-      .references(() => company.id, { onDelete: "restrict" }),
-    termId: integer()
-      .notNull()
-      .references(() => billingTerm.id, { onDelete: "cascade" }),
-
-    name: varchar({ length: 100 }).notNull(),
-    priority: integer().notNull().default(100),
-    isActive: boolean().notNull().default(true),
-    conditions: jsonb().notNull(),
-
-    effectiveFrom: timestamp({ precision: 3 }),
-    effectiveTo: timestamp({ precision: 3 }),
-
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-  },
-  (t) => [
-    index("BillingTermRule_companyId_termId_active_priority_idx").on(
-      t.companyId,
-      t.termId,
-      t.isActive,
-      t.priority,
-    ),
-    index("BillingTermRule_effective_idx").on(t.effectiveFrom, t.effectiveTo),
-  ],
-);
-
-// ------------------------------------------------------------
-// BILLING TERM TEMPLATE
-// ------------------------------------------------------------
-
-export const billingTermTemplate = pgTable(
-  "BillingTermTemplate",
-  {
-    id: serial().primaryKey(),
-    companyId: integer()
-      .notNull()
-      .references(() => company.id, { onDelete: "restrict" }),
-
-    code: varchar({ length: 30 }).notNull(),
-    name: varchar({ length: 100 }).notNull(),
-    description: varchar({ length: 500 }),
-
-    applicability: billingApplicabilityEnum().notNull().default("BOTH"),
-    status: billingTermStatusEnum().notNull().default("DRAFT"),
-
-    isDefault: boolean().notNull().default(false),
-    currencyCode: varchar({ length: 3 }),
-    effectiveFrom: timestamp({ precision: 3 }),
-    effectiveTo: timestamp({ precision: 3 }),
-
-    // Array of BillingDocumentType values this template may be used on.
-    appliesToDocuments: jsonb(),
-    priority: integer().notNull().default(100),
-
-    createdBy: integer().references(() => user.id, { onDelete: "set null" }),
-    updatedBy: integer().references(() => user.id, { onDelete: "set null" }),
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-  },
-  (t) => [
-    uniqueIndex("BillingTermTemplate_companyId_code_key").on(t.companyId, t.code),
-    index("BillingTermTemplate_companyId_status_applicability_idx").on(
-      t.companyId,
-      t.status,
-      t.applicability,
-    ),
-    index("BillingTermTemplate_companyId_isDefault_priority_idx").on(
-      t.companyId,
-      t.isDefault,
-      t.priority,
-    ),
-  ],
-);
-
-export const billingTermTemplateLine = pgTable(
-  "BillingTermTemplateLine",
-  {
-    id: serial().primaryKey(),
-    templateId: integer()
-      .notNull()
-      .references(() => billingTermTemplate.id, { onDelete: "cascade" }),
-    termId: integer()
-      .notNull()
-      .references(() => billingTerm.id, { onDelete: "restrict" }),
-
-    sequence: integer().notNull().default(100),
-    placement: billingPlacementEnum(),
-
-    // Optional template-level overrides of the master term
-    calculationMethod: billingCalculationMethodEnum(),
-    calculationBasis: billingCalculationBasisEnum(),
-    rate: amount(),
-    fixedAmount: amount(),
-    sign: billingSignEnum(),
-    ledgerId: integer().references(() => generalLedger.id, {
-      onDelete: "restrict",
-    }),
-    isEnabled: boolean().notNull().default(true),
+    // true = line level, false = header level
+    isProductwise: boolean().notNull().default(false),
     isMandatory: boolean().notNull().default(false),
+    sequence: integer().notNull().default(100),
 
-    // Dependency on another line in the same template
-    dependsOnLineId: integer().references(
-      (): AnyPgColumn => billingTermTemplateLine.id,
-      { onDelete: "set null" },
-    ),
-    settings: jsonb(),
+    // Starting values; the user may change type and value on the document.
+    defaultCalcType: billingCalcTypeEnum().notNull().default("PERCENT"),
+    defaultValue: money().notNull().default("0"),
+    calcBase: billingCalcBaseEnum().notNull().default("ITEM_VALUE"),
+    baseTermId: integer().references((): AnyPgColumn => purchaseTerm.id, {
+      onDelete: "restrict",
+    }),
+
+    // Landed cost: spread a header term over item lines for valuation.
+    distributeToLines: boolean().notNull().default(false),
+    allocationBasis: billingAllocationBasisEnum(),
+
+    generalLedgerId: integer().references(() => generalLedger.id, {
+      onDelete: "restrict",
+    }),
+
+    isActive: boolean().notNull().default(true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [
-    uniqueIndex("BillingTermTemplateLine_templateId_termId_key").on(
-      t.templateId,
-      t.termId,
+    uniqueIndex("PurchaseTerm_companyId_code_key").on(t.companyId, t.code),
+    index("PurchaseTerm_companyId_idx").on(t.companyId),
+    index("PurchaseTerm_generalLedgerId_idx").on(t.generalLedgerId),
+    check(
+      "PurchaseTerm_base_term_check",
+      sql`(${t.calcBase} = 'SINGLE_TERM') = (${t.baseTermId} IS NOT NULL)`,
     ),
-    uniqueIndex("BillingTermTemplateLine_templateId_sequence_key").on(
-      t.templateId,
-      t.sequence,
+    check(
+      "PurchaseTerm_distribute_check",
+      sql`NOT ${t.distributeToLines} OR (NOT ${t.isProductwise} AND ${t.allocationBasis} IS NOT NULL)`,
     ),
-    index("BillingTermTemplateLine_termId_idx").on(t.termId),
-    index("BillingTermTemplateLine_dependsOnLineId_idx").on(t.dependsOnLineId),
   ],
 );
 
-// ------------------------------------------------------------
-// DOCUMENT BILLING TERM — immutable calculation snapshot
-// Stores the term definition + result as used on a specific document so
-// later master edits never silently change posted documents.
-// ------------------------------------------------------------
+// Suggest a term for a vendor OR for an item (exactly one is set).
+export const purchaseTermDefault = pgTable(
+  "PurchaseTermDefault",
+  {
+    id: serial().primaryKey(),
+    termId: integer()
+      .notNull()
+      .references(() => purchaseTerm.id, { onDelete: "cascade" }),
+    partyId: integer().references(() => party.id, { onDelete: "cascade" }),
+    productId: integer().references(() => product.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("PurchaseTermDefault_term_party_key")
+      .on(t.termId, t.partyId)
+      .where(sql`${t.partyId} IS NOT NULL`),
+    uniqueIndex("PurchaseTermDefault_term_product_key")
+      .on(t.termId, t.productId)
+      .where(sql`${t.productId} IS NOT NULL`),
+    index("PurchaseTermDefault_partyId_idx").on(t.partyId),
+    index("PurchaseTermDefault_productId_idx").on(t.productId),
+    check(
+      "PurchaseTermDefault_one_target_check",
+      sql`num_nonnulls(${t.partyId}, ${t.productId}) = 1`,
+    ),
+  ],
+);
 
-export const documentBillingTerm = pgTable(
-  "DocumentBillingTerm",
+export const purchaseDocumentTerm = pgTable(
+  "PurchaseDocumentTerm",
   {
     id: serial().primaryKey(),
     companyId: integer()
       .notNull()
       .references(() => company.id, { onDelete: "restrict" }),
 
-    // Polymorphic link to the transaction header/line — no FK (see above).
-    documentType: billingDocumentTypeEnum().notNull(),
+    documentType: purchaseTermDocTypeEnum().notNull(),
     documentId: integer().notNull(),
+    // Set for productwise (line-level) terms, null for header terms.
     documentLineId: integer(),
 
-    // Master references; nullable for ad-hoc terms. Set null so deleting a
-    // master never destroys history (snapshot columns below remain).
-    termId: integer().references(() => billingTerm.id, { onDelete: "set null" }),
-    templateId: integer().references(() => billingTermTemplate.id, {
-      onDelete: "set null",
-    }),
-    templateLineId: integer().references(() => billingTermTemplateLine.id, {
-      onDelete: "set null",
-    }),
+    termId: integer()
+      .notNull()
+      .references(() => purchaseTerm.id, { onDelete: "restrict" }),
 
-    // --- Snapshot of definition at calculation time -------------------
-    termCode: varchar({ length: 30 }).notNull(),
-    termName: varchar({ length: 100 }).notNull(),
-    category: billingTermCategoryEnum().notNull(),
-    nature: billingTermNatureEnum().notNull(),
-    placement: billingPlacementEnum().notNull(),
+    // Snapshot of the master at entry time
     sequence: integer().notNull(),
-    calculationMethod: billingCalculationMethodEnum().notNull(),
-    calculationBasis: billingCalculationBasisEnum().notNull(),
-    sign: billingSignEnum().notNull(),
-    rate: amount(),
-    formulaSnapshot: jsonb(),
-
-    // --- Calculation result -------------------------------------------
-    quantity: amount(),
-    baseAmount: amount().notNull().default("0"),
-    taxableBase: amount().notNull().default("0"),
-    calculatedAmount: amount().notNull().default("0"), // positive magnitude
-    signedAmount: amount().notNull().default("0"), // after sign applied
-    taxAmount: amount().notNull().default("0"),
-
-    // --- Currency ------------------------------------------------------
-    currencyCode: varchar({ length: 3 }),
-    exchangeRate: numeric({ precision: 20, scale: 10 }),
-    baseCurrencyAmount: amount(),
-
-    // --- Accounting & valuation snapshots -----------------------------
-    ledgerId: integer().references(() => generalLedger.id, {
+    nature: billingTermNatureEnum().notNull(),
+    calcBase: billingCalcBaseEnum().notNull(),
+    generalLedgerId: integer().references(() => generalLedger.id, {
       onDelete: "restrict",
     }),
-    taxLedgerId: integer().references(() => generalLedger.id, {
-      onDelete: "restrict",
-    }),
-    taxTreatment: billingTaxTreatmentEnum().notNull(),
-    valuationTreatment: billingValuationTreatmentEnum().notNull(),
-    allocatedStockAmount: amount().notNull().default("0"),
+    distributeToLines: boolean().notNull().default(false),
+    allocationBasis: billingAllocationBasisEnum(),
 
-    // --- Audit & calculation trace ------------------------------------
-    calculationInputs: jsonb(),
-    calculationTrace: jsonb(),
-    isManualOverride: boolean().notNull().default(false),
-    overrideReason: varchar({ length: 500 }),
-    calculatedAt: timestamp({ precision: 3 }).notNull().defaultNow(),
+    // As entered by the user
+    calcType: billingCalcTypeEnum().notNull(),
+    rate: rate(), // used when calcType = PERCENT
+    inputAmount: money(), // used when calcType = AMOUNT
+
+    // Results
+    baseAmount: money().notNull().default("0"),
+    calculatedAmount: money().notNull().default("0"), // always positive
+    isOverridden: boolean().notNull().default(false),
+    // Amount actually used; equals calculatedAmount unless overridden.
+    finalAmount: money().notNull().default("0"), // always positive
+
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [
-    index("DocumentBillingTerm_document_idx").on(
+    // Once per document (header terms) / once per line (line terms).
+    uniqueIndex("PurchaseDocumentTerm_header_key")
+      .on(t.documentType, t.documentId, t.termId)
+      .where(sql`${t.documentLineId} IS NULL`),
+    uniqueIndex("PurchaseDocumentTerm_line_key")
+      .on(t.documentType, t.documentId, t.documentLineId, t.termId)
+      .where(sql`${t.documentLineId} IS NOT NULL`),
+    index("PurchaseDocumentTerm_document_idx").on(
       t.documentType,
       t.documentId,
       t.sequence,
     ),
-    index("DocumentBillingTerm_companyId_idx").on(t.companyId),
-    index("DocumentBillingTerm_documentLineId_idx").on(t.documentLineId),
-    index("DocumentBillingTerm_termId_idx").on(t.termId),
-    index("DocumentBillingTerm_ledgerId_idx").on(t.ledgerId),
+    index("PurchaseDocumentTerm_termId_idx").on(t.termId),
+    index("PurchaseDocumentTerm_companyId_idx").on(t.companyId),
     check(
-      "DocumentBillingTerm_override_reason_check",
-      sql`NOT ${t.isManualOverride} OR ${t.overrideReason} IS NOT NULL`,
+      "PurchaseDocumentTerm_value_check",
+      sql`(${t.calcType} = 'PERCENT' AND ${t.rate} IS NOT NULL) OR (${t.calcType} = 'AMOUNT' AND ${t.inputAmount} IS NOT NULL)`,
+    ),
+  ],
+);
+
+// Landed cost: how a header term was split across item lines.
+export const purchaseDocumentTermAllocation = pgTable(
+  "PurchaseDocumentTermAllocation",
+  {
+    id: serial().primaryKey(),
+    documentTermId: integer()
+      .notNull()
+      .references(() => purchaseDocumentTerm.id, { onDelete: "cascade" }),
+    documentLineId: integer().notNull(),
+    allocatedAmount: money().notNull(),
+  },
+  (t) => [
+    uniqueIndex("PurchaseDocumentTermAllocation_term_line_key").on(
+      t.documentTermId,
+      t.documentLineId,
+    ),
+    index("PurchaseDocumentTermAllocation_documentLineId_idx").on(
+      t.documentLineId,
+    ),
+  ],
+);
+
+// ============================================================
+// SALES  (same shape as purchase, minus landed-cost allocation)
+// ============================================================
+
+export const salesTerm = pgTable(
+  "SalesTerm",
+  {
+    id: serial().primaryKey(),
+    companyId: integer()
+      .notNull()
+      .references(() => company.id, { onDelete: "restrict" }),
+
+    code: varchar({ length: 20 }).notNull(),
+    name: varchar({ length: 100 }).notNull(),
+    category: billingTermCategoryEnum().notNull().default("GENERAL"),
+    nature: billingTermNatureEnum().notNull(),
+
+    isProductwise: boolean().notNull().default(false),
+    isMandatory: boolean().notNull().default(false),
+    sequence: integer().notNull().default(100),
+
+    defaultCalcType: billingCalcTypeEnum().notNull().default("PERCENT"),
+    defaultValue: money().notNull().default("0"),
+    calcBase: billingCalcBaseEnum().notNull().default("ITEM_VALUE"),
+    baseTermId: integer().references((): AnyPgColumn => salesTerm.id, {
+      onDelete: "restrict",
+    }),
+
+    generalLedgerId: integer().references(() => generalLedger.id, {
+      onDelete: "restrict",
+    }),
+
+    isActive: boolean().notNull().default(true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("SalesTerm_companyId_code_key").on(t.companyId, t.code),
+    index("SalesTerm_companyId_idx").on(t.companyId),
+    index("SalesTerm_generalLedgerId_idx").on(t.generalLedgerId),
+    check(
+      "SalesTerm_base_term_check",
+      sql`(${t.calcBase} = 'SINGLE_TERM') = (${t.baseTermId} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const salesTermDefault = pgTable(
+  "SalesTermDefault",
+  {
+    id: serial().primaryKey(),
+    termId: integer()
+      .notNull()
+      .references(() => salesTerm.id, { onDelete: "cascade" }),
+    partyId: integer().references(() => party.id, { onDelete: "cascade" }),
+    productId: integer().references(() => product.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("SalesTermDefault_term_party_key")
+      .on(t.termId, t.partyId)
+      .where(sql`${t.partyId} IS NOT NULL`),
+    uniqueIndex("SalesTermDefault_term_product_key")
+      .on(t.termId, t.productId)
+      .where(sql`${t.productId} IS NOT NULL`),
+    index("SalesTermDefault_partyId_idx").on(t.partyId),
+    index("SalesTermDefault_productId_idx").on(t.productId),
+    check(
+      "SalesTermDefault_one_target_check",
+      sql`num_nonnulls(${t.partyId}, ${t.productId}) = 1`,
+    ),
+  ],
+);
+
+export const salesDocumentTerm = pgTable(
+  "SalesDocumentTerm",
+  {
+    id: serial().primaryKey(),
+    companyId: integer()
+      .notNull()
+      .references(() => company.id, { onDelete: "restrict" }),
+
+    documentType: salesTermDocTypeEnum().notNull(),
+    documentId: integer().notNull(),
+    documentLineId: integer(),
+
+    termId: integer()
+      .notNull()
+      .references(() => salesTerm.id, { onDelete: "restrict" }),
+
+    sequence: integer().notNull(),
+    nature: billingTermNatureEnum().notNull(),
+    calcBase: billingCalcBaseEnum().notNull(),
+    generalLedgerId: integer().references(() => generalLedger.id, {
+      onDelete: "restrict",
+    }),
+
+    calcType: billingCalcTypeEnum().notNull(),
+    rate: rate(),
+    inputAmount: money(),
+
+    baseAmount: money().notNull().default("0"),
+    calculatedAmount: money().notNull().default("0"),
+    isOverridden: boolean().notNull().default(false),
+    finalAmount: money().notNull().default("0"),
+
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("SalesDocumentTerm_header_key")
+      .on(t.documentType, t.documentId, t.termId)
+      .where(sql`${t.documentLineId} IS NULL`),
+    uniqueIndex("SalesDocumentTerm_line_key")
+      .on(t.documentType, t.documentId, t.documentLineId, t.termId)
+      .where(sql`${t.documentLineId} IS NOT NULL`),
+    index("SalesDocumentTerm_document_idx").on(
+      t.documentType,
+      t.documentId,
+      t.sequence,
+    ),
+    index("SalesDocumentTerm_termId_idx").on(t.termId),
+    index("SalesDocumentTerm_companyId_idx").on(t.companyId),
+    check(
+      "SalesDocumentTerm_value_check",
+      sql`(${t.calcType} = 'PERCENT' AND ${t.rate} IS NOT NULL) OR (${t.calcType} = 'AMOUNT' AND ${t.inputAmount} IS NOT NULL)`,
     ),
   ],
 );
