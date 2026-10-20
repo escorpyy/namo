@@ -10,6 +10,15 @@ import {
 } from "./vouchers";
 import { openingBalance, stockOpeningBalance } from "./openingBalances";
 import {
+  purchaseTerm,
+  purchaseTermDefault,
+  purchaseDocumentTerm,
+  purchaseDocumentTermAllocation,
+  salesTerm,
+  salesTermDefault,
+  salesDocumentTerm,
+} from "./billing";
+import {
   productGroup,
   productSubGroup,
   productUnit,
@@ -60,6 +69,9 @@ export const companyRelations = relations(company, ({ one, many }) => ({
   journalVouchers: many(journalVoucher),
   cashBankVouchers: many(cashBankVoucher),
   openingBalances: many(openingBalance),
+
+  purchaseTerms: many(purchaseTerm),
+  salesTerms: many(salesTerm),
 }));
 
 export const branchRelations = relations(branch, ({ one, many }) => ({
@@ -765,3 +777,125 @@ export const bundleComponentRelations = relations(bundleComponent, ({ one }) => 
     relationName: "BundleComponentProduct",
   }),
 }));
+
+// ============================================================
+// BILLING TERMS
+// ============================================================
+
+export const purchaseTermRelations = relations(purchaseTerm, ({ one, many }) => ({
+  company: one(company, {
+    fields: [purchaseTerm.companyId],
+    references: [company.id],
+  }),
+  generalLedger: one(generalLedger, {
+    fields: [purchaseTerm.generalLedgerId],
+    references: [generalLedger.id],
+  }),
+  baseTerm: one(purchaseTerm, {
+    fields: [purchaseTerm.baseTermId],
+    references: [purchaseTerm.id],
+    relationName: "PurchaseTermBase",
+  }),
+  dependentTerms: many(purchaseTerm, { relationName: "PurchaseTermBase" }),
+  defaults: many(purchaseTermDefault),
+  documentTerms: many(purchaseDocumentTerm),
+}));
+
+export const purchaseTermDefaultRelations = relations(
+  purchaseTermDefault,
+  ({ one }) => ({
+    term: one(purchaseTerm, {
+      fields: [purchaseTermDefault.termId],
+      references: [purchaseTerm.id],
+    }),
+    party: one(party, {
+      fields: [purchaseTermDefault.partyId],
+      references: [party.id],
+    }),
+    product: one(product, {
+      fields: [purchaseTermDefault.productId],
+      references: [product.id],
+    }),
+  }),
+);
+
+export const purchaseDocumentTermRelations = relations(
+  purchaseDocumentTerm,
+  ({ one, many }) => ({
+    company: one(company, {
+      fields: [purchaseDocumentTerm.companyId],
+      references: [company.id],
+    }),
+    term: one(purchaseTerm, {
+      fields: [purchaseDocumentTerm.termId],
+      references: [purchaseTerm.id],
+    }),
+    generalLedger: one(generalLedger, {
+      fields: [purchaseDocumentTerm.generalLedgerId],
+      references: [generalLedger.id],
+    }),
+    allocations: many(purchaseDocumentTermAllocation),
+  }),
+);
+
+export const purchaseDocumentTermAllocationRelations = relations(
+  purchaseDocumentTermAllocation,
+  ({ one }) => ({
+    documentTerm: one(purchaseDocumentTerm, {
+      fields: [purchaseDocumentTermAllocation.documentTermId],
+      references: [purchaseDocumentTerm.id],
+    }),
+  }),
+);
+
+export const salesTermRelations = relations(salesTerm, ({ one, many }) => ({
+  company: one(company, {
+    fields: [salesTerm.companyId],
+    references: [company.id],
+  }),
+  generalLedger: one(generalLedger, {
+    fields: [salesTerm.generalLedgerId],
+    references: [generalLedger.id],
+  }),
+  baseTerm: one(salesTerm, {
+    fields: [salesTerm.baseTermId],
+    references: [salesTerm.id],
+    relationName: "SalesTermBase",
+  }),
+  dependentTerms: many(salesTerm, { relationName: "SalesTermBase" }),
+  defaults: many(salesTermDefault),
+  documentTerms: many(salesDocumentTerm),
+}));
+
+export const salesTermDefaultRelations = relations(salesTermDefault, ({ one }) => ({
+  term: one(salesTerm, {
+    fields: [salesTermDefault.termId],
+    references: [salesTerm.id],
+  }),
+  party: one(party, {
+    fields: [salesTermDefault.partyId],
+    references: [party.id],
+  }),
+  product: one(product, {
+    fields: [salesTermDefault.productId],
+    references: [product.id],
+  }),
+}));
+
+export const salesDocumentTermRelations = relations(
+  salesDocumentTerm,
+  ({ one }) => ({
+    company: one(company, {
+      fields: [salesDocumentTerm.companyId],
+      references: [company.id],
+    }),
+    term: one(salesTerm, {
+      fields: [salesDocumentTerm.termId],
+      references: [salesTerm.id],
+    }),
+    generalLedger: one(generalLedger, {
+      fields: [salesDocumentTerm.generalLedgerId],
+      references: [generalLedger.id],
+    }),
+  }),
+);

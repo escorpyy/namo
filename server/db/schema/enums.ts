@@ -78,3 +78,52 @@ export const depreciationMethodEnum = pgEnum("DepreciationMethod", [
   "STRAIGHT_LINE",
   "WRITTEN_DOWN_VALUE",
 ]);
+
+// ============================================================
+// BILLING TERMS (purchase & sales share these enums, not tables)
+// ============================================================
+
+export const billingTermCategoryEnum = pgEnum("BillingTermCategory", [
+  "GENERAL",
+  "ADDITIONAL",
+  "ROUNDED",
+]);
+
+// Fixed in the term master; users cannot flip it on a document.
+export const billingTermNatureEnum = pgEnum("BillingTermNature", [
+  "ADDITIVE",
+  "DEDUCTIVE",
+]);
+
+// Users may switch between % and amount while entering a term on a document.
+export const billingCalcTypeEnum = pgEnum("BillingCalcType", [
+  "PERCENT",
+  "AMOUNT",
+]);
+
+// What a percentage is applied to. Chosen once, in the term master.
+//   ITEM_VALUE    - gross value of the item line(s)
+//   RUNNING_TOTAL - items plus all earlier terms (by sequence)
+//   SINGLE_TERM   - the result of one specific earlier term (baseTermId)
+export const billingCalcBaseEnum = pgEnum("BillingCalcBase", [
+  "ITEM_VALUE",
+  "RUNNING_TOTAL",
+  "SINGLE_TERM",
+]);
+
+export const billingAllocationBasisEnum = pgEnum("BillingAllocationBasis", [
+  "QUANTITY",
+  "VALUE",
+]);
+
+export const purchaseTermDocTypeEnum = pgEnum("PurchaseTermDocType", [
+  "PURCHASE_ORDER",
+  "PURCHASE_BILL",
+  "PURCHASE_RETURN",
+]);
+
+export const salesTermDocTypeEnum = pgEnum("SalesTermDocType", [
+  "SALES_ORDER",
+  "SALES_INVOICE",
+  "SALES_RETURN",
+]);
