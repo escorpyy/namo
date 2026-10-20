@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   BarChart3, BookOpen, BookText, Boxes, ChevronDown, ChevronRight, ClipboardList, FileText, FolderTree, Landmark,
   LayoutDashboard, Layers, Map, MapPin, Package, PanelLeftClose, PanelLeftOpen, Percent, Ruler, Settings,
-  Scale, Tag, UserCheck, UserSquare, Users, Warehouse, Building2, Network, CalendarRange, UserCog, KeyRound,
+  Scale, Tag, UserCheck, UserSquare, Users, Warehouse, Building2, Network, CalendarRange, UserCog, KeyRound, Receipt, ShoppingCart,
 } from "lucide-react";
 import { MASTERS } from "../../shared/masters";
 
@@ -47,6 +47,13 @@ const sections: Section[] = [
     ],
   },
   {
+    id: "billing", label: "Billing", icon: Receipt,
+    items: [
+      { id: "purchase-terms", label: "Purchase Term", icon: ShoppingCart },
+      { id: "sales-terms", label: "Sales Term", icon: Receipt },
+    ],
+  },
+  {
     id: "admin", label: "Admin", icon: Settings,
     items: [
       { id: "companies", label: "Company", icon: Building2 },
@@ -74,7 +81,7 @@ interface Props {
 }
 
 export function Sidebar({ collapsed, active, onToggle, onNavigate, onNotify }: Props) {
-  const [open, setOpen] = useState<Record<string, boolean>>({ accounts: true, parties: true, inventory: true, admin: true, vouchers: false });
+  const [open, setOpen] = useState<Record<string, boolean>>({ accounts: true, parties: true, inventory: true, billing: true, admin: true, vouchers: false });
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
     const btns = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("button[data-sb]"));

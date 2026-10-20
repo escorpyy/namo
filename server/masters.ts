@@ -182,7 +182,61 @@ const CFG: Record<string, ServerCfg> = {
     // Location hierarchy: khud ka parent ya cycle nahi banna chahiye
     validate: (data, ctx) => checkHierarchy(S.location, data.parentId ?? null, ctx, "location"),
   },
+
+  "purchase-terms": {
+    table: S.purchaseTerm,
+    orderBy: (t) => asc(t.sequence),
+    counts: {
+      defaultCount: { table: S.purchaseTermDefault, column: "termId" },
+      documentTermCount: { table: S.purchaseDocumentTerm, column: "termId" },
+      dependentCount: { table: S.purchaseTerm, column: "baseTermId" },
+    },
+    validate: async (data, { companyId, id }) => {
+      if (data.generalLedgerId != null) {
+        const [g] = await db.select({ c: S.generalLedger.companyId }).from(S.generalLedger).where(eq(S.generalLedger.id, data.generalLedgerId));
+        if (g?.c !== companyId) throw new HttpError(400, "General Ledger not found in this company.", "generalLedgerId");
+      }
+      if (data.calcBase === "SINGLE_TERM") {
+        if (data.baseTermId == null) throw new HttpError(400, "Base Term is required when Calc Base is SINGLE TERM.", "baseTermId");
+        if (id != null && data.baseTermId === id) throw new HttpError(400, "A term cannot use itself as Base Term.", "baseTermId");
+        const [b] = await db.select({ c: S.purchaseTerm.companyId, seq: S.purchaseTerm.sequence }).from(S.purchaseTerm).where(eq(S.purchaseTerm.id, data.baseTermId));
+        if (b?.c !== companyId) throw new HttpError(400, "Base Term not found in this company.", "baseTermId");
+        if (b.seq >= data.sequence) throw new HttpError(400, "Base Term must have a lower Sequence (run earlier).", "baseTermId");
+      } else if (data.baseTermId != null) {
+        throw new HttpError(400, "Base Term is only used when Calc Base is SINGLE TERM.", "baseTermId");
+      }
+      if (data.distributeToLines) {
+        if (data.isProductwise) throw new HttpError(400, "Landed-cost distribution is only for header terms (not productwise).", "distributeToLines");
+        if (!data.allocationBasis) throw new HttpError(400, "Allocation Basis is required when distributing to lines.", "allocationBasis");
+      }
+    },
+  },
+  "sales-terms": {
+    table: S.salesTerm,
+    orderBy: (t) => asc(t.sequence),
+    counts: {
+      defaultCount: { table: S.salesTermDefault, column: "termId" },
+      documentTermCount: { table: S.salesDocumentTerm, column: "termId" },
+      dependentCount: { table: S.salesTerm, column: "baseTermId" },
+    },
+    validate: async (data, { companyId, id }) => {
+      if (data.generalLedgerId != null) {
+        const [g] = await db.select({ c: S.generalLedger.companyId }).from(S.generalLedger).where(eq(S.generalLedger.id, data.generalLedgerId));
+        if (g?.c !== companyId) throw new HttpError(400, "General Ledger not found in this company.", "generalLedgerId");
+      }
+      if (data.calcBase === "SINGLE_TERM") {
+        if (data.baseTermId == null) throw new HttpError(400, "Base Term is required when Calc Base is SINGLE TERM.", "baseTermId");
+        if (id != null && data.baseTermId === id) throw new HttpError(400, "A term cannot use itself as Base Term.", "baseTermId");
+        const [b] = await db.select({ c: S.salesTerm.companyId, seq: S.salesTerm.sequence }).from(S.salesTerm).where(eq(S.salesTerm.id, data.baseTermId));
+        if (b?.c !== companyId) throw new HttpError(400, "Base Term not found in this company.", "baseTermId");
+        if (b.seq >= data.sequence) throw new HttpError(400, "Base Term must have a lower Sequence (run earlier).", "baseTermId");
+      } else if (data.baseTermId != null) {
+        throw new HttpError(400, "Base Term is only used when Calc Base is SINGLE TERM.", "baseTermId");
+      }
+    },
+  },
 };
+
 
 export const masterRouters = [
   ...Object.entries(CFG).map(([key, cfg]) => ({ key, router: masterRouter(MASTERS[key], cfg) })),

@@ -109,7 +109,7 @@ async function main() {
     // Demo parties: har party = GL + Party + Customer/Vendor detail
     if (!(await hasRows(S.party, co.id))) {
       const [g1] = await db.select().from(S.accountGroup).where(and(eq(S.accountGroup.companyId, co.id), eq(S.accountGroup.code, "AG01")));
-      const [g3] = await db.select().from(S.accountGroup).where(and(eq(S.accountGroup.companyId, co.id), eq(S.accountGroup.code, "AG03")));
+      const [g3] = await db.select().from(S.accountGroup).where(and(eq(S.accountGroup.code, "AG03"), eq(S.accountGroup.companyId, co.id)));
       const sub = async (groupId: number, code: string, description: string) => {
         const [ex] = await db.select().from(S.accountSubGroup).where(and(eq(S.accountSubGroup.accountGroupId, groupId), eq(S.accountSubGroup.code, code)));
         return ex ?? (await db.insert(S.accountSubGroup).values({ accountGroupId: groupId, code, description }).returning())[0];
@@ -156,7 +156,7 @@ async function main() {
           ...(subs.length === 2 ? [{ ...base, generalLedgerId: bank.id, subLedgerId: subs[0].id, debit: "200000.00" }, { ...base, generalLedgerId: bank.id, subLedgerId: subs[1].id, debit: "100000.00" }] : []),
           { ...base, generalLedgerId: ram.id, debit: "100000.00" },
           { ...base, generalLedgerId: cap.id, credit: "660000.00" },
-          ...(stockGl ? [{ ...base, generalLedgerId: stockGl.id, debit: "310000.00" }] : []), // stock opening (neeche Stock Opening rows se match)
+          ...(stockGl ? [{ ...base, generalLedgerId: stockGl.id, debit: "310000.00" }] : []),
           { ...base, generalLedgerId: sita.id, credit: "100000.00" },
         ]);
       }
@@ -249,7 +249,7 @@ async function main() {
         openingGLId: openStock.id, closingPLGLId: closePL.id, closingBSGLId: closeBS.id, purchaseGLId: purchases.id, purchaseReturnGLId: purchRet.id,
         salesGLId: sales.id, salesReturnGLId: salesRet.id, defaultVendorId: vend?.id,
       }).returning())[0];
-      await db.insert(S.alternateUnit).values({ stockDetailId: sd1.id, unitId: box.id, conversionFactor: "25" }); // 1 Box = 25 Kg
+      await db.insert(S.alternateUnit).values({ stockDetailId: sd1.id, unitId: box.id, conversionFactor: "25" });
 
       const p2 = await mk("P002", "Sunflower Oil 1L", "STOCK", oil, "8901000000028");
       const sd2 = (await db.insert(S.stockDetail).values({
@@ -274,7 +274,6 @@ async function main() {
         { bundleDetailId: bd.id, componentProductId: p2.id, quantity: "2" },
       ]);
 
-      // Demo Stock Opening (ABC, Head Office, FY 2082/083): total 3,10,000 = GL003 ke Opening Balance se match
       const [ho] = await db.select().from(S.branch).where(and(eq(S.branch.companyId, co.id), eq(S.branch.code, "HO")));
       const [fy] = await db.select().from(S.fiscalYear).where(and(eq(S.fiscalYear.companyId, co.id), eq(S.fiscalYear.code, "2082/083")));
       const [rackA] = await db.select().from(S.location).where(and(eq(S.location.companyId, co.id), eq(S.location.code, "GD1-A")));
@@ -284,6 +283,27 @@ async function main() {
           { branchId: ho.id, fiscalYearId: fy.id, stockDetailId: sd2.id, locationId: gd1?.id, batchNo: "B-2082-01", expiryDate: new Date("2027-03-31"), quantity: "500", rate: "180", value: "90000.00" },
         ]);
       }
+    }
+
+    // Demo billing terms (purchase + sales)
+    if (!(await hasRows(S.purchaseTerm, co.id))) {
+      const gl = async (code: string) => (await db.select().from(S.generalLedger).where(and(eq(S.generalLedger.companyId, co.id), eq(S.generalLedger.code, code))))[0];
+      const purchases = await gl("GL040");
+      const rent = await gl("GL030");
+      await db.insert(S.purchaseTerm).values([
+        { companyId: co.id, code: "DISC", name: "Trade Discount", category: "GENERAL", nature: "DEDUCTIVE", sequence: 10, isProductwise: true, defaultCalcType: "PERCENT", defaultValue: "5", calcBase: "ITEM_VALUE", generalLedgerId: purchases?.id ?? null },
+        { companyId: co.id, code: "FREIGHT", name: "Freight Inward", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 50, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "VALUE", generalLedgerId: purchases?.id ?? null },
+        { companyId: co.id, code: "ROUND", name: "Round Off", category: "ROUNDED", nature: "ADDITIVE", sequence: 900, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "RUNNING_TOTAL", generalLedgerId: rent?.id ?? null },
+      ]);
+    }
+    if (!(await hasRows(S.salesTerm, co.id))) {
+      const gl = async (code: string) => (await db.select().from(S.generalLedger).where(and(eq(S.generalLedger.companyId, co.id), eq(S.generalLedger.code, code))))[0];
+      const sales = await gl("GL020");
+      await db.insert(S.salesTerm).values([
+        { companyId: co.id, code: "DISC", name: "Trade Discount", category: "GENERAL", nature: "DEDUCTIVE", sequence: 10, isProductwise: true, defaultCalcType: "PERCENT", defaultValue: "5", calcBase: "ITEM_VALUE", generalLedgerId: sales?.id ?? null },
+        { companyId: co.id, code: "PACK", name: "Packing Charges", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 40, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "ITEM_VALUE", generalLedgerId: sales?.id ?? null },
+        { companyId: co.id, code: "ROUND", name: "Round Off", category: "ROUNDED", nature: "ADDITIVE", sequence: 900, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "RUNNING_TOTAL", generalLedgerId: sales?.id ?? null },
+      ]);
     }
   }
 
