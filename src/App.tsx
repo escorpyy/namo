@@ -6,6 +6,7 @@ import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import MasterScreen from "./screens/MasterScreen";
 import OpeningBalanceScreen from "./screens/OpeningBalanceScreen";
+import StockOpeningScreen from "./screens/StockOpeningScreen";
 import { MASTERS } from "../shared/masters";
 
 export default function App() {
@@ -100,7 +101,13 @@ export default function App() {
       <div className="flex-1 min-h-0 flex">
         <Sidebar collapsed={collapsed} active={screen} onToggle={toggleSidebar} onNavigate={navigate} onNotify={(text) => setNote({ text, n: Date.now() })} />
         {/* key: screen ya company badalne par list reload + form reset */}
-        {screen === "opening-balance" ? (
+        {screen === "stock-opening" ? (
+          <StockOpeningScreen
+            key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} fyId={fyId}
+            branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
+            calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note}
+          />
+        ) : screen === "opening-balance" ? (
           <OpeningBalanceScreen
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} fyId={fyId} userId={ctx.user.id}
             branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}

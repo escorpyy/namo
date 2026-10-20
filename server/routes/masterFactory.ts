@@ -22,17 +22,19 @@ export interface ServerCfg {
 
 const fieldOf = (def: MasterDef, name: string) => def.fields.find((f) => f.name === name)!;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const decPlaces = (v: number) => { const t = String(v); return t.includes("e") ? 99 : t.includes(".") ? t.split(".")[1].length : 0; };
 const validIso = (v: string) => {
   const d = new Date(v + "T00:00:00Z");
   return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
 };
 
 // Shared definition se zod schema: server me wahi rules jo UI me dikhte hain. readOnly fields schema me nahi (ignore hote hain).
-export function buildSchema(def: MasterDef) {
+export function buildSchema(def: MasterDef, opts?: { lenient?: boolean }) {
   const shape: Record<string, z.ZodTypeAny> = {};
   for (const f of def.fields) {
     if (f.readOnly) continue;
-    const req = !!f.required;
+    // lenient: conditional fields (showIf/requiredIf) optional parse hote hain; applyConditions unhe type ke hisaab se enforce karta hai
+    const req = !!f.required && !(opts?.lenient && (f.showIf || f.requiredIf));
     const msgReq = `${f.label} is required.`;
     let s: z.ZodTypeAny;
     if (f.type === "text") {
@@ -46,7 +48,23 @@ export function buildSchema(def: MasterDef) {
       if (f.decimals === 0) n = n.int(`${f.label} must be a whole number.`);
       if (f.min != null) n = n.min(f.min, `${f.label} must be at least ${f.min}.`);
       if (f.maxValue != null) n = n.max(f.maxValue, `${f.label} must be at most ${f.maxValue}.`);
-      s = req ? n : n.nullable().optional();
+      let nn: z.ZodTypeAny = n;
+      if ((f.decimals ?? 0) > 0) nn = n.refine((v) => decPlaces(v) <= 6 && Math.abs(v) < 1e12, `${f.label}: at most 6 decimal places and below 1 trillion.`); // numeric(18,6)
+      s = req ? nn : nn.nullable().optional();
+    } else if (f.type === "lines") {
+      const colShape: Record<string, z.ZodTypeAny> = {};
+      for (const c of f.lines!.columns) {
+        const m = `${f.label}: ${c.label} is required.`;
+        let cs: z.ZodTypeAny;
+        if (c.type === "lookup") cs = z.number({ required_error: m, invalid_type_error: m }).int();
+        else {
+          let nn = z.number({ required_error: m, invalid_type_error: `${c.label} must be a number.` });
+          if (c.positive) nn = nn.gt(0, `${f.label}: ${c.label} must be greater than 0.`);
+          cs = nn.refine((v) => decPlaces(v) <= 6 && Math.abs(v) < 1e12, `${f.label}: ${c.label} has too many decimals.`);
+        }
+        colShape[c.name] = c.required ? cs : cs.nullable().optional();
+      }
+      s = z.array(z.object(colShape)).max(200).optional().default([]);
     } else if (f.type === "date") {
       const msg = `${f.label} must be a valid date (YYYY-MM-DD).`;
       const d = z.string({ required_error: msgReq, invalid_type_error: msg }).regex(/^\d{4}-\d{2}-\d{2}$/, msg).refine(validIso, msg);
@@ -68,7 +86,7 @@ export function buildSchema(def: MasterDef) {
 function toDb(def: MasterDef, data: Record<string, any>) {
   const out: Record<string, any> = {};
   for (const f of def.fields) {
-    if (f.readOnly) continue; // isClosed jaise fields form se kabhi nahi badalte
+    if (f.readOnly || f.type === "lines") continue; // isClosed jaise fields form se kabhi nahi badalte; lines ko custom router sambhalta hai
     const v = data[f.name] ?? null;
     if (f.type === "date") out[f.name] = v == null ? null : new Date(v + "T00:00:00Z");
     else out[f.name] = f.type === "number" && v != null && (f.decimals ?? 0) > 0 ? String(v) : v; // numeric column string leta hai
@@ -193,4 +211,23 @@ export function masterRouter(def: MasterDef, cfg: ServerCfg) {
   }));
 
   return r;
+}
+
+// Type ke hisaab se conditional rules (Product): chhupe fields null/[] ho jaate hain, zaroori fields enforce hote hain
+export function applyConditions(def: MasterDef, data: Record<string, any>) {
+  const out: Record<string, any> = { ...data };
+  const inList = (c: { field: string; in: string[] } | undefined) => !!c && c.in.includes(String(out[c.field] ?? ""));
+  for (const f of def.fields) {
+    if (f.readOnly) continue;
+    if (f.showIf && !inList(f.showIf)) { out[f.name] = f.type === "checkbox" ? false : f.type === "lines" ? [] : null; continue; }
+    const v = out[f.name];
+    if (f.type === "lines") {
+      const min = f.lines?.min ?? (f.required || inList(f.requiredIf) ? 1 : 0);
+      if (min && (v as unknown[]).length < min) throw new HttpError(400, `${f.label}: add at least ${min} line.`, f.name);
+      continue;
+    }
+    if ((f.required || inList(f.requiredIf)) && f.type !== "checkbox" && (v == null || v === ""))
+      throw new HttpError(400, `${f.label} is required.`, f.name);
+  }
+  return out;
 }

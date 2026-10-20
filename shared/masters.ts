@@ -1,5 +1,5 @@
 // Ek hi jagah har master ki definition: server (validation, duplicate check) aur UI (form, list) dono yahin se padhte hain.
-export type FieldType = "text" | "number" | "select" | "lookup" | "checkbox" | "date";
+export type FieldType = "text" | "number" | "select" | "lookup" | "checkbox" | "date" | "lines";
 
 export interface Opt {
   value: string;
@@ -7,6 +7,17 @@ export interface Opt {
   short?: string;
   hotkey?: string;
   badge?: string;
+}
+
+export interface LookupWhere { field: string; value?: unknown; in?: unknown[]; notIn?: unknown[] }
+export const matchWhere = (w: LookupWhere | undefined, row: Record<string, any>) =>
+  !w || ((w.value === undefined || row[w.field] === w.value) && (!w.in || w.in.includes(row[w.field])) && (!w.notIn || !w.notIn.includes(row[w.field])));
+
+// "lines" field ki ek column (jaise Alternate Unit: unit + conversion factor)
+export interface LineCol {
+  name: string; label: string; type: "lookup" | "number";
+  lookup?: string; lookupWhere?: LookupWhere;
+  required?: boolean; positive?: boolean; decimals?: number; width?: string; placeholder?: string;
 }
 
 export interface FieldDef {
@@ -31,7 +42,11 @@ export interface FieldDef {
   lookupScope?: "record"; // options selected record ki company se aate hain (Company screen par)
   format?: "email";
   lower?: boolean; // auto-lowercase
-  lookupWhere?: { field: string; value: unknown }; // lookup options sirf wahi rows jinme row[field] === value
+  lookupWhere?: LookupWhere; // lookup options filter
+  tab?: string; // form ke tab me dikhta hai (bina tab wale fields hamesha upar)
+  requiredIf?: { field: string; in: string[] }; // sirf tab zaroori jab doosre field ki value in me ho
+  lockOnEdit?: boolean; // NEW me edit hota hai, baad me nahi (jaise Product Type)
+  lines?: { columns: LineCol[]; unique?: string[]; min?: number; hint?: string }; // repeating rows (Alternate Units, Bundle Components)
 }
 
 export interface ColumnDef {
@@ -104,6 +119,26 @@ const ROLES: Opt[] = [
   { value: "VIEWER", label: "VIEWER", hotkey: "V", badge: "bg-slate-100 text-slate-700 border-slate-300" },
 ];
 const flag = (name: string, label: string): FieldDef => ({ name, label, type: "checkbox", default: false });
+
+const PRODUCT_TYPES: Opt[] = [
+  { value: "STOCK", label: "STOCK", hotkey: "S", badge: "bg-blue-100 text-blue-800 border-blue-300" },
+  { value: "NON_STOCK", label: "NON-STOCK", hotkey: "N", badge: "bg-slate-100 text-slate-700 border-slate-300" },
+  { value: "SERVICE", label: "SERVICE", hotkey: "V", badge: "bg-green-100 text-green-800 border-green-300" },
+  { value: "FIXED_ASSET", label: "FIXED ASSET", hotkey: "F", badge: "bg-orange-100 text-orange-800 border-orange-300" },
+  { value: "BUNDLE", label: "BUNDLE", hotkey: "B", badge: "bg-purple-100 text-purple-800 border-purple-300" },
+];
+const VALUATION: Opt[] = [
+  { value: "FIFO", label: "FIFO", hotkey: "F" },
+  { value: "WEIGHTED_AVERAGE", label: "WEIGHTED AVERAGE", hotkey: "W" },
+  { value: "STANDARD_COST", label: "STANDARD COST", hotkey: "S" },
+];
+const DEPR: Opt[] = [
+  { value: "STRAIGHT_LINE", label: "STRAIGHT LINE", hotkey: "S" },
+  { value: "WRITTEN_DOWN_VALUE", label: "WRITTEN DOWN VALUE", hotkey: "W" },
+];
+const T = (...types: string[]) => ({ field: "type", in: types });
+const num = (name: string, label: string, decimals: number): FieldDef => ({ name, label, type: "number", decimals, min: 0 });
+const glf = (name: string, label: string): FieldDef => ({ name, label, type: "lookup", lookup: "general-ledger" });
 
 const code = (): FieldDef => ({ name: "code", label: "Code", type: "text", required: true, max: 10, upper: true });
 const text = (name: string, label: string, max: number, required = true): FieldDef => ({ name, label, type: "text", required, max });
@@ -305,6 +340,90 @@ const list: MasterDef[] = [
     uniqueScope: "system",
     parent: { field: "generalLedgerId", label: "General Ledger" },
     counts: [{ key: "openingCount", label: "Opening Balance(s)" }],
+  },
+  {
+    key: "products", title: "Product", singular: "Product", labelFields: ["code", "description"], cols: 2, loads: ["product-groups"],
+    fields: [
+      { name: "type", label: "Type", type: "select", required: true, options: PRODUCT_TYPES, default: "STOCK", lockOnEdit: true },
+      code(),
+      { ...text("description", "Description", 256), span: 2 },
+      text("shortName", "Short Name", 30, false),
+      text("barcode", "Barcode", 64, false),
+      lookup("productSubGroupId", "Sub Group", "product-sub-groups"),
+      active(),
+
+      // ---- Tab: Details ----
+      { ...lookup("unitId", "Unit", "product-units"), tab: "Details", showIf: T("STOCK", "NON_STOCK") },
+      { ...lookup("serviceUnitId", "Unit", "product-units", false), tab: "Details", showIf: T("SERVICE"), placeholder: "Optional (per hour / per visit)" },
+      { ...lookup("stockCategoryId", "Stock Category", "stock-categories", false), tab: "Details", showIf: T("STOCK") },
+      { ...lookup("locationId", "Location", "locations", false), tab: "Details", showIf: T("STOCK", "FIXED_ASSET") },
+      { name: "valuationMethod", label: "Valuation", type: "select", required: true, options: VALUATION, default: "WEIGHTED_AVERAGE", tab: "Details", showIf: T("STOCK") },
+      { ...flag("tracksBatch", "Track Batch"), tab: "Details", showIf: T("STOCK") },
+      { ...flag("tracksExpiry", "Track Expiry"), tab: "Details", showIf: T("STOCK") },
+
+      // ---- Tab: Units & Levels (Stock) ----
+      { ...num("minStock", "Min Stock", 3), tab: "Units & Levels", showIf: T("STOCK") },
+      { ...num("maxStock", "Max Stock", 3), tab: "Units & Levels", showIf: T("STOCK") },
+      { ...num("reorderLevel", "Reorder Level", 3), tab: "Units & Levels", showIf: T("STOCK") },
+      { ...num("reorderQty", "Reorder Qty", 3), tab: "Units & Levels", showIf: T("STOCK") },
+      {
+        name: "alternateUnits", label: "Alternate Units", type: "lines", tab: "Units & Levels", showIf: T("STOCK"), span: 2,
+        lines: {
+          columns: [
+            { name: "unitId", label: "Unit", type: "lookup", lookup: "product-units", required: true, width: "1fr", placeholder: "e.g. Box" },
+            { name: "conversionFactor", label: "Equals (in base units)", type: "number", decimals: 2, required: true, positive: true, width: "170px" },
+          ],
+          unique: ["unitId"],
+          hint: "1 Alternate Unit = factor × Base Unit (jaise 1 Box = 12 Pcs). Base unit dobara nahi aa sakta.",
+        },
+      },
+
+      // ---- Tab: Pricing & Tax ----
+      { ...lookup("taxRateId", "Tax Rate", "tax-rates", false), tab: "Pricing & Tax", showIf: T("STOCK", "NON_STOCK", "SERVICE") },
+      { ...lookup("defaultVendorId", "Default Vendor", "party", false), tab: "Pricing & Tax", showIf: T("STOCK"), lookupWhere: { field: "glType", in: ["VENDOR", "BOTH"] } },
+      { ...num("purchaseRate", "Purchase Rate", 2), tab: "Pricing & Tax", showIf: T("STOCK") },
+      { ...num("salesRate", "Sales Rate", 2), tab: "Pricing & Tax", showIf: T("STOCK") },
+      { ...num("mrp", "MRP", 2), tab: "Pricing & Tax", showIf: T("STOCK") },
+      { ...num("tradePrice", "Trade Price", 2), tab: "Pricing & Tax", showIf: T("STOCK") },
+      { ...num("bundlePrice", "Bundle Price", 2), tab: "Pricing & Tax", showIf: T("BUNDLE"), placeholder: "Khali = components ka jod" },
+
+      // ---- Tab: Accounts (GL mapping) ----
+      { ...glf("openingGLId", "Opening Stock GL"), tab: "Accounts", showIf: T("STOCK") },
+      { ...glf("closingPLGLId", "Closing Stock GL (P&L)"), tab: "Accounts", showIf: T("STOCK") },
+      { ...glf("closingBSGLId", "Closing Stock GL (B/S)"), tab: "Accounts", showIf: T("STOCK") },
+      { ...glf("purchaseGLId", "Purchase GL"), tab: "Accounts", showIf: T("STOCK", "NON_STOCK", "SERVICE"), requiredIf: { field: "type", in: ["NON_STOCK", "SERVICE"] } },
+      { ...glf("purchaseReturnGLId", "Purchase Return GL"), tab: "Accounts", showIf: T("STOCK") },
+      { ...glf("salesGLId", "Sales GL"), tab: "Accounts", showIf: T("STOCK", "NON_STOCK", "SERVICE", "BUNDLE"), requiredIf: { field: "type", in: ["NON_STOCK", "SERVICE", "BUNDLE"] } },
+      { ...glf("salesReturnGLId", "Sales Return GL"), tab: "Accounts", showIf: T("STOCK") },
+      { ...glf("assetGLId", "Asset GL"), tab: "Accounts", showIf: T("FIXED_ASSET"), required: true },
+      { ...glf("accumulatedDeprGLId", "Accum. Depreciation GL"), tab: "Accounts", showIf: T("FIXED_ASSET"), required: true },
+      { ...glf("depreciationExpenseGLId", "Depreciation Expense GL"), tab: "Accounts", showIf: T("FIXED_ASSET"), required: true },
+
+      // ---- Tab: Depreciation (Fixed Asset) ----
+      { name: "purchaseDate", label: "Purchase Date", type: "date", tab: "Depreciation", showIf: T("FIXED_ASSET") },
+      { ...num("originalCost", "Original Cost", 2), tab: "Depreciation", showIf: T("FIXED_ASSET") },
+      { ...num("salvageValue", "Salvage Value", 2), required: true, default: "0", tab: "Depreciation", showIf: T("FIXED_ASSET") },
+      { name: "usefulLifeYears", label: "Useful Life (years)", type: "number", decimals: 0, min: 1, tab: "Depreciation", showIf: T("FIXED_ASSET") },
+      { name: "depreciationMethod", label: "Method", type: "select", required: true, options: DEPR, default: "STRAIGHT_LINE", tab: "Depreciation", showIf: T("FIXED_ASSET") },
+      { name: "depreciationRatePercent", label: "Rate % (WDV)", type: "number", decimals: 2, min: 0, maxValue: 100, tab: "Depreciation", showIf: T("FIXED_ASSET"), requiredIf: { field: "depreciationMethod", in: ["WRITTEN_DOWN_VALUE"] } },
+      { ...num("accumulatedDepreciation", "Accumulated Depr.", 2), required: true, default: "0", tab: "Depreciation", showIf: T("FIXED_ASSET") },
+
+      // ---- Tab: Components (Bundle) ----
+      {
+        name: "components", label: "Components", type: "lines", tab: "Components", showIf: T("BUNDLE"), span: 2,
+        lines: {
+          columns: [
+            { name: "componentProductId", label: "Product", type: "lookup", lookup: "products", lookupWhere: { field: "type", notIn: ["BUNDLE"] }, required: true, width: "1fr" },
+            { name: "quantity", label: "Quantity", type: "number", decimals: 3, required: true, positive: true, width: "130px" },
+          ],
+          unique: ["componentProductId"], min: 1,
+          hint: "Bundle ke andar bundle nahi ho sakta, aur apna hi component nahi.",
+        },
+      },
+    ],
+    columns: [{ name: "code", label: "Code", width: "70px", kind: "mono" }, { name: "description", label: "Description", width: "1fr", kind: "text" }, { name: "type", label: "Type", width: "78px", kind: "badge" }, ON_COL],
+    unique: [["code"], ["barcode"]],
+    counts: [{ key: "bundleUseCount", label: "Bundle component(s)" }, { key: "stockOpeningCount", label: "Stock Opening row(s)" }],
   },
   {
     key: "areas", title: "Area", singular: "Area", labelFields: ["code", "name"],

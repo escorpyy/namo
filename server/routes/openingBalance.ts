@@ -3,6 +3,7 @@ import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../db";
 import * as S from "../db/schema";
 import { HttpError, wrap } from "./_util";
+import { stockMismatches } from "./stockRecon";
 
 const OB = S.openingBalance;
 const AMOUNT = /^\d{1,12}(\.\d{1,2})?$/; // NPR: 2 decimals, negative nahi (DB me CHECK nahi hai, yahan enforce)
@@ -161,6 +162,14 @@ openingBalanceRouter.post("/lock", wrap(async (req, res) => {
   const t = await sums(and(eq(OB.companyId, companyId), eq(OB.fiscalYearId, fyId)));
   const [d] = await db.select({ diff: sql<string>`(${t.debit}::numeric - ${t.credit}::numeric)::text` }).from(S.company).limit(1);
   if (Number(d.diff) !== 0) throw new HttpError(409, `Opening balance is not balanced (Dr ${t.debit} vs Cr ${t.credit}). Fix the difference before locking.`);
+  // Stock ka value stock ledger ke opening se match hona chahiye; mismatch par saaf message, "force" se hi lock
+  if (!req.body?.force) {
+    const bad = await stockMismatches(companyId, fyId);
+    if (bad.length) {
+      const first = bad.slice(0, 3).map((m) => `${m.branch} · ${m.ledger}: stock ${m.stock} vs ledger ${m.ledgerBalance}`).join("; ");
+      throw new HttpError(409, `Stock opening does not match the stock ledger (${first}${bad.length > 3 ? `; +${bad.length - 3} more` : ""}).`, "stockMismatch");
+    }
+  }
   await db.update(S.fiscalYear).set({ isOpeningBalanceLocked: true, openingBalanceLockedAt: new Date(), openingBalanceLockedBy: userId }).where(eq(S.fiscalYear.id, fyId));
   res.json({ ok: true });
 }));

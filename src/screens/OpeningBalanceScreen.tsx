@@ -161,6 +161,23 @@ export default function OpeningBalanceScreen({ companyId, branchId, fyId, userId
   };
 
   // ---- lock / unlock ----
+  // Stock opening ledger se match na kare to server "stockMismatch" deta hai: saaf warning, "Lock anyway" se hi aage
+  const doLock = async (force: boolean) => {
+    try { await obApi.lock({ companyId, fiscalYearId: fyId, userId, force }); await load(); flash("Opening balance locked.", "ok"); }
+    catch (e) {
+      if (e instanceof ApiError && e.field === "stockMismatch") {
+        flash(e.message, "err");
+        return setDialog({
+          title: "Stock does not match the ledger", body: e.message,
+          buttons: [
+            { label: "Cancel", kind: "neutral", autoFocus: true, onClick: () => setDialog(null) },
+            { label: "Lock anyway", kind: "danger", onClick: () => { setDialog(null); void doLock(true); } },
+          ],
+        });
+      }
+      flash((e as Error).message, "err");
+    }
+  };
   const toggleLock = () => {
     if (!fy || fy.isClosed) return;
     if (fy.isOpeningBalanceLocked) {
@@ -183,7 +200,7 @@ export default function OpeningBalanceScreen({ companyId, branchId, fyId, userId
       title: "Lock opening balance?", body: `FY ${fy.code}: Dr = Cr. Lock ke baad koi edit nahi hoga jab tak Unlock na ho.`,
       buttons: [
         { label: "Cancel", kind: "neutral", autoFocus: true, onClick: () => setDialog(null) },
-        { label: "Lock", kind: "primary", onClick: async () => { setDialog(null); try { await obApi.lock({ companyId, fiscalYearId: fyId, userId }); await load(); flash("Opening balance locked.", "ok"); } catch (e) { flash((e instanceof ApiError ? e.message : String(e)), "err"); } } },
+        { label: "Lock", kind: "primary", onClick: () => { setDialog(null); void doLock(false); } },
       ],
     });
   };

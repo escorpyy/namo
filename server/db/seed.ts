@@ -142,6 +142,7 @@ async function main() {
       const [ho] = await db.select().from(S.branch).where(and(eq(S.branch.companyId, co.id), eq(S.branch.code, "HO")));
       const [fy] = await db.select().from(S.fiscalYear).where(and(eq(S.fiscalYear.companyId, co.id), eq(S.fiscalYear.code, "2082/083")));
       const gl = async (code: string) => (await db.select().from(S.generalLedger).where(and(eq(S.generalLedger.companyId, co.id), eq(S.generalLedger.code, code))))[0];
+      const stockGl = await gl("GL003");
       const [cash, bank, cap, ram, sita] = [await gl("GL001"), await gl("GL002"), await gl("GL010"), await gl("C001"), await gl("V001")];
       if (ho && fy && cash && bank && cap && ram && sita) {
         await db.update(S.generalLedger).set({ requiresSubLedger: true }).where(eq(S.generalLedger.id, bank.id));
@@ -154,7 +155,8 @@ async function main() {
           { ...base, generalLedgerId: cash.id, debit: "50000.00" },
           ...(subs.length === 2 ? [{ ...base, generalLedgerId: bank.id, subLedgerId: subs[0].id, debit: "200000.00" }, { ...base, generalLedgerId: bank.id, subLedgerId: subs[1].id, debit: "100000.00" }] : []),
           { ...base, generalLedgerId: ram.id, debit: "100000.00" },
-          { ...base, generalLedgerId: cap.id, credit: "350000.00" },
+          { ...base, generalLedgerId: cap.id, credit: "660000.00" },
+          ...(stockGl ? [{ ...base, generalLedgerId: stockGl.id, debit: "310000.00" }] : []), // stock opening (neeche Stock Opening rows se match)
           { ...base, generalLedgerId: sita.id, credit: "100000.00" },
         ]);
       }
@@ -199,6 +201,89 @@ async function main() {
         { companyId: co.id, code: "GD1-A", name: "Rack A", parentId: godown.id },
         { companyId: co.id, code: "GD1-B", name: "Rack B", parentId: godown.id },
       ]);
+    }
+
+    // Demo products: 5 types (Stock, Service, Non-stock, Fixed Asset, Bundle) + zaroori GLs
+    if (!(await hasRows(S.product, co.id))) {
+      const grp = async (code: string) => (await db.select().from(S.accountGroup).where(and(eq(S.accountGroup.companyId, co.id), eq(S.accountGroup.code, code))))[0];
+      const sub = async (groupCode: string, subCode: string, description: string) => {
+        const g = await grp(groupCode);
+        const [ex] = await db.select().from(S.accountSubGroup).where(and(eq(S.accountSubGroup.accountGroupId, g.id), eq(S.accountSubGroup.code, subCode)));
+        return ex ?? (await db.insert(S.accountSubGroup).values({ accountGroupId: g.id, code: subCode, description }).returning())[0];
+      };
+      const gl = async (code: string, name: string, subId: number, nb: "DEBIT" | "CREDIT") => {
+        const [ex] = await db.select().from(S.generalLedger).where(and(eq(S.generalLedger.companyId, co.id), eq(S.generalLedger.code, code)));
+        return ex ?? (await db.insert(S.generalLedger).values({ companyId: co.id, code, name, accountSubGroupId: subId, normalBalance: nb }).returning())[0];
+      };
+      const purchSub = await sub("AG07", "SG01", "Purchase Accounts");
+      const salesSub = await sub("AG05", "SG01", "Sales Accounts");
+      const vehSub = await sub("AG02", "SG01", "Vehicles");
+      const admSub = await sub("AG08", "SG01", "Administrative Expenses");
+      const stockSub = await sub("AG01", "SG03", "Stock-in-Hand");
+      const sales = await gl("GL020", "Sales", salesSub.id, "CREDIT");
+      const purchases = await gl("GL040", "Purchases", purchSub.id, "DEBIT");
+      const purchRet = await gl("GL041", "Purchase Returns", purchSub.id, "CREDIT");
+      const salesRet = await gl("GL021", "Sales Returns", salesSub.id, "DEBIT");
+      const openStock = await gl("GL050", "Opening Stock", purchSub.id, "DEBIT");
+      const closePL = await gl("GL051", "Closing Stock (P&L)", salesSub.id, "CREDIT");
+      const closeBS = await gl("GL003", "Stock in Hand", stockSub.id, "DEBIT");
+      const vehicles = await gl("GL060", "Vehicles", vehSub.id, "DEBIT");
+      const accDep = await gl("GL061", "Accumulated Depreciation - Vehicles", vehSub.id, "CREDIT");
+      const depExp = await gl("GL062", "Depreciation Expense", admSub.id, "DEBIT");
+
+      const unit = async (c: string) => (await db.select().from(S.productUnit).where(and(eq(S.productUnit.companyId, co.id), eq(S.productUnit.code, c))))[0];
+      const [kg, ltr, pcs, box] = [await unit("KG"), await unit("LTR"), await unit("PCS"), await unit("BOX")];
+      const [vat] = await db.select().from(S.taxRate).where(and(eq(S.taxRate.companyId, co.id), eq(S.taxRate.code, "VAT13")));
+      const [trd] = await db.select().from(S.stockCategory).where(and(eq(S.stockCategory.companyId, co.id), eq(S.stockCategory.code, "TRD")));
+      const [gd1] = await db.select().from(S.location).where(and(eq(S.location.companyId, co.id), eq(S.location.code, "GD1")));
+      const [vend] = await db.select({ id: S.party.id }).from(S.party).innerJoin(S.generalLedger, eq(S.party.generalLedgerId, S.generalLedger.id)).where(and(eq(S.party.companyId, co.id), eq(S.generalLedger.code, "V001")));
+      const psg = async (name: string) => (await db.select({ id: S.productSubGroup.id }).from(S.productSubGroup).innerJoin(S.productGroup, eq(S.productSubGroup.productGroupId, S.productGroup.id)).where(and(eq(S.productGroup.companyId, co.id), eq(S.productSubGroup.name, name))))[0];
+      const rice = await psg("Rice & Grains"), oil = await psg("Oil & Ghee"), mob = await psg("Mobiles");
+      const mk = async (code: string, description: string, type: "STOCK" | "NON_STOCK" | "SERVICE" | "FIXED_ASSET" | "BUNDLE", sg: { id: number }, barcode?: string) =>
+        (await db.insert(S.product).values({ companyId: co.id, code, description, type, productSubGroupId: sg.id, barcode: barcode ?? null }).returning())[0];
+
+      const p1 = await mk("P001", "Basmati Rice", "STOCK", rice, "8901000000011");
+      const sd1 = (await db.insert(S.stockDetail).values({
+        productId: p1.id, baseUnitId: kg.id, stockCategoryId: trd?.id, defaultLocationId: gd1?.id, taxRateId: vat?.id, valuationMethod: "WEIGHTED_AVERAGE",
+        purchaseRate: "110.00", salesRate: "125.00", mrp: "140.00", minStock: "50", maxStock: "1000", reorderLevel: "100", reorderQty: "200",
+        openingGLId: openStock.id, closingPLGLId: closePL.id, closingBSGLId: closeBS.id, purchaseGLId: purchases.id, purchaseReturnGLId: purchRet.id,
+        salesGLId: sales.id, salesReturnGLId: salesRet.id, defaultVendorId: vend?.id,
+      }).returning())[0];
+      await db.insert(S.alternateUnit).values({ stockDetailId: sd1.id, unitId: box.id, conversionFactor: "25" }); // 1 Box = 25 Kg
+
+      const p2 = await mk("P002", "Sunflower Oil 1L", "STOCK", oil, "8901000000028");
+      const sd2 = (await db.insert(S.stockDetail).values({
+        productId: p2.id, baseUnitId: ltr.id, stockCategoryId: trd?.id, taxRateId: vat?.id, tracksBatch: true, tracksExpiry: true,
+        purchaseRate: "180.00", salesRate: "210.00", openingGLId: openStock.id, closingPLGLId: closePL.id, closingBSGLId: closeBS.id,
+        purchaseGLId: purchases.id, salesGLId: sales.id,
+      }).returning())[0];
+
+      const p3 = await mk("P003", "Delivery Charge", "SERVICE", mob);
+      await db.insert(S.serviceDetail).values({ productId: p3.id, taxRateId: vat?.id, salesGLId: sales.id, purchaseGLId: purchases.id });
+      const p4 = await mk("P004", "Packing Material", "NON_STOCK", mob);
+      await db.insert(S.nonStockDetail).values({ productId: p4.id, unitId: pcs.id, salesGLId: sales.id, purchaseGLId: purchases.id });
+      const p5 = await mk("P005", "Delivery Truck", "FIXED_ASSET", mob);
+      await db.insert(S.fixedAssetDetail).values({
+        productId: p5.id, assetGLId: vehicles.id, accumulatedDeprGLId: accDep.id, depreciationExpenseGLId: depExp.id, locationId: gd1?.id,
+        purchaseDate: new Date("2024-01-15"), originalCost: "4500000.00", salvageValue: "450000.00", usefulLifeYears: 8, depreciationMethod: "STRAIGHT_LINE",
+      });
+      const p6 = await mk("P006", "Festival Pack", "BUNDLE", rice);
+      const bd = (await db.insert(S.bundleDetail).values({ productId: p6.id, salesGLId: sales.id, bundlePrice: "1500.00" }).returning())[0];
+      await db.insert(S.bundleComponent).values([
+        { bundleDetailId: bd.id, componentProductId: p1.id, quantity: "5" },
+        { bundleDetailId: bd.id, componentProductId: p2.id, quantity: "2" },
+      ]);
+
+      // Demo Stock Opening (ABC, Head Office, FY 2082/083): total 3,10,000 = GL003 ke Opening Balance se match
+      const [ho] = await db.select().from(S.branch).where(and(eq(S.branch.companyId, co.id), eq(S.branch.code, "HO")));
+      const [fy] = await db.select().from(S.fiscalYear).where(and(eq(S.fiscalYear.companyId, co.id), eq(S.fiscalYear.code, "2082/083")));
+      const [rackA] = await db.select().from(S.location).where(and(eq(S.location.companyId, co.id), eq(S.location.code, "GD1-A")));
+      if (ho && fy) {
+        await db.insert(S.stockOpeningBalance).values([
+          { branchId: ho.id, fiscalYearId: fy.id, stockDetailId: sd1.id, locationId: rackA?.id, quantity: "2000", rate: "110", value: "220000.00" },
+          { branchId: ho.id, fiscalYearId: fy.id, stockDetailId: sd2.id, locationId: gd1?.id, batchNo: "B-2082-01", expiryDate: new Date("2027-03-31"), quantity: "500", rate: "180", value: "90000.00" },
+        ]);
+      }
     }
   }
 

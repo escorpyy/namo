@@ -45,8 +45,11 @@ Note: browser `Ctrl+N` ko kabhi-kabhi nahi chhodta, isliye **F3** hamesha kaam k
 shared/masters.ts   har master ki definition (fields, rules, list columns): server aur UI dono yahin se padhte hain
 server/masters.ts   kaunsi Drizzle table, parent, child counts
 server/routes/masterFactory.ts   generic CRUD + validation + duplicate check + delete guard
+server/routes/product.ts         Product: type ke hisaab se detail table + Alternate Units / Bundle Components (transaction)
 server/routes/party.ts           Party: ek form se GL + Party + Customer/Vendor detail (transaction)
 server/routes/openingBalance.ts  Opening Balance grid API: GET / PUT (diff save) / lock / unlock
+server/routes/stockOpening.ts    Stock Opening grid API (product x location x batch lines) + stockRecon.ts (stock vs ledger control)
+shared/decimal.ts                exact decimal maths (BigInt): Qty x Rate, client + server same
 src/screens/OpeningBalanceScreen.tsx  grid: Dr/Cr, live totals, difference, lock (master engine se alag)
 src/screens/MasterScreen.tsx     modes, guards, shortcuts ki saari logic (har master me same)
 src/components/     Header, Sidebar, StatusBar, MasterForm, MasterList, Combobox, ConfirmDialog, ShortcutsOverlay
@@ -58,9 +61,9 @@ src/components/     Header, Sidebar, StatusBar, MasterForm, MasterList, Combobox
 2. `server/masters.ts` me table aur counts.
 3. `src/components/Sidebar.tsx` me item (id = master key). Bas, screen apne aap ban jati hai.
 
-## Ready screens (20)
+## Ready screens (22)
 
-Account Group, Account Sub Group, General Ledger, Sub Ledger, Party, Company, Branch, Fiscal Year, User, User Access, Area, Sub Area, Agent, Product Group, Product Sub Group, Unit, Tax Rate, Stock Category, Location, **plus Opening Balance (grid screen)**.
+Account Group, Account Sub Group, General Ledger, Sub Ledger, Party, Company, Branch, Fiscal Year, User, User Access, Area, Sub Area, Agent, Product Group, Product Sub Group, Unit, Tax Rate, Stock Category, Location, **Product (5 types)**, plus Opening Balance and Stock Opening Balance (grid screens).
 
 ## Abhi ke limits
 
@@ -68,4 +71,4 @@ Account Group, Account Sub Group, General Ledger, Sub Ledger, Party, Company, Br
 - Login/auth nahi hai: header me pehla active user dikhta hai. Roles (User Access) abhi sirf record hote hain, enforce nahi.
 - BS date conversion library ki range BS 2000-2090 (AD 1943-2034) hai; uske bahar sirf AD chalta hai.
 - Fiscal Year ka Close / Opening-balance-lock workflow (audit freeze) abhi nahi hai; screen sirf unki status dikhati hai.
-- Product (aur Stock Opening Balance, jo Product par tikta hai) aur vouchers abhi "not built yet" hain (sidebar me dim dikhte hain).
+- Vouchers (Journal, Cash/Bank) abhi "not built yet" hain (sidebar me dim dikhte hain).

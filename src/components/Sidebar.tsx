@@ -7,7 +7,7 @@ import {
 import { MASTERS } from "../../shared/masters";
 
 // Master-engine ke bahar ki custom screens (grid etc.)
-export const CUSTOM_SCREENS = ["opening-balance"];
+export const CUSTOM_SCREENS = ["opening-balance", "stock-opening"];
 
 type Item = { id: string; label: string; icon: React.ElementType };
 type Section = { id: string; label: string; icon: React.ElementType; items: Item[] };

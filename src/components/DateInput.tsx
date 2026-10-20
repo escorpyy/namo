@@ -8,11 +8,12 @@ interface Props {
   calendar: "BS" | "AD";
   hasError: boolean;
   onBlurField: () => void;
+  compact?: boolean; // grid cell: dusre calendar ka hint nahi
 }
 
 // User apne preferred calendar (BS/AD) me type karta hai; form me hamesha AD jaata hai.
 // Digits type karo, dashes apne aap lagte hain (20820401 -> 2082-04-01).
-export function DateInput({ fieldName, value, onChange, calendar, hasError, onBlurField }: Props) {
+export function DateInput({ fieldName, value, onChange, calendar, hasError, onBlurField, compact }: Props) {
   const show = (v: string) => (v.startsWith("?") ? v.slice(1) : v === "" ? "" : calendar === "BS" ? (adToBs(v) ?? "") : v);
   const [text, setText] = useState(show(value));
 
@@ -32,7 +33,7 @@ export function DateInput({ fieldName, value, onChange, calendar, hasError, onBl
   };
 
   const ok = value !== "" && !value.startsWith("?");
-  const other = ok ? (calendar === "BS" ? `AD ${value}` : (adToBs(value) ? `BS ${adToBs(value)}` : "")) : "";
+  const other = ok && !compact ? (calendar === "BS" ? `AD ${value}` : (adToBs(value) ? `BS ${adToBs(value)}` : "")) : "";
 
   return (
     <div className="relative">

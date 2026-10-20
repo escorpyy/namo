@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { MASTERS, type MasterDef, type Opt } from "../../shared/masters";
+import { MASTERS, matchWhere, type MasterDef, type Opt } from "../../shared/masters";
 import { ApiError, masterApi } from "../api";
-import { emptyForm, recordLabel, recordTitle, sameForm, toForm, toPayload, validate, type Errors, type FormState, type Row } from "../lib/form";
+import { emptyForm, recordLabel, recordTitle, sameForm, tabsOf, toForm, toPayload, validate, type Errors, type FormState, type Row } from "../lib/form";
 import type { Mode, MsgKind, StatusInfo } from "../types";
 import { MasterForm } from "../components/MasterForm";
 import { MasterList } from "../components/MasterList";
@@ -9,7 +9,8 @@ import { ConfirmDialog, type DialogSpec } from "../components/ConfirmDialog";
 import { ShortcutsOverlay } from "../components/ShortcutsOverlay";
 
 const q = (sel: string) => document.querySelector<HTMLElement>(sel);
-const focusField = (n: string) => q(`[data-field="${n}"]`)?.focus();
+type FieldDefWhere = import("../../shared/masters").LookupWhere | undefined;
+const rawFocus = (n: string) => (q(`[data-field="${n}"]`) ?? q(`[data-field^="${n}."]`))?.focus();
 const focusForm = () => setTimeout(() => q("[data-zone=form] [data-nav]")?.focus(), 0);
 const sortRows = (def: MasterDef, a: Row[]) => {
   const k = def.sortBy ?? "code", dir = def.sortDir === "desc" ? -1 : 1;
@@ -41,14 +42,21 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
   const [help, setHelp] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ text: string; kind: MsgKind }>({ text: "Ready", kind: "info" });
+  const [tab, setTab] = useState("");
   const savingRef = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const flash = (text: string, kind: MsgKind = "info") => setMsg({ text, kind });
+  // Field kisi doosre tab me ho to pehle wo tab kholo, phir focus
+  const focusField = (n: string) => {
+    const f = def.fields.find((x) => x.name === n.split(".")[0]);
+    if (f?.tab) setTab(f.tab);
+    setTimeout(() => rawFocus(n), f?.tab ? 40 : 0);
+  };
   const selected = items.find((i) => i.id === selectedId) ?? null;
 
   const baseline = mode === "edit" && selected ? toForm(def, selected) : emptyForm(def);
-  const dirty = mode !== "view" && !sameForm(form, baseline);
+  const dirty = mode !== "view" && !sameForm(def, form, baseline);
 
   const filtered = useMemo(() => {
     const s = search.trim().toLowerCase();
@@ -61,19 +69,23 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
 
   const lookups = useMemo(() => {
     const out: Record<string, Opt[]> = {};
-    for (const f of def.fields) {
-      if (f.type !== "lookup") continue;
-      const target = MASTERS[f.lookup!];
-      const rows = (f.lookupScope === "record" ? (scopedRows[f.name] ?? []) : rowsOf(f.lookup!)).filter((r) => (f.lookup !== def.key || r.id !== selectedId) && (!f.lookupWhere || r[f.lookupWhere.field] === f.lookupWhere.value));
+    // Ek lookup (field ya lines ka column) ke options: target master ki rows, filter, parent prefix
+    const build = (key: string, lookup: string, where: FieldDefWhere, scoped: boolean) => {
+      const target = MASTERS[lookup];
+      const rows = (scoped ? (scopedRows[key] ?? []) : rowsOf(lookup)).filter((r) => (lookup !== def.key || r.id !== selectedId) && matchWhere(where, r));
       // Child master ho (jaise Sub Group) to label me parent code bhi: "AG01 / SG01 — Cash-in-Hand"
       const pf = target.parent && target.fields.find((x) => x.name === target.parent!.field);
       const parents = pf ? rowsOf(pf.lookup!) : [];
       const pTarget = pf ? MASTERS[pf.lookup!] : null;
-      out[f.name] = rows.map((r) => {
+      out[key] = rows.map((r) => {
         const par = pf ? parents.find((p) => p.id === r[pf.name]) : null;
         const prefix = par && pTarget ? `${par[pTarget.labelFields[0]]} / ` : "";
         return { value: String(r.id), label: `${prefix}${recordTitle(target, r)}`, short: String(r[target.labelFields[0]]) };
       });
+    };
+    for (const f of def.fields) {
+      if (f.type === "lookup") build(f.name, f.lookup!, f.lookupWhere, f.lookupScope === "record");
+      if (f.type === "lines") for (const c of f.lines!.columns) if (c.type === "lookup") build(`${f.name}.${c.name}`, c.lookup!, c.lookupWhere, false);
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -82,7 +94,8 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
   // ---- load ----
   useEffect(() => {
     let live = true;
-    const keys = [...new Set([...def.fields.filter((f) => f.type === "lookup" && f.lookupScope !== "record").map((f) => f.lookup!), ...(def.loads ?? [])])].filter((k) => k !== def.key);
+    const lineLookups = def.fields.flatMap((f) => (f.type === "lines" ? f.lines!.columns.filter((c) => c.type === "lookup").map((c) => c.lookup!) : []));
+    const keys = [...new Set([...def.fields.filter((f) => f.type === "lookup" && f.lookupScope !== "record").map((f) => f.lookup!), ...lineLookups, ...(def.loads ?? [])])].filter((k) => k !== def.key);
     Promise.all([api.list(companyId), ...keys.map((k) => masterApi(k).list(companyId))])
       .then(([own, ...rest]) => {
         if (!live) return;
@@ -281,8 +294,17 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
   };
 
   // ---- global shortcuts (ek hi listener, latest handlers ref se) ----
-  const H = useRef({ save, newRec, edit, askDelete, moveSel, cancelEdit, clear, mode, dirty, dialogOpen: false, help: false });
-  H.current = { save, newRec, edit, askDelete, moveSel, cancelEdit, clear, mode, dirty, dialogOpen: !!dialog, help };
+  const tabNames = tabsOf(def, form, mode);
+  const moveTab = (dir: 1 | -1) => {
+    if (tabNames.length < 2) return;
+    const i = Math.max(0, tabNames.indexOf(tab));
+    const n = tabNames[(i + dir + tabNames.length) % tabNames.length];
+    setTab(n);
+    setTimeout(() => q("[data-tabpane] [data-nav]")?.focus(), 40);
+  };
+
+  const H = useRef({ save, newRec, edit, askDelete, moveSel, cancelEdit, clear, moveTab, mode, dirty, dialogOpen: false, help: false });
+  H.current = { save, newRec, edit, askDelete, moveSel, cancelEdit, clear, moveTab, mode, dirty, dialogOpen: !!dialog, help };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -299,6 +321,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
       else if (k === "F4" || (ctrl && kl === "f") || (k === "/" && !typing)) { e.preventDefault(); searchRef.current?.focus(); }
       else if (ctrl && k === "ArrowDown") { e.preventDefault(); h.moveSel(1); }
       else if (ctrl && k === "ArrowUp") { e.preventDefault(); h.moveSel(-1); }
+      else if (ctrl && (k === "ArrowRight" || k === "ArrowLeft")) { e.preventDefault(); h.moveTab(k === "ArrowRight" ? 1 : -1); }
       else if (k === "F1" || (k === "?" && !typing)) { e.preventDefault(); setHelp(true); }
       else if (e.altKey && k === "1") { e.preventDefault(); q("[data-zone=sidebar] button[data-sb]")?.focus(); }
       else if (e.altKey && k === "2") { e.preventDefault(); q("[data-zone=form] [data-nav]")?.focus(); }
@@ -321,7 +344,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
         </div>
         <MasterForm
           def={def} mode={mode} form={form} setForm={onChangeForm} errors={errors} onBlurField={onBlurField}
-          selected={selected} dirty={dirty} saving={saving} lookups={lookups} calendar={calendar}
+          selected={selected} dirty={dirty} saving={saving} lookups={lookups} calendar={calendar} tab={tab} onTab={setTab}
           actions={{ save: () => void save(), clear, edit, del: askDelete, newRec, cancel: cancelEdit }}
         />
       </main>

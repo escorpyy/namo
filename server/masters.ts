@@ -6,6 +6,7 @@ import { masterRouter, type ServerCfg } from "./routes/masterFactory";
 import { HttpError } from "./routes/_util";
 import { assertAgent, assertSubArea, assertSubGroup } from "./routes/links";
 import { partyRouter } from "./routes/party";
+import { productRouter } from "./routes/product";
 
 // Hierarchy (parent) check: same company, khud ya apne child ke andar nahi
 async function checkHierarchy(table: any, parentId: number | null, ctx: { companyId: number; id?: number }, label: string) {
@@ -186,4 +187,5 @@ const CFG: Record<string, ServerCfg> = {
 export const masterRouters = [
   ...Object.entries(CFG).map(([key, cfg]) => ({ key, router: masterRouter(MASTERS[key], cfg) })),
   { key: "party", router: partyRouter(MASTERS.party) },
+  { key: "products", router: productRouter(MASTERS.products) },
 ];

@@ -61,3 +61,23 @@ export const obApi = {
   lock: (body: Record<string, unknown>) => req<{ ok: true }>("/api/opening-balance/lock", { method: "POST", body: JSON.stringify(body) }),
   unlock: (body: Record<string, unknown>) => req<{ ok: true }>("/api/opening-balance/unlock", { method: "POST", body: JSON.stringify(body) }),
 };
+
+// Stock Opening Balance: grid (product x location x batch lines)
+export interface SoProduct {
+  stockDetailId: number; productId: number; code: string; description: string; isActive: boolean;
+  unitId: number; unitCode: string; decimals: number; tracksBatch: boolean; tracksExpiry: boolean;
+  closingBSGLId: number | null; defaultLocationId: number | null;
+}
+export interface SoLine { id: number; stockDetailId: number; locationId: number | null; batchNo: string | null; expiryDate: string | null; quantity: string; rate: string; value: string }
+export interface SoData {
+  fiscalYear: { id: number; code: string; startDate: string; endDate: string; isClosed: boolean; isOpeningBalanceLocked: boolean };
+  products: SoProduct[];
+  locations: { id: number; code: string; name: string; isActive: boolean }[];
+  lines: SoLine[];
+  ledgers: { id: number; code: string; name: string; balance: string }[];
+}
+export const soApi = {
+  get: (companyId: number, branchId: number, fiscalYearId: number) =>
+    req<SoData>(`/api/stock-opening?companyId=${companyId}&branchId=${branchId}&fiscalYearId=${fiscalYearId}`),
+  save: (body: Record<string, unknown>) => req<{ saved: number; deleted: number }>("/api/stock-opening", { method: "PUT", body: JSON.stringify(body) }),
+};
