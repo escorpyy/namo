@@ -147,6 +147,73 @@ const active = (): FieldDef => ({ name: "isActive", label: "Active", type: "chec
 const CODE_COL: ColumnDef = { name: "code", label: "Code", width: "56px", kind: "mono" };
 const ON_COL: ColumnDef = { name: "isActive", label: "On", width: "28px", kind: "dot" };
 
+// --- Billing terms (Purchase Term / Sales Term): same shape, purchase adds landed-cost allocation ---
+const TERM_CATEGORY: Opt[] = [
+  { value: "GENERAL", label: "GENERAL", hotkey: "G", badge: "bg-slate-100 text-slate-700 border-slate-300" },
+  { value: "ADDITIONAL", label: "ADDITIONAL", hotkey: "A", badge: "bg-blue-100 text-blue-800 border-blue-300" },
+  { value: "ROUNDED", label: "ROUNDED", hotkey: "R", badge: "bg-purple-100 text-purple-800 border-purple-300" },
+];
+const TERM_NATURE: Opt[] = [
+  { value: "ADDITIVE", label: "ADDITIVE (+)", hotkey: "A", badge: "bg-green-100 text-green-800 border-green-300" },
+  { value: "DEDUCTIVE", label: "DEDUCTIVE (−)", hotkey: "D", badge: "bg-red-100 text-red-800 border-red-300" },
+];
+const CALC_TYPE: Opt[] = [
+  { value: "PERCENT", label: "PERCENT (%)", hotkey: "P" },
+  { value: "AMOUNT", label: "AMOUNT", hotkey: "A" },
+];
+const CALC_BASE: Opt[] = [
+  { value: "ITEM_VALUE", label: "ITEM VALUE", hotkey: "I" },
+  { value: "RUNNING_TOTAL", label: "RUNNING TOTAL", hotkey: "R" },
+  { value: "SINGLE_TERM", label: "SINGLE TERM", hotkey: "S" },
+];
+const ALLOC_BASIS: Opt[] = [
+  { value: "QUANTITY", label: "QUANTITY", hotkey: "Q" },
+  { value: "VALUE", label: "VALUE", hotkey: "V" },
+];
+
+function termMaster(kind: "purchase" | "sales"): MasterDef {
+  const purchase = kind === "purchase";
+  const key = purchase ? "purchase-terms" : "sales-terms";
+  const fields: FieldDef[] = [
+    { name: "code", label: "Code", type: "text", required: true, max: 20, upper: true },
+    text("name", "Name", 100),
+    { name: "category", label: "Category", type: "select", required: true, options: TERM_CATEGORY, default: "GENERAL" },
+    { name: "nature", label: "Nature", type: "select", required: true, options: TERM_NATURE },
+    { name: "isProductwise", label: "Productwise (line level)", type: "checkbox", default: false },
+    { name: "isMandatory", label: "Mandatory", type: "checkbox", default: false },
+    { name: "sequence", label: "Sequence", type: "number", required: true, decimals: 0, min: 0, default: "100", placeholder: "Calculation order (lower runs first)" },
+    { name: "defaultCalcType", label: "Default Calc Type", type: "select", required: true, options: CALC_TYPE, default: "PERCENT" },
+    { name: "defaultValue", label: "Default Value", type: "number", required: true, decimals: 4, min: 0, default: "0" },
+    { name: "calcBase", label: "Calc Base", type: "select", required: true, options: CALC_BASE, default: "ITEM_VALUE" },
+    { name: "baseTermId", label: "Base Term", type: "lookup", lookup: key, showIf: { field: "calcBase", in: ["SINGLE_TERM"] }, requiredIf: { field: "calcBase", in: ["SINGLE_TERM"] } },
+  ];
+  if (purchase) {
+    fields.push(
+      { name: "distributeToLines", label: "Distribute to lines (landed cost)", type: "checkbox", default: false, showIf: { field: "isProductwise", in: ["false"] } },
+      { name: "allocationBasis", label: "Allocation Basis", type: "select", options: ALLOC_BASIS, showIf: { field: "distributeToLines", in: ["true"] }, requiredIf: { field: "distributeToLines", in: ["true"] } },
+    );
+  }
+  fields.push(glf("generalLedgerId", "General Ledger"), active());
+  return {
+    key, title: purchase ? "Purchase Term" : "Sales Term", singular: purchase ? "Purchase Term" : "Sales Term",
+    labelFields: ["code", "name"], cols: 2, sortBy: "sequence", sortDir: "asc",
+    fields,
+    columns: [
+      { name: "sequence", label: "Seq", width: "44px", kind: "mono" },
+      { name: "code", label: "Code", width: "72px", kind: "mono" },
+      { name: "name", label: "Name", width: "1fr", kind: "text" },
+      { name: "nature", label: "Nature", width: "96px", kind: "badge" },
+      ON_COL,
+    ],
+    unique: [["code"]],
+    counts: [
+      { key: "defaultCount", label: "Default assignment(s)" },
+      { key: "documentTermCount", label: "Document term(s)" },
+      { key: "dependentCount", label: "Dependent term(s)" },
+    ],
+  };
+}
+
 const list: MasterDef[] = [
   {
     key: "account-groups", title: "Account Group", singular: "Account Group", labelFields: ["code", "description"],
@@ -485,6 +552,8 @@ const list: MasterDef[] = [
     unique: [["code"]],
     counts: [{ key: "childCount", label: "Child Location(s)" }],
   },
+  termMaster("purchase"),
+  termMaster("sales"),
 ];
 
 export const MASTERS: Record<string, MasterDef> = Object.fromEntries(list.map((m) => [m.key, m]));
