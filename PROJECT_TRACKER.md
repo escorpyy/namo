@@ -103,7 +103,7 @@
 | ERP-016 | Per-voucher balance (Dr = Cr) and posted-voucher immutability enforced in the database | P1 | Backlog | Books cannot be unbalanced or silently edited even by a buggy code path | ERP-005 design | Deferred constraint trigger on voucher lines + status guard; tests with concrete Dr/Cr examples | Red-first DB tests |
 | ERP-013 | Master list latency | P3 | Backlog (low) | Snappy screens | — | Only if slowness appears in real use on the owner's machine (his run: 22 lists in ~1.3 s) | Timing |
 | ERP-015 | DB-level company consistency for all tenant-scoped links (OpeningBalance, StockOpening, SubLedger, Party, Voucher tables…) | P1 | **Done (uncommitted)** | A bug or new code path must not be able to mix companies' books | ERP-003 | Registry-driven generic trigger (`namo.company_source`/`company_link`) covering every tenant-scoped table; completeness test fails CI if a new FK is unregistered; audit function; migration with dirty-data pre-flight | 15 tests red-then-green; mutation checks; legacy + dirty upgrade paths (section G) |
-| ERP-014 | Extend tests: party, product, stock opening + reconciliation, sub-ledger, user access, company/branch/fiscal-year masters | P1 | **Ready — next** | Cover the remaining existing workflows before building on them | ERP-004 | Each route has success + failure + invariant tests | CI green |
+| ERP-014 | Extend tests: party [completed], product, stock opening + reconciliation, sub-ledger, user access, company/branch/fiscal-year masters | P1 | **Ready — next** | Cover the remaining existing workflows before building on them | ERP-004 | Each route has success + failure + invariant tests | CI green |
 
 ---
 
@@ -181,6 +181,8 @@ Sandbox: Linux, Node 22, pnpm 12.14.0, throwaway PostgreSQL 16 databases (never 
 - Registry-driven company consistency for all tenant tables (migration 0002, 15 tests). Fixed the `test:db` second-run bug. Rewrote one ERP-003 control test to match the stricter "company never changes" rule.
 - Verification: section G. **Commit hash: none (uncommitted).**
 
+### 2026-10-21 — Session 4 — ERP-014
+- party is only completed
 ---
 
 ## HANDOFF (end of session 4)
