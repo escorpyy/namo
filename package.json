@@ -11,12 +11,13 @@
     "start": "tsx server/index.ts",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "tsx server/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx server/db/seed.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:db": "node scripts/test-db.mjs"
+    "test:db": "node scripts/test-db.mjs",
+    "db:baseline": "tsx server/db/baseline.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

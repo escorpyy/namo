@@ -44,6 +44,9 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   // Kisi aur table me use ho raha hai (FK) to friendly message
   if ((err as { code?: string }).code === "23503")
     return res.status(409).json({ message: "Cannot delete: this record is used elsewhere." });
+  // Database-level rule refused the change (e.g. company-integrity triggers). The API normally pre-checks, so this is the safety net.
+  if ((err as { code?: string }).code === "23514")
+    return res.status(409).json({ message: (err as Error).message });
   console.error(err);
   res.status(500).json({ message: (err as Error).message ?? "Server error" });
 });

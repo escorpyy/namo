@@ -34,9 +34,13 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Create schema and seed demo data (test database)
+      - name: Migrations are up to date with the schema code
         run: |
-          pnpm exec drizzle-kit push --force
+          pnpm exec drizzle-kit generate
+          test -z "$(git status --porcelain drizzle)" || { echo "Schema changed without a migration. Run: pnpm db:generate"; git status --porcelain drizzle; exit 1; }
+      - name: Apply migrations and seed demo data (test database)
+        run: |
+          pnpm db:migrate
           pnpm db:seed
       - name: Type-check and build
         run: pnpm build

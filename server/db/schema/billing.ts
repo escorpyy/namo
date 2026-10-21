@@ -3,6 +3,7 @@ import {
   type AnyPgColumn,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   numeric,
@@ -210,13 +211,17 @@ export const purchaseDocumentTermAllocation = pgTable(
   "PurchaseDocumentTermAllocation",
   {
     id: serial().primaryKey(),
-    documentTermId: integer()
-      .notNull()
-      .references(() => purchaseDocumentTerm.id, { onDelete: "cascade" }),
+    documentTermId: integer().notNull(),
     documentLineId: integer().notNull(),
     allocatedAmount: money().notNull(),
   },
   (t) => [
+    // Explicit short name: the generated one exceeded Postgres' 63-char identifier limit and was silently truncated.
+    foreignKey({
+      name: "PurchaseDocTermAlloc_documentTermId_fk",
+      columns: [t.documentTermId],
+      foreignColumns: [purchaseDocumentTerm.id],
+    }).onDelete("cascade"),
     uniqueIndex("PurchaseDocumentTermAllocation_term_line_key").on(
       t.documentTermId,
       t.documentLineId,

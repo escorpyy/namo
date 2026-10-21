@@ -8,14 +8,22 @@ React + Vite + Tailwind + TypeScript (frontend) · Express + Drizzle ORM + Postg
 pnpm install
 cp .env.example .env          # DATABASE_URL local wala already set hai
 docker compose up -d          # local Postgres
-pnpm db:push               # tables bana do (schema: server/db/schema)
+pnpm db:migrate            # tables + DB triggers bana do (committed migrations: ./drizzle)
 pnpm db:seed               # demo data (dobara chalana safe hai, sirf missing data banta hai)
 pnpm dev                   # web http://localhost:5173  |  api http://localhost:4000
 ```
 
-## Purani DB hai to (schema badla hai)
+## Purani DB hai to (pehle `db:push` se bani thi)
 
-GL ke references ab `ON DELETE RESTRICT` hain (pehle `set null` the). Ek baar `pnpm db:push` chalao, phir `pnpm db:seed` (demo data ke liye).
+Ab schema **migrations** se chalta hai (`./drizzle`), kyunki DB-level rules (triggers) `db:push` se nahi bante. Apni purani DB ko **ek baar** migration history me daalo (ye koi table/data nahi badalta):
+
+```bash
+pnpm db:baseline    # purani tables ko "0000_baseline applied" mark karta hai (tables poori match na hon to refuse karta hai)
+pnpm db:migrate     # baaki migrations (triggers) lagata hai; data me koi gadbad ho to saaf message ke saath ruk jata hai, kuch change nahi hota
+```
+
+Naya DB ho to sirf `pnpm db:migrate`. Schema code badalne par: `pnpm db:generate` (nayi migration banegi, usse commit karo). CI check karta hai ki migration bhuli to nahi.
+`pnpm db:push` ab sirf throw-away experiments ke liye hai (triggers nahi banata).
 
 **Fiscal Year dates:** purane seed me FY 2082/083 ek din galat (2025-07-16) thi. Sahi: **2025-07-17 se 2026-07-16** (Shrawan 1, 2082 se Ashad 32, 2083). Fiscal Year screen se theek kar lo.
 
@@ -23,8 +31,8 @@ GL ke references ab `ON DELETE RESTRICT` hain (pehle `set null` the). Ek baar `p
 
 1. `.env` me `DATABASE_URL` ko cloud connection string se replace karo (`.env.example` me example hai).
 2. Supabase pooler (port 6543) ke liye `prepare: false` already set hai (`server/db/index.ts`).
-3. `db:push` ke liye direct string (port 5432) better hai: `DATABASE_URL_DIRECT` me daalo.
-4. `pnpm db:push && pnpm db:seed`
+3. Migrations ke liye direct string (port 5432) better hai: `DATABASE_URL_DIRECT` me daalo.
+4. `pnpm db:migrate && pnpm db:seed`
 
 ## Production
 
@@ -43,6 +51,17 @@ pnpm typecheck           # tsc --noEmit
 
 Integration tests DB me likhte hain, isliye wo sirf **local + naam me "test"** wali DB par chalte hain (apni dev DB par kabhi nahi).
 `pnpm test:db` us test DB ko har baar wipe + re-seed karta hai. GitHub par har push/PR par `.github/workflows/ci.yml` yahi sab chalata hai.
+
+## DB integrity (ek company ka data doosri company se kabhi nahi mil sakta)
+
+Har record aur uske saare links **ek hi company** ke hone chahiye, aur kisi record ki company kabhi badal nahi sakti. Ye DB khud enforce karta hai (API ke alawa), `namo` schema ke registry + ek generic trigger se.
+Koi bhi data ka audit kabhi bhi chala sakte ho (khali result = sab theek):
+
+```sql
+select * from namo.company_violations();
+```
+
+Naya table/FK jodo to `namo.company_source` / `namo.company_link` me register karna padega, warna `pnpm test` fail hoga (CI me bhi). Saaf message ke saath refuse hota hai (HTTP 409).
 
 ## Keyboard shortcuts (app me F1 dabao)
 
@@ -79,7 +98,7 @@ Account Group, Account Sub Group, General Ledger, Sub Ledger, Party, Company, Br
 
 ## Abhi ke limits
 
-- Schema ke DB triggers (jaise GL companyId sync) migrations me nahi hain; `db:push` sirf tables/indexes banata hai.
+- Company-consistency DB-level enforced hai (account hierarchy + baaki saari tenant tables, ERP-015). Voucher balance (Dr = Cr) abhi DB-level enforce nahi hai (vouchers abhi bane nahi).
 - Login/auth nahi hai: header me pehla active user dikhta hai. Roles (User Access) abhi sirf record hote hain, enforce nahi.
 - BS date conversion library ki range BS 2000-2090 (AD 1943-2034) hai; uske bahar sirf AD chalta hai.
 - Fiscal Year ka Close / Opening-balance-lock workflow (audit freeze) abhi nahi hai; screen sirf unki status dikhati hai.

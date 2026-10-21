@@ -1,5 +1,5 @@
 // One command to run the whole test suite against a throw-away local test database:  pnpm test:db
-// It (re)creates the schema, seeds demo data, then runs vitest. Works on Windows/macOS/Linux.
+// It (re)creates the schema from the committed migrations, seeds demo data, then runs vitest. Works on Windows/macOS/Linux.
 // SAFETY: refuses anything that is not a local database whose name contains "test".
 import postgres from "postgres";
 import { spawnSync } from "node:child_process";
@@ -23,7 +23,9 @@ try {
   }
   await a.end();
   const t = postgres(url, { max: 1, onnotice: () => {} });
-  await t.unsafe("drop schema public cascade; create schema public;"); // clean slate (test DB only)
+  // Clean slate (test DB only). "drizzle" holds the migration history and "namo" holds our DB-level integrity helpers:
+  // both must be dropped too, otherwise a second run believes the migrations are already applied to an empty database.
+  await t.unsafe("drop schema if exists drizzle cascade; drop schema if exists namo cascade; drop schema public cascade; create schema public;");
   await t.end();
 } catch (e) {
   console.error(`Could not reach Postgres at ${u.host}. Is it running? (docker compose up -d)\n${e.message}`);
@@ -37,6 +39,6 @@ const run = (cmd) => {
   const r = spawnSync(cmd, { stdio: "inherit", shell: true, env });
   if (r.status !== 0) process.exit(r.status ?? 1);
 };
-run("pnpm exec drizzle-kit push --force");
+run("pnpm db:migrate"); // real migrations, so triggers/constraints are exercised exactly as in production
 run("pnpm db:seed");
 run("pnpm exec vitest run");

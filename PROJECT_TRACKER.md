@@ -24,11 +24,11 @@
 
 ## B. Current project state
 
-- **Latest inspected commit:** `dc3a184` on `origin/main` (merge that pushed the ERP-001 fix; verified on GitHub by the owner's push output)
+- **Latest inspected commit:** `0fd03ab` on `origin/main` (owner's ERP-004 push; verified by cloning GitHub in session 3). GitHub Actions run `39455007886` on that commit: **success**, all steps incl. "Tests (unit + API integration)".
 - **Branch:** `main`
-- **Working tree (end of session 2):** ERP-004 changes are **uncommitted** (see section E for the file list). Owner's push of ERP-001 succeeded (`699fa96..dc3a184`).
+- **Working tree (end of session 4):** ERP-003 + ERP-015 changes are **uncommitted** (file list in section E). ERP-001 (`dc3a184`) and ERP-004 (`0fd03ab`) are on GitHub.
 - **Package manager:** pnpm (owner's choice). `package-lock.json` removed in the ERP-004 changes.
-- **Phase:** Foundation / master-data, now with an automated safety net (tests + CI). **No transactional accounting yet** (no vouchers, sales, purchases, reports).
+- **Phase:** Foundation / master-data, with an automated safety net (tests + CI) and committed migrations. **No transactional accounting yet** (no vouchers, sales, purchases, reports).
 
 ### Verified complete (this session, with evidence in section G)
 - Master CRUD engine + the 22 master screens' API layer starts and serves (health, list, create, validation, delete guard exercised for the two term masters only; other masters not re-tested this session).
@@ -50,13 +50,14 @@
 
 ### Blockers and risks
 - **Risk (confirmed; owner chose to defer login on 2026-10-20 — ERP-002):** No auth. **Do not expose this app on a shared network or cloud with real data until ERP-002 is done.** `companyId` comes from the query string; `userId` for audit/lock comes from the request body (`server/routes/openingBalance.ts` lines ~100, ~158). Any client can read/write any company and impersonate any user.
-- **Risk (confirmed):** `drizzle/` is in `.gitignore` and `drizzle.config.ts` outputs there; only `db:push` is documented. Schema changes are not reviewable/reversible; production upgrade path undefined.
-- **Risk (needs verification):** `GeneralLedger.companyId` is denormalized and the schema comment says "A trigger must keep it in sync". README confirms triggers are **not** in any migration, so that invariant is currently unenforced at DB level.
+- **Resolved by ERP-003 (uncommitted):** migrations are committed (`drizzle/0000_baseline.sql`, `0001_account_company_integrity.sql` + `meta/`); `drizzle/` is no longer gitignored; `pnpm db:migrate` / `db:baseline` / CI drift check added. **Owner's existing dev DB (created by `db:push`) needs the one-time `pnpm db:baseline` then `pnpm db:migrate` — not yet run by the owner.**
+- **Resolved by ERP-003 (uncommitted):** the account-hierarchy company invariant (`GeneralLedger.companyId` = its Account Group's company; parent ledger same company) is now enforced by 3 DB triggers. Before the fix the DB accepted such rows (proven by 6 failing tests); the API already rejected them ("Sub Group not found in this company"), so the master screens were never exposed.
+- **Resolved by ERP-015 (uncommitted):** the cross-company gap on the other tables (e.g. `OpeningBalance` accepted `companyId=2` pointing at a company-1 ledger) is closed for all 41 registered tables / 68 links by one registry-driven trigger; a record's company can no longer change. Still **not** DB-enforced: voucher balance (Dr = Cr) — no voucher posting exists yet (ERP-005, ERP-016).
 - **Mitigated (ERP-004, uncommitted):** `main` was non-compiling across 6 commits without anyone being alerted. Tests + CI now cover this; CI itself has not yet run on GitHub.
 - **Risk (code-read, NOT reproduced):** `server/routes/openingBalance.ts` checks "locked/closed" before its write transaction (PUT) and computes balance before setting the lock (POST /lock), without row locking, so a concurrent save and lock could interleave (ERP-012).
 - **Latent (confirmed by test):** `toCents` truncates beyond 2 decimals while `mulRound2` rounds half-up (`shared/decimal.ts`). Today `toCents` only sees 2-decimal strings (`stockRecon.ts`), so no live effect (ERP-011).
-- **Observation:** 22 master list endpoints took ~4 s total (~180 ms each) on a local seeded DB; likely per-row count queries. Not investigated (ERP-013).
-- **Minor (confirmed):** `db:push` emits Postgres NOTICE that FK name `PurchaseDocumentTermAllocation_documentTermId_PurchaseDocumentTerm_id_fk` is truncated to 63 chars.
+- **Observation:** 22 master list endpoints took ~4 s total in the AI sandbox but ~1.3 s on the owner's machine (his `pnpm test:db` output). Probably a slow sandbox, not a defect; ERP-013 downgraded to "measure only if it shows up in real use".
+- **Resolved by ERP-003 (uncommitted):** that FK now has an explicit short name (`PurchaseDocTermAlloc_documentTermId_fk`); no identifier in the migrations exceeds 63 chars (scanned).
 - **Resolved in ERP-004 changes:** single lockfile (`pnpm-lock.yaml`); README now says pnpm; `pnpm-workspace.yaml` `allowBuilds` placeholder set (`esbuild: true`) because a fresh/CI `pnpm install` failed on it.
 
 ---
@@ -78,8 +79,8 @@
 | Sales / Purchase documents | MISSING | — | — | ERP-009 |
 | Reports | MISSING | — | — | ERP-008 |
 | Auth / permissions | MISSING (deferred by owner) | — | see risks | ERP-002 |
-| Tests / CI | PARTIAL (uncommitted) | `tests/`, `vitest.config.ts`, `.github/workflows/ci.yml`, `scripts/test-db.mjs` | CI not yet run on GitHub; no tests for party/product/stock-opening/other masters | ERP-014 |
-| Migrations | MISSING | — | see risks | ERP-003 |
+| Tests / CI | PARTIAL (green on GitHub for `0fd03ab`; ERP-003 additions uncommitted) | `tests/`, `vitest.config.ts`, `.github/workflows/ci.yml`, `scripts/test-db.mjs` | CI not yet run on GitHub; no tests for party/product/stock-opening/other masters | ERP-014 |
+| Migrations + DB integrity (account hierarchy + all tenant tables) | COMPLETE (uncommitted) | `drizzle/0000-0002`, `server/db/migrate.ts`, `server/db/baseline.ts`, `tests/db.integrity.test.ts` (8), `tests/db.companyConsistency.test.ts` (15) | voucher balance not DB-enforced (no vouchers yet) | ERP-005, ERP-016 |
 
 ---
 
@@ -88,10 +89,10 @@
 | ID | Title | Pri | Status | Business objective | Dependencies | Acceptance criteria | Verification |
 |---|---|---|---|---|---|---|---|
 | ERP-001 | Restore corrupted `shared/masters.ts`; add Purchase/Sales Term definitions | P0 | **Done (pushed in `dc3a184`)** | App compiles and runs again | — | `tsc` clean, build clean, server starts, term CRUD+rules work | Section G |
-| ERP-004 | Test + CI baseline | P1 | **Done (uncommitted)** | Prevent a repeat of ERP-001; safety net for accounting work | — | Vitest; unit tests for decimal + master definitions; API integration tests (master registry/CRUD, term rules, opening balance); GitHub Actions runs build + tests on Postgres | 154 tests pass; mutation checks; fresh-copy CI replay (section G). **Still needed:** first green run on GitHub |
+| ERP-004 | Test + CI baseline | P1 | **Done (pushed `0fd03ab`; first CI run green)** | Prevent a repeat of ERP-001; safety net for accounting work | — | Vitest; unit tests for decimal + master definitions; API integration tests (master registry/CRUD, term rules, opening balance); GitHub Actions runs build + tests on Postgres | 154 tests pass; mutation checks; fresh-copy CI replay (section G). First GitHub Actions run (`39455007886`) green |
 | ERP-002 | Authentication, authorization, tenant isolation | P0 | **Deferred by owner (2026-10-20)** | Stop cross-company access and user spoofing before any real data | Decision: auth approach (see F) | Login; server derives user + allowed companies from session; every route checks company membership and role; `userId` never read from body; tests for cross-tenant denial | Authz tests |
-| ERP-003 | Commit real migrations; move invariants into DB | P1 | **Ready — next** | Reviewable, repeatable schema changes | — | `drizzle/` un-ignored; baseline migration generated; GL.companyId sync trigger (or composite FK) in a migration; fresh-DB and upgrade paths tested; fix truncated FK name | Migrate on empty DB + `db:push` parity |
-| ERP-005 | Journal Voucher posting service | P1 | Backlog | First real financial transaction | ERP-003, ERP-004 (ERP-002 deferred: service takes an explicit `actorUserId` so real auth plugs in later; until then it is dev-only) | Atomic post; Σdebit = Σcredit enforced in service **and** DB; fiscal-year open + not closed; GL active/company-scoped; numbering; reversal (never edit posted); audit fields | Concrete Dr/Cr example tests |
+| ERP-003 | Commit real migrations; move invariants into DB | P1 | **Done (uncommitted)** | Reviewable, repeatable schema changes | — | `drizzle/` un-ignored; baseline migration; GL company triggers (+ parent-ledger rule, group/sub-group move guards, pre-flight on dirty data); fresh-DB and legacy-DB upgrade paths; FK name fixed; CI drift check | See section G (fresh DB, legacy `db:push` DB, dirty DB, idempotence, drift, 162 tests) |
+| ERP-005 | Journal Voucher posting service | P1 | Backlog | First real financial transaction | ERP-014 (ERP-015 done; ERP-002 deferred: service takes an explicit `actorUserId` so real auth plugs in later; until then it is dev-only) | Atomic post; Σdebit = Σcredit enforced in service **and** DB; fiscal-year open + not closed; GL active/company-scoped; numbering; reversal (never edit posted); audit fields | Concrete Dr/Cr example tests |
 | ERP-006 | Cash/Bank Voucher | P1 | Backlog | Receipts/payments | ERP-005 | Same controls as ERP-005 | Tests |
 | ERP-007 | Fiscal-year close + period lock | P2 | Backlog | Audit freeze | ERP-005 | Close blocks posting; carry-forward creates openings (schema has roll-forward trace column) | Tests |
 | ERP-008 | Reports: Ledger, Trial Balance, P&L, Balance Sheet | P2 | Backlog | Financial visibility | ERP-005 | TB balances; BS equation holds; ties to control accounts | Tests |
@@ -99,92 +100,95 @@
 | ERP-010 | Hygiene: single lockfile, README/package manager, FK name length | P3 | Partly done (uncommitted) | Maintainability | — | Lockfile + README done; FK identifier truncation notice remains (folds into ERP-003) | Clean install |
 | ERP-011 | Align `toCents` (truncates) with `mulRound2` (rounds) | P3 | Backlog | Avoid 1-paisa drift if both are ever mixed | — | One documented rounding rule; test updated (currently characterizes truncation) | `tests/decimal.test.ts` |
 | ERP-012 | Close lock/save race in opening balance | P2 | Backlog | Locked balances must not change | ERP-004 | Check lock/closed state and write inside one transaction with a row lock; concurrent test | Concurrency test |
-| ERP-013 | Master list latency | P3 | Backlog | Snappy screens | — | Measure; replace per-row count queries if confirmed | Timing before/after |
-| ERP-014 | Extend tests: party, product, stock opening + reconciliation, sub-ledger, hierarchy/cross-company checks | P1 | Backlog | Cover the remaining existing workflows before building on them | ERP-004 | Each route has success + failure + invariant tests | CI green |
+| ERP-016 | Per-voucher balance (Dr = Cr) and posted-voucher immutability enforced in the database | P1 | Backlog | Books cannot be unbalanced or silently edited even by a buggy code path | ERP-005 design | Deferred constraint trigger on voucher lines + status guard; tests with concrete Dr/Cr examples | Red-first DB tests |
+| ERP-013 | Master list latency | P3 | Backlog (low) | Snappy screens | — | Only if slowness appears in real use on the owner's machine (his run: 22 lists in ~1.3 s) | Timing |
+| ERP-015 | DB-level company consistency for all tenant-scoped links (OpeningBalance, StockOpening, SubLedger, Party, Voucher tables…) | P1 | **Done (uncommitted)** | A bug or new code path must not be able to mix companies' books | ERP-003 | Registry-driven generic trigger (`namo.company_source`/`company_link`) covering every tenant-scoped table; completeness test fails CI if a new FK is unregistered; audit function; migration with dirty-data pre-flight | 15 tests red-then-green; mutation checks; legacy + dirty upgrade paths (section G) |
+| ERP-014 | Extend tests: party, product, stock opening + reconciliation, sub-ledger, user access, company/branch/fiscal-year masters | P1 | **Ready — next** | Cover the remaining existing workflows before building on them | ERP-004 | Each route has success + failure + invariant tests | CI green |
 
 ---
 
 ## E. Current task and next action
 
-- **Current task:** ERP-004 (tests + CI) — implemented and verified locally; **uncommitted**, and CI has **not yet run on GitHub**.
-- **Objective:** Make a repeat of ERP-001 (a broken `main` nobody noticed) impossible, and give later accounting work a regression net.
-- **Work done:** Split `server/app.ts` out of `server/index.ts` (behavior unchanged; lets tests load the app). Added Vitest, 154 tests, a safe one-command test-DB runner, the CI workflow, pnpm cleanup.
-- **Files changed (uncommitted):** `.env.example`, `.github/workflows/ci.yml` (new), `PROJECT_TRACKER.md`, `README.md`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `scripts/test-db.mjs` (new), `server/app.ts` (new), `server/index.ts`, `tests/*` (new: `helpers.ts`, `decimal`, `masters.definitions`, `api.terms`, `api.masters`, `api.openingBalance`), `vitest.config.ts` (new); `package-lock.json` deleted.
-- **Remaining for ERP-004:** owner commits + pushes; confirm the first GitHub Actions run is green (workflow pins pnpm `12`; owner to confirm `pnpm -v`); run `pnpm test:db` once on Windows (script uses `shell: true`; untested on Windows).
-- **Blocker:** none technical. Commit/push needs owner action.
-- **Single best next action:** **ERP-003** — commit real migrations and move the `GeneralLedger.companyId` sync invariant into the database, because the voucher posting engine (ERP-005) must not be built on schema that is only `db:push`ed and has an unenforced cross-company invariant. Add a test for the invariant first (it should fail today), then the migration.
+- **Current task:** ERP-015 (database-level company consistency for all tenant tables) — implemented and verified locally; **uncommitted**, stacked on ERP-003 which is also not yet on GitHub (GitHub `main` = `0fd03ab`).
+- **Objective:** A bug or a new code path (vouchers, imports, scripts) must not be able to mix two companies' books.
+- **Work done:** Registry-driven design (migration `0002_company_consistency.sql`): `namo.company_source` (where each of 41 tables gets its company; SubLedger can derive it from ledger or party), `namo.company_link` (68 links that must agree), generic trigger `namo.enforce_company()` (links must match; a record's company can never change), `namo.company_violations()` audit, dirty-data pre-flight, 41 triggers. Tests first (15, red for the right reasons), then green. Also fixed a real bug in the ERP-003 test runner (below).
+- **Files changed (uncommitted, cumulative vs GitHub `0fd03ab`):** everything from ERP-003 (session 3) **plus** `drizzle/0002_company_consistency.sql` + `drizzle/meta/*`, `tests/db.companyConsistency.test.ts` (new), `tests/db.integrity.test.ts` (one test rewritten, see F), `scripts/test-db.mjs` (reset fix), `README.md`, `PROJECT_TRACKER.md`.
+- **Remaining for ERP-015:** owner applies the cumulative patch, runs `pnpm db:baseline` (once, existing dev DB) then `pnpm db:migrate`, then `pnpm test:db` **twice**, commits, pushes, checks the Actions run.
+- **Blocker:** none technical; needs owner action.
+- **Single best next action:** **ERP-014** — tests for the existing routes that have none (party, product, stock opening/reconciliation, sub-ledger, user access, company/branch/fiscal-year masters). Reason: ERP-005 (Journal Voucher posting) should be built on verified workflows, and the DB-level safety net (ERP-003/015) now makes such tests meaningful. Then ERP-005 + ERP-016 (design together: DB-enforced Dr = Cr and posted-voucher immutability).
 
 ---
 
 ## F. Decisions and assumptions
 
 **Confirmed (from code):**
-- One shared master definition drives both UI and server validation (`shared/masters.ts`). Corrupting it breaks everything (ERP-001); `tests/masters.definitions.test.ts` now guards its structure.
-- Term semantics follow `server/db/schema/billing.ts`: purchase and sales are separate schemas; header vs line via `isProductwise`; landed-cost distribution is purchase header terms only; SINGLE_TERM base must have a lower sequence.
-- Money is `numeric`; arithmetic via BigInt in `shared/decimal.ts`.
-- Display columns like `userName`/`branchName` are server-joined (`refs` in `server/masters.ts`); tests accept `<lookup>Id` -> `<lookup>Name`.
+- One shared master definition drives UI and server validation (`shared/masters.ts`); `tests/masters.definitions.test.ts` guards it.
+- Term semantics follow `server/db/schema/billing.ts`. Money is `numeric`; arithmetic via BigInt in `shared/decimal.ts`.
+- Server-joined display columns follow the `<lookup>Id` -> `<lookup>Name` convention.
+- `SubLedger` may belong to a ledger and/or a party (schema comment); the master screen always sets the ledger.
 
 **Decisions made:**
-- (S1) Restore `shared/masters.ts` from git history; term definitions come from one factory so purchase/sales stay identical.
-- (S2) **Owner: skip login for now** (2026-10-20). ERP-002 deferred, not cancelled; the risk stays open in section B.
-- (S2) **pnpm is the package manager.** Single lockfile `pnpm-lock.yaml`.
-- (S2) Integration tests may only run against a **local database whose name contains "test"** (`TEST_DATABASE_URL`/`DATABASE_URL`; override flags exist but are for experts). In CI an unsafe/missing DB **fails** the run instead of skipping. `scripts/test-db.mjs` pins `DATABASE_URL_DIRECT` too, because `drizzle.config.ts` prefers it and a cloud value in `.env` could otherwise redirect `db:push`.
-- (S2) `pnpm-workspace.yaml`: `allowBuilds: esbuild: true` (was an unresolved placeholder that made a clean `pnpm install` exit non-zero).
+- (S1) Restore `shared/masters.ts` from history; one factory for both term masters.
+- (S2) **Owner: skip login for now**; ERP-002 deferred (risk open). **pnpm** is the package manager. Integration tests only run against a local DB whose name contains "test"; in CI an unsafe/missing DB fails the run; `scripts/test-db.mjs` pins `DATABASE_URL_DIRECT`. `allowBuilds: esbuild: true`.
+- (S3) Schema changes go through committed migrations (`pnpm db:generate` -> review -> commit); `db:push` is for throw-away experiments only; CI fails on schema/migration drift. Existing `db:push` databases use one-time `pnpm db:baseline`. Check violations (23514) surface as HTTP 409.
+- (S4) **Company consistency is registry-driven.** One generic trigger instead of ~70 hand-written ones; every tenant-scoped table is registered; a **completeness test reads the catalog and fails CI if a new FK between tenant tables is not registered** (or a new table is neither registered nor listed as global: only `User` and `AuditLog`). Consequence: adding a table/FK means adding a registry row in a new migration.
+- (S4) **A record's company can never change** (direct `companyId`; for child tables, the owner's company). **Behavior change vs ERP-003:** an *empty* Sub Group/Account Group can no longer be moved to another company; the ERP-003 control test that allowed it was rewritten to assert the refusal. Rationale: moving records between companies is a copy, never an UPDATE.
+- (S4) A registered row whose company cannot be determined (e.g. a SubLedger with neither ledger nor party) is **rejected**; the migration pre-flight reports existing such rows.
+- (S4) Implementation notes: trigger fires only when a company-relevant column is written (`UPDATE OF ...`); named `namo_company_consistency` so the more specific ERP-003 triggers (uppercase names) run first and their messages win; no row locks (company is immutable, so a parent's company cannot change underneath a check); functions are VOLATILE so they see rows written earlier in the same transaction. Cost: a few indexed lookups per write to registered tables.
 
 **Assumptions awaiting owner confirmation:**
-- Auth approach when ERP-002 resumes (sessions vs Supabase Auth); `User` has no credential fields today.
-- Deployment target (README suggests Supabase/Neon).
-- Nepal-specific rules (VAT, BS fiscal calendar, PAN) are unspecified; confirm before tax work.
-- "Master Account" modeled as an enum on Account Group, not a table — confirm intended.
-- Owner's pnpm major version (CI pins `12`, matching the version used to generate/verify the lockfile here).
+- Auth approach when ERP-002 resumes; deployment target; Nepal-specific tax/calendar rules (unspecified, not assumed); "Master Account" as an enum on Account Group.
+- Owner's dev DB: baseline preserves it; recreating is the alternative.
+- That a SubLedger with neither ledger nor party is not a real use case (the migration refuses existing ones rather than guessing).
 
 ---
 
 ## G. Verification record
 
-All run 2026-10-20 in the AI sandbox (Linux, Node 22, pnpm 12.14.0) against throwaway local PostgreSQL 16 databases — never the owner's database or production.
+Sandbox: Linux, Node 22, pnpm 12.14.0, throwaway PostgreSQL 16 databases (never the owner's DB). Owner independently ran `pnpm test:db` on Windows for ERP-004: 154/154. GitHub Actions run `39455007886` on `0fd03ab`: success (install, schema+seed, build, tests).
 
-**Session 1 (ERP-001):** `tsc` failed on untouched `main` @ `699fa96`; passes after fix. `build`, `db:push`, `db:seed` pass. 16/16 ad-hoc API checks on term masters. (Superseded by the committed tests below.)
-
-**Session 2 (ERP-004):**
+**Session 4 (ERP-015 + runner fix):**
 | Check | Result |
 |---|---|
-| `pnpm exec tsc --noEmit` after `server/app.ts` split | PASS |
-| Clean `pnpm install --frozen-lockfile` (twice) | exit 0 |
-| `pnpm exec vitest run` on seeded `namoerp_test` | **154/154 PASS** (decimal 8, definitions 112, terms 9, masters 8, opening balance 17) |
-| Mutation checks (temporarily broke the app, tests must fail): lock ignores imbalance; PUT ignores closed FY; term "base must run earlier" removed | **3/3 caught** (3, 1, 1 tests failed); code restored via `git checkout`; suite self-heals after a failed run |
-| Fresh-copy CI replay, exact workflow steps with `CI=true`, no `.env`, empty DB: install `--frozen-lockfile`, `drizzle-kit push --force` (non-interactive), `db:seed`, `pnpm build`, `pnpm test` | all steps exit 0; 154/154 |
-| `pnpm test:db` end to end | PASS (154/154) |
-| Safety: runner refuses non-"test" DB name; refuses remote host; vitest skips integration tests (units still run) on a non-test DB; with `CI=true` the same situation FAILS the run | all behaved as designed |
-| `pnpm build` (tsc + vite) in CI replay | PASS (same bundle hash as the owner's build: `index-D_Khb6XO.js`) |
+| Exposure map from the catalog | 21 tables with `companyId`, 22 direct links, ~50 more on child tables; classified 43 tables: 41 registered (tenant or derived), 2 global (`User`, `AuditLog`) |
+| Probe (rolled back) before the fix: company-2 `OpeningBalance` on a company-1 ledger | accepted by the DB |
+| New `tests/db.companyConsistency.test.ts` against the pre-fix DB | 15/15 red. Reasons: 10 "bad data accepted", 5 "registry/trigger missing". Two fixture bugs (wrong-reason failures: duplicate names, unique-key collision) found by reading the messages and fixed before proceeding |
+| After migration 0002: full suite | **177/177 PASS** (7 files); seed runs with all triggers active |
+| Mutation checks on the live DB: drop one trigger; delete one registry rule; neutralize the trigger function | all detected (3, then 5 cumulative incl. the completeness test and the table's behavior test, then 12 failures) |
+| Legacy `db:push`-built seeded DB: `db:baseline` -> `db:migrate` | 44 triggers (3 + 41), 3 migrations recorded, audit 0 violations, seed idempotent afterwards |
+| Dirty DB (planted cross-company `OpeningBalance`, and separately an owner-less `SubLedger`) | migration **refused** and named the rows (`OpeningBalance#8.branchId/.fiscalYearId/.generalLedgerId`; `SubLedger#3.(owner)`); 0 triggers, no `namo` schema, only baseline recorded (0001 rolled back too) |
+| Fresh-repo CI replay, `CI=true`: install --frozen-lockfile, drift check, migrate, seed, build, test | all exit 0; **177/177** |
+| **Bug found and fixed:** `pnpm test:db` (ERP-003 version) reset only `public`; the migration history in schema `drizzle` survived, so every run after the first failed in seed ("relation User does not exist"). Reproduced, fixed (now also drops `drizzle` and `namo`), then run twice in a row | 162/162 both runs (before ERP-015 tests added); 177/177 afterwards |
 
-**Not verified / not run:** the workflow on real GitHub Actions; `pnpm test:db` on Windows; any browser/UI check (owner's check of the two term screens was requested, result not yet reported); lint (none configured); routes without tests — party, product, stock opening, stock reconciliation, sub-ledger, user access, company/branch/fiscal-year masters beyond "list responds 200"; concurrency; `db:push` against an existing populated DB.
+**Not verified / not run:** ERP-003/ERP-015 steps on real GitHub Actions; the baseline path on the owner's actual dev DB; behavior under truly concurrent transactions (design reasoned, not stress-tested); trigger overhead on large data (not measured); migrations on Supabase/Neon; rollback/down migrations (none; recovery = restore from backup, and no backup/restore procedure exists yet); lint; browser check of the two term screens (still owed).
 
-**Manual verification still required:** Purchase Term / Sales Term screens in the browser (conditional fields, Seq sorting, SINGLE TERM base error).
+**Manual verification still required:** Purchase Term / Sales Term screens in the browser; after applying the patch, `pnpm test:db` twice in a row on Windows.
 
 ---
 
 ## H. Change log
 
 ### 2026-10-20 — Session 1 — ERP-001 + initial audit
-- Found `main` non-compiling: `6c567d8` wiped `shared/masters.ts` (490 -> 0 lines); "restore" commits left a placeholder.
-- Restored from history; added `termMaster()` (Purchase/Sales Term); created this tracker.
-- Owner merged and pushed as `dc3a184` (local history had diverged from GitHub; resolved by keeping the local good file; `tsc` clean, 559 lines).
+- Found `main` non-compiling (`6c567d8` wiped `shared/masters.ts`). Restored; added `termMaster()`; created this tracker. Pushed as `dc3a184`.
 
 ### 2026-10-20 — Session 2 — ERP-004
-- Owner: skip login for now (ERP-002 deferred); use pnpm.
-- Added Vitest + 154 tests, CI workflow, `pnpm test:db` runner with DB-safety guards, `server/app.ts` split, pnpm cleanup (lockfile, README, `allowBuilds`).
-- New findings logged: ERP-011, ERP-012, ERP-013, ERP-014.
-- Verification: section G. **Commit hash: none yet (uncommitted).**
+- Vitest + 154 tests, CI workflow, `pnpm test:db`, `server/app.ts` split, pnpm cleanup. Pushed as `0fd03ab`; first CI run green.
+
+### 2026-10-20/21 — Session 3 — ERP-003
+- Committed migrations (baseline + account-hierarchy triggers), `db:migrate`/`db:baseline`, FK rename, 23514 -> 409, CI drift check. **Not yet on GitHub.**
+
+### 2026-10-21 — Session 4 — ERP-015
+- Registry-driven company consistency for all tenant tables (migration 0002, 15 tests). Fixed the `test:db` second-run bug. Rewrote one ERP-003 control test to match the stricter "company never changes" rule.
+- Verification: section G. **Commit hash: none (uncommitted).**
 
 ---
 
-## HANDOFF (end of session 2)
+## HANDOFF (end of session 4)
 
-**Accomplished:** ERP-004 implemented and verified locally (tests, mutation checks, CI replay, safety guards). Tracker updated.
+**Accomplished:** ERP-015 complete and verified locally; a runner bug in my earlier work found, reproduced and fixed.
 
-**Not accomplished:** nothing committed/pushed by me; CI not yet seen green on GitHub; no browser check; ERP-002 intentionally deferred; no new feature modules.
+**Not accomplished:** nothing of ERP-003/ERP-015 is on GitHub; owner's dev DB not yet baselined; no browser check; ERP-002 deferred; no new feature modules.
 
-**Repo state:** changes are in the sandbox working tree and in the exported zip/patch; **not on GitHub**. Owner applies them, runs `pnpm install`, `pnpm test:db`, commits, pushes, and watches the Actions tab.
+**Repo state:** one **cumulative** patch/zip vs GitHub `0fd03ab` contains ERP-003 + ERP-015 (it supersedes the session-3 files; apply only the newest one).
 
-**Next task:** ERP-003 (migrations + DB-level company-consistency invariant), then ERP-014 (more tests), then ERP-005 (Journal Voucher posting). Reason: financial posting needs reviewable migrations and DB-enforced integrity first.
+**Next task:** ERP-014 (tests for existing untested routes), then ERP-005 + ERP-016 (Journal Voucher posting with DB-enforced balance).
