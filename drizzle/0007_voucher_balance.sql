@@ -53,7 +53,7 @@ BEGIN
   FOREACH v_id IN ARRAY v_ids LOOP
     EXECUTE format('SELECT "isPosted" FROM public.%I WHERE id = $1', v_header_table)
       INTO v_posted USING v_id;
-    IF NOT FOUND OR NOT v_posted THEN CONTINUE; END IF;
+    IF v_posted IS DISTINCT FROM TRUE THEN CONTINUE; END IF;
 
     EXECUTE format(
       'SELECT COUNT(*), COALESCE(SUM(debit), 0), COALESCE(SUM(credit), 0) FROM public.%I WHERE %I = $1',
