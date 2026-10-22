@@ -6,43 +6,66 @@
 CREATE OR REPLACE FUNCTION public.enforce_posted_voucher_balance() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE
+  v_ids integer[];
   v_id integer;
   v_posted boolean;
   v_debits numeric(38, 6);
   v_credits numeric(38, 6);
   v_count integer;
+  v_header_table text;
+  v_line_table text;
+  v_fk text;
 BEGIN
   IF TG_TABLE_NAME = 'JournalVoucher' THEN
-    v_id := COALESCE(NEW.id, OLD.id);
+    v_ids := ARRAY[COALESCE(NEW.id, OLD.id)];
+    v_header_table := 'JournalVoucher';
+    v_line_table := 'JournalVoucherLine';
+    v_fk := 'journalVoucherId';
   ELSIF TG_TABLE_NAME = 'CashBankVoucher' THEN
-    v_id := COALESCE(NEW.id, OLD.id);
+    v_ids := ARRAY[COALESCE(NEW.id, OLD.id)];
+    v_header_table := 'CashBankVoucher';
+    v_line_table := 'CashBankVoucherLine';
+    v_fk := 'cashBankVoucherId';
   ELSIF TG_TABLE_NAME = 'JournalVoucherLine' THEN
-    v_id := CASE WHEN TG_OP = 'DELETE' THEN OLD."journalVoucherId" ELSE NEW."journalVoucherId" END;
+    v_header_table := 'JournalVoucher';
+    v_line_table := 'JournalVoucherLine';
+    v_fk := 'journalVoucherId';
+    IF TG_OP = 'DELETE' THEN
+      v_ids := ARRAY[OLD."journalVoucherId"];
+    ELSIF TG_OP = 'UPDATE' THEN
+      v_ids := ARRAY[OLD."journalVoucherId", NEW."journalVoucherId"];
+    ELSE
+      v_ids := ARRAY[NEW."journalVoucherId"];
+    END IF;
   ELSE
-    v_id := CASE WHEN TG_OP = 'DELETE' THEN OLD."cashBankVoucherId" ELSE NEW."cashBankVoucherId" END;
+    v_header_table := 'CashBankVoucher';
+    v_line_table := 'CashBankVoucherLine';
+    v_fk := 'cashBankVoucherId';
+    IF TG_OP = 'DELETE' THEN
+      v_ids := ARRAY[OLD."cashBankVoucherId"];
+    ELSIF TG_OP = 'UPDATE' THEN
+      v_ids := ARRAY[OLD."cashBankVoucherId", NEW."cashBankVoucherId"];
+    ELSE
+      v_ids := ARRAY[NEW."cashBankVoucherId"];
+    END IF;
   END IF;
 
-  IF TG_TABLE_NAME IN ('JournalVoucher', 'JournalVoucherLine') THEN
-    SELECT "isPosted" INTO v_posted FROM public."JournalVoucher" WHERE id = v_id;
-    IF NOT FOUND THEN RETURN NULL; END IF;
-    IF NOT v_posted THEN RETURN NULL; END IF;
-    SELECT COUNT(*), COALESCE(SUM(debit), 0), COALESCE(SUM(credit), 0)
-      INTO v_count, v_debits, v_credits
-      FROM public."JournalVoucherLine" WHERE "journalVoucherId" = v_id;
-  ELSE
-    SELECT "isPosted" INTO v_posted FROM public."CashBankVoucher" WHERE id = v_id;
-    IF NOT FOUND THEN RETURN NULL; END IF;
-    IF NOT v_posted THEN RETURN NULL; END IF;
-    SELECT COUNT(*), COALESCE(SUM(debit), 0), COALESCE(SUM(credit), 0)
-      INTO v_count, v_debits, v_credits
-      FROM public."CashBankVoucherLine" WHERE "cashBankVoucherId" = v_id;
-  END IF;
+  FOREACH v_id IN ARRAY v_ids LOOP
+    EXECUTE format('SELECT "isPosted" FROM public.%I WHERE id = $1', v_header_table)
+      INTO v_posted USING v_id;
+    IF NOT FOUND OR NOT v_posted THEN CONTINUE; END IF;
 
-  IF v_count < 2 OR v_debits <= 0 OR v_debits <> v_credits THEN
-    RAISE EXCEPTION 'Posted voucher % must have at least two lines and equal positive debit and credit totals (debit %, credit %, lines %)',
-      v_id, v_debits, v_credits, v_count
-      USING ERRCODE = '23514', CONSTRAINT = 'posted_voucher_balanced';
-  END IF;
+    EXECUTE format(
+      'SELECT COUNT(*), COALESCE(SUM(debit), 0), COALESCE(SUM(credit), 0) FROM public.%I WHERE %I = $1',
+      v_line_table, v_fk)
+      INTO v_count, v_debits, v_credits USING v_id;
+
+    IF v_count < 2 OR v_debits <= 0 OR v_debits <> v_credits THEN
+      RAISE EXCEPTION 'Posted voucher % must have at least two lines and equal positive debit and credit totals (debit %, credit %, lines %)',
+        v_id, v_debits, v_credits, v_count
+        USING ERRCODE = '23514', CONSTRAINT = 'posted_voucher_balanced';
+    END IF;
+  END LOOP;
   RETURN NULL;
 END;
 $$;
