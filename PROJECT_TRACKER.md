@@ -18,22 +18,22 @@
 | Validation | zod, driven by `shared/masters.ts` (single source for UI + server) |
 | Deployment | None found. `npm run build && npm start` serves `dist/` from Express. `docker-compose.yml` = local Postgres only |
 | Release / milestone | None established (package version 0.1.0) |
-| Last actual audit | 2026-10-22 (session 8: re-pulled GitHub `main` = `c209436`, no code change since `69b5559`; ERP-018 implemented and verified locally; CI-equivalent run: drift check, build, `pnpm test:db` twice) |
+| Last actual audit | 2026-10-22 (session 9: re-pulled GitHub `main` = `1079c7d` (ERP-018 pushed by the owner); drift check, build, `pnpm test:db` twice: 421/421; no code changed in this session) |
 
 ---
 
 ## B. Current project state
 
-- **Latest inspected commit:** `c209436` (`projecttrackerupdated`: tracker only) on top of `69b5559`. Details of `69b5559`: (`purchase-order-challan-services`, 2026-10-22 13:31 +0545) on `origin/main`, fast-forwarded from `dbf5b4b` in session 7. It adds Purchase Order + Purchase Challan tables (migration 0006, 12 triggers), a **purchase service layer** (`server/services/purchase/`, 1,342 lines: order -> challan -> bill, term pricing, landed cost, posting to a journal voucher, reversal) and 73 tests. `dbf5b4b` and earlier: see change log. GitHub Actions status of any commit after `0fd03ab` is **still unread** (API rate-limited from the sandbox): **owner to check the Actions tab**.
+- **Latest inspected commit:** `1079c7d` (`erp-018 dberrormapping`, 2026-10-22 16:03 +0545: the ERP-018 fix, its tests and the tracker) on top of `c209436` (tracker only) on top of `69b5559`. Details of `69b5559`: (`purchase-order-challan-services`, 2026-10-22 13:31 +0545) on `origin/main`, fast-forwarded from `dbf5b4b` in session 7. It adds Purchase Order + Purchase Challan tables (migration 0006, 12 triggers), a **purchase service layer** (`server/services/purchase/`, 1,342 lines: order -> challan -> bill, term pricing, landed cost, posting to a journal voucher, reversal) and 73 tests. `dbf5b4b` and earlier: see change log. GitHub Actions status of any commit after `0fd03ab` is **still unread** (API rate-limited from the sandbox): **owner to check the Actions tab** (now includes `c209436` and `1079c7d`).
 - **Branch:** `main`
-- **Working tree (session 8):** `c209436` plus an **uncommitted ERP-018 change** (3 files modified, 1 new test file; see section E). `c209436` is the owner's commit of my session-7 tracker, byte-identical, so nothing was lost or merged. Sessions 6 and 7 changed no code; session 8 is the first to change application code since `69b5559`.
+- **Working tree (session 9):** clean clone at `1079c7d` (= `origin/main`); the only local change is this tracker update. Session 9 changed **no application code**; the last code change is the owner's ERP-018 commit `1079c7d`.
 - **Package manager:** pnpm (owner's choice). `package-lock.json` removed in the ERP-004 changes.
 - **Phase:** Foundation / master-data, with an automated safety net (tests + CI) and committed migrations. Purchase documents (order, challan, bill) now exist as tables, DB triggers **and a tested service layer that can post and reverse a balanced journal voucher** (service tests only: **no route, no screen, no auth**). Everything else transactional is still missing: generic voucher posting, sales, reports.
 
 ### Verified complete (session 6 evidence in section G; earlier items from sessions 1-5)
 - Master CRUD engine + the 22 master screens' API layer starts and serves (health, list, create, validation, delete guard exercised for the two term masters only; other masters not re-tested this session).
 - Purchase Term / Sales Term masters (after ERP-001 fix); both screens confirmed in the browser by the owner (2026-10-22).
-- (Session 8) ERP-018 fixed in the working tree: database constraint errors now answer a clear 409 and nothing else leaks SQL; **421/421 tests pass twice in a row** (18 files). Evidence in section G. **Not yet committed.**
+- (Session 8; committed as `1079c7d`; **re-verified on the pushed commit in session 9**) ERP-018: database constraint errors answer a clear 409 and nothing else leaks SQL; **421/421 tests pass twice in a row** (18 files; session 9 re-ran drift check, build and the suite on `1079c7d`). Evidence in section G.
 - (Session 7) `69b5559`: migrations 0000-0006 apply on an empty DB, seed runs, `drizzle-kit generate` reports no drift, `pnpm build` succeeds, 411/411 tests pass, twice in a row (17 files).
 - (Session 7) Purchase service **as exercised by its own tests**: draft pricing, landed cost, order -> challan -> bill quantity control, posting with Dr = Cr, immutability after posting, reversal, additional bills. 32 service + 15 calculation + 26 order/challan DB + 21 bill DB tests pass. Not mutation-checked (see G).
 - (Session 5) API tests now cover Product (31), Stock Opening + reconciliation (44), Sub Ledger (11), Users + User Access (14), Company / Branch / Fiscal Year (26); evidence in section G.
@@ -61,7 +61,7 @@
 - **Mitigated (ERP-004):** `main` was non-compiling across 6 commits without anyone being alerted. Tests + CI now cover this (first CI run, on `0fd03ab`, green).
 - **Risk (code-read, NOT reproduced):** `server/routes/openingBalance.ts` checks "locked/closed" before its write transaction (PUT) and computes balance before setting the lock (POST /lock), without row locking, so a concurrent save and lock could interleave (ERP-012).
 - **Latent (confirmed by test):** `toCents` truncates beyond 2 decimals while `mulRound2` rounds half-up (`shared/decimal.ts`). Today `toCents` only sees 2-decimal strings (`stockRecon.ts`), so no live effect (ERP-011).
-- **Resolved in the working tree, session 8 (ERP-018; uncommitted until the owner commits):** database errors used to answer HTTP 500 with the SQL text and parameters because the handler read `err.code`, while drizzle-orm 0.44.7 puts the Postgres code on `err.cause.code`. Now `pgError()` (`server/routes/_util.ts`) finds the real `PostgresError` through `.cause` and `errorHandler` (`server/app.ts`) maps 23505 / 23503 / 23514 to 409 using the Postgres code and its clean message; every other error answers a generic `{message: "Server error"}` 500 (full error only in the server log). 10 new tests (`tests/api.dbErrors.test.ts`), the old `it.fails` became a plain test; 5 mutation checks caught. **Behaviour changes to know about:** (a) unknown 500s no longer carry the real message (the UI just shows `data.message`, so it will say "Server error"); (b) a foreign-key failure on a non-DELETE request now says "A linked record does not exist or can no longer be used." instead of the misleading "Cannot delete"; (c) an object with a `code` of 23505 that is not a `PostgresError` is no longer treated as a duplicate (the old handler did).
+- **Resolved by ERP-018 (session 8; committed `1079c7d`):** database errors used to answer HTTP 500 with the SQL text and parameters because the handler read `err.code`, while drizzle-orm 0.44.7 puts the Postgres code on `err.cause.code`. Now `pgError()` (`server/routes/_util.ts`) finds the real `PostgresError` through `.cause` and `errorHandler` (`server/app.ts`) maps 23505 / 23503 / 23514 to 409 using the Postgres code and its clean message; every other error answers a generic `{message: "Server error"}` 500 (full error only in the server log). 10 new tests (`tests/api.dbErrors.test.ts`), the old `it.fails` became a plain test; 5 mutation checks caught. **Behaviour changes to know about:** (a) unknown 500s no longer carry the real message (the UI just shows `data.message`, so it will say "Server error"); (b) a foreign-key failure on a non-DELETE request now says "A linked record does not exist or can no longer be used." instead of the misleading "Cannot delete"; (c) an object with a `code` of 23505 that is not a `PostgresError` is no longer treated as a duplicate (the old handler did).
 - **Defect (reproduced session 5, STILL PRESENT in `dbf5b4b`: `server/app.ts` line 17 is a bare `express.json()` — ERP-017; session 8 note: oversize and malformed-JSON body errors still answer 500, now with the generic message instead of the parser's text):** `PUT /api/stock-opening` has a 5000-row limit that can never trigger: `express.json()` keeps its 100 KB default (about 1,300 minimal rows; fewer with batch/expiry) and an oversized body is answered 500 (same handler gap). Saving a few thousand stock lines in one go fails with a server error.
 - **Observation:** 22 master list endpoints took ~4 s total in the AI sandbox but ~1.3 s on the owner's machine (his `pnpm test:db` output). Probably a slow sandbox, not a defect; ERP-013 downgraded to "measure only if it shows up in real use".
 - **Resolved by ERP-003 (committed `7547005`):** that FK now has an explicit short name (`PurchaseDocTermAlloc_documentTermId_fk`); no identifier in the migrations exceeds 63 chars (scanned).
@@ -92,7 +92,7 @@
 | Sales documents | MISSING | — | — | ERP-009 |
 | Reports | MISSING | — | — | ERP-008 |
 | Auth / permissions | MISSING (deferred by owner) | — | see risks | ERP-002 |
-| Tests / CI | GOOD for the API + DB layers: **421 tests in 18 files, pass twice in a row (session 8)**; GitHub green for `0fd03ab`, later commits not checked by me | `tests/`, `vitest.config.ts`, `.github/workflows/ci.yml`, `scripts/test-db.mjs` | no UI tests; 1 known-defect test uses `it.fails` (ERP-017); General Ledger / Location custom rules untested (ERP-019) | owner: check Actions; ERP-017/019 |
+| Tests / CI | GOOD for the API + DB layers: **421 tests in 18 files, pass twice in a row (session 8; re-run on `1079c7d` in session 9)**; GitHub green for `0fd03ab`, later commits not checked by me | `tests/`, `vitest.config.ts`, `.github/workflows/ci.yml`, `scripts/test-db.mjs` | no UI tests; 1 known-defect test uses `it.fails` (ERP-017); General Ledger / Location custom rules untested (ERP-019) | owner: check Actions; ERP-017/019 |
 | Migrations + DB integrity (account hierarchy + all tenant tables + purchase bill) | COMPLETE for current scope (0000-0002 in `7547005`; 0003-0005 in `dbf5b4b`; 0006 in `69b5559`) | `drizzle/0000-0006`, `server/db/migrate.ts`, `server/db/baseline.ts`, `tests/db.integrity.test.ts` (8), `tests/db.companyConsistency.test.ts` (15), `tests/db.purchaseBill.test.ts` (21), `tests/db.purchaseOrderChallan.test.ts` (26) | voucher balance not DB-enforced (no vouchers yet) | ERP-005, ERP-016 |
 
 ---
@@ -117,28 +117,24 @@
 | ERP-013 | Master list latency | P3 | Backlog (low) | Snappy screens | — | Only if slowness appears in real use on the owner's machine (his run: 22 lists in ~1.3 s) | Timing |
 | ERP-015 | DB-level company consistency for all tenant-scoped links (OpeningBalance, StockOpening, SubLedger, Party, Voucher tables…) | P1 | **Done (committed `7547005`)** | A bug or new code path must not be able to mix companies' books | ERP-003 | Registry-driven generic trigger (`namo.company_source`/`company_link`) covering every tenant-scoped table; completeness test fails CI if a new FK is unregistered; audit function; migration with dirty-data pre-flight | 15 tests red-then-green; mutation checks; legacy + dirty upgrade paths (section G) |
 | ERP-014 | Extend tests: party, product, stock opening + reconciliation, sub-ledger, user access, company/branch/fiscal-year masters | P1 | **Done (party `a2e6a31`; the other five files `60a1cd0`, merged to `main` in `dbf5b4b`)** | Cover the remaining existing workflows before building on them | ERP-004 | Each route has success + failure + invariant tests | 317/317 in session 5; **re-verified in session 6 on the merged `main`: 338/338 twice** (317 + 21 purchase-bill DB tests). Mutation checks on every file (session 5). Remaining owner item: check the GitHub Actions run |
-| ERP-018 | Map database errors correctly: read the Postgres error from `err.cause`; never return SQL text to clients | P1 | **Done in the working tree (session 8); owner to commit and check CI** | The DB safety net must answer 409, and clients must never see SQL | — | `pgError()` finds the PostgresError through `.cause`; 23505 / 23503 / 23514 -> 409 with safe messages; unknown errors -> generic 500, details only in the log; the `it.fails` test became a plain `it`; real-error tests for each code | 421/421 twice; 10 new tests red first (9 failed for the right reasons), then green; 5 mutation checks caught (section G) |
+| ERP-018 | Map database errors correctly: read the Postgres error from `err.cause`; never return SQL text to clients | P1 | **Done (committed `1079c7d`); CI status unread: owner to check** | The DB safety net must answer 409, and clients must never see SQL | — | `pgError()` finds the PostgresError through `.cause`; 23505 / 23503 / 23514 -> 409 with safe messages; unknown errors -> generic 500, details only in the log; the `it.fails` test became a plain `it`; real-error tests for each code | 421/421 twice; 10 new tests red first (9 failed for the right reasons), then green; 5 mutation checks caught (section G) |
 | ERP-017 | Stock opening: a save of more than ~1,300 rows answers 500; the 5000-row rule is unreachable | P2 | **Backlog (reproduced)** | Large catalogues must save, or be refused with a clear message | ERP-018 (same error handler) | Raise the JSON body limit for that route (or save in pages); also answer malformed JSON 400 (the generic handler now answers any body-parser error as 500 "Server error"); `entity.too.large` answered 413 with a message; the 5000-row rule reachable and tested; the `it.fails` test in `tests/api.stockOpening.test.ts` becomes a plain `it` | Same signal |
 | ERP-019 | Tests for the remaining custom master rules: General Ledger (parent hierarchy and cycles, party-linked ledgers, "Requires Sub Ledger" toggle), Location hierarchy, Account Group / Sub Group, and the simple masters (Area, Sub Area, Agent, Unit, Tax Rate, Stock Category, Product Group) | P2 | Backlog | Finish covering every existing master before building on them | ERP-004 | Success + failure + invariant tests per master | CI green |
 
 | ERP-020 | Purchase documents: API routes + screens (order, challan, bill), permissions, and the stock/inventory accounting decision | P2 | Backlog (service layer **done** in `69b5559`) | Make the existing service usable | ERP-018, ERP-016, ERP-002 (or an explicit dev-only actor), owner's inventory-method answer (section B) | Routes call `server/services/purchase` only (no duplicated logic); server-side validation and company scoping; errors map to 4xx; screens for order, challan, bill with keyboard entry; route tests incl. cross-company denial and double-post; stock ledger / inventory posting per the owner's decision | Route tests + manual UI check |
 | ERP-022 | Harden the purchase layer: mutation-check the 73 new tests; add concurrent tests (two posts of one bill, two numberings, billing the same challan quantity twice) | P2 | Backlog | Prove the service holds under real use | — | Each business rule broken on purpose makes a test fail; concurrent tests pass; any race found is fixed | Mutation + concurrency runs |
-| ERP-023 | Error-handling follow-ups from ERP-018: make `translate()` in `server/services/purchase/common.ts` use `pgError()` (it has its own copy of the `.cause` logic); decide answers for other client-fixable SQLSTATEs now generic 500 (23502 not-null, 22001 too long, 22003 out of range, 22P02 bad text); `/api/health` still returns the raw error message | P3 | Backlog | One consistent, safe error contract | ERP-018 committed | Single helper; chosen codes mapped to 400/409 with tests; health returns no internals | Tests |
+| ERP-023 | Error-handling follow-ups from ERP-018: make `translate()` in `server/services/purchase/common.ts` use `pgError()` (it has its own copy of the `.cause` logic); decide answers for other client-fixable SQLSTATEs now generic 500 (23502 not-null, 22001 too long, 22003 out of range, 22P02 bad text); `/api/health` still returns the raw error message | P3 | Backlog | One consistent, safe error contract | ERP-018 committed (**satisfied: `1079c7d`**) | Single helper; chosen codes mapped to 400/409 with tests; health returns no internals | Tests |
 | ERP-021 | Housekeeping: delete merged branch `claude/purchase-bill-schema`; decide whether tracker/PR descriptions should record the purchase-bill design rules (currently only in schema comments and migration SQL) | P3 | Backlog | Tidy repo | — | Branch removed by the owner; design rules mirrored in section F | — |
 
 ---
 
 ## E. Current task and next action
 
-- **Current task:** ERP-018 — **implemented and verified locally; uncommitted** (I have no GitHub write access).
-- **Objective:** make a rule refused by the database reach the client as a clear 409, and stop SQL text leaking in 500 answers.
-- **Existing behaviour (session 5, still true at `c209436`):** `server/app.ts` read `err.code`; drizzle puts it on `err.cause.code`; so 23505 / 23503 / 23514 all became 500 with SQL and parameters.
-- **Implementation:** `pgError()` in `server/routes/_util.ts`; `errorHandler` exported from `server/app.ts` (so it can be tested) and rewritten; unknown errors answer `{message: "Server error"}`.
-- **Files changed (uncommitted):** `server/app.ts`, `server/routes/_util.ts`, `tests/api.company.test.ts` (`it.fails` -> `it`), `tests/api.dbErrors.test.ts` (new, 10 tests), `PROJECT_TRACKER.md`. Delivered as `ERP-018.patch` (`git apply`).
-- **Latest verification:** `tsc` clean; drift check clean; build exit 0; `pnpm test:db` twice: **18 files, 421/421** each; 5 mutation checks each caught (section G).
-- **Remaining for ERP-018:** owner applies the patch, runs `pnpm test:db` (expect 421), commits, checks CI. Follow-ups are ERP-023 (P3) and ERP-017.
-- **Owner actions still open:** (1) apply and commit the patch; (2) check GitHub Actions for the recent commits (`7547005` ... `c209436`); (3) run `pnpm db:migrate` on the dev DB (0003-0006); (4) answer the inventory-method question (section B).
-- **Blocker:** none technical.
+- **Current task:** none in progress. Session 9 was a reconciliation: the owner pushed ERP-018 as `1079c7d`, and this tracker now says so. No application code changed.
+- **What session 9 established:** `1079c7d` passes 421/421 on a fresh run (twice), `drizzle-kit generate` reports no drift, `pnpm build` exits 0, and only one `it.fails` remains (ERP-017). ERP-018 is closed; its follow-ups are ERP-023 (P3) and the body-error part of ERP-017.
+- **Files changed this session:** `PROJECT_TRACKER.md` only (delivered as a patch; not committed).
+- **Owner actions still open:** (1) commit this tracker; (2) check GitHub Actions for `7547005`, `a2e6a31`, `60a1cd0`, `dbf5b4b`, `69b5559`, `c209436`, `1079c7d`; (3) run `pnpm db:migrate` on the dev DB (0003-0006) and report; (4) answer the inventory-method question (section B) before ERP-020; (5) optionally delete the merged branch `claude/purchase-bill-schema` (still on the remote as of `1079c7d`).
+- **Blocker:** none technical. No GitHub write access or Actions status from the sandbox.
 - **Single best next action: ERP-016** (P1): enforce **in the database** that a posted journal voucher balances (Dr = Cr) and cannot be edited or deleted. Red-first DB tests using concrete Dr/Cr examples; the 32 purchase service tests and the posting/reversal flows are the regression suite and must stay green. Reason: the purchase service already writes posted vouchers with the balance rule only in application code, and ERP-018 now makes a violation surface as a clear 409. Then ERP-005 (generalise the voucher writer), ERP-017, ERP-022, ERP-020.
 
 ---
@@ -154,7 +150,7 @@
 **Decisions made:**
 - (S1) Restore `shared/masters.ts` from history; one factory for both term masters.
 - (S2) **Owner: skip login for now**; ERP-002 deferred (risk open). **pnpm** is the package manager. Integration tests only run against a local DB whose name contains "test"; in CI an unsafe/missing DB fails the run; `scripts/test-db.mjs` pins `DATABASE_URL_DIRECT`. `allowBuilds: esbuild: true`.
-- (S3) Schema changes go through committed migrations (`pnpm db:generate` -> review -> commit); `db:push` is for throw-away experiments only; CI fails on schema/migration drift. Existing `db:push` databases use one-time `pnpm db:baseline`. Check violations (23514) were meant to surface as HTTP 409 — found not true in session 5; **made true by ERP-018 (session 8, uncommitted)**.
+- (S3) Schema changes go through committed migrations (`pnpm db:generate` -> review -> commit); `db:push` is for throw-away experiments only; CI fails on schema/migration drift. Existing `db:push` databases use one-time `pnpm db:baseline`. Check violations (23514) were meant to surface as HTTP 409 — found not true in session 5; **made true by ERP-018 (session 8, committed `1079c7d`)**.
 - (S4) **Company consistency is registry-driven.** One generic trigger instead of ~70 hand-written ones; every tenant-scoped table is registered; a **completeness test reads the catalog and fails CI if a new FK between tenant tables is not registered** (or a new table is neither registered nor listed as global: only `User` and `AuditLog`). Consequence: adding a table/FK means adding a registry row in a new migration.
 - (S4) **A record's company can never change** (direct `companyId`; for child tables, the owner's company). **Behavior change vs ERP-003:** an *empty* Sub Group/Account Group can no longer be moved to another company; the ERP-003 control test that allowed it was rewritten to assert the refusal. Rationale: moving records between companies is a copy, never an UPDATE.
 - (S4) A registered row whose company cannot be determined (e.g. a SubLedger with neither ledger nor party) is **rejected**; the migration pre-flight reports existing such rows.
@@ -178,6 +174,19 @@
 ## G. Verification record
 
 Sandbox: Linux, Node 22, pnpm 12.14.0, throwaway PostgreSQL 16 databases (never the owner's DB). Owner independently ran `pnpm test:db` on Windows for ERP-004: 154/154. GitHub Actions run `39455007886` on `0fd03ab`: success (install, schema+seed, build, tests).
+
+**Session 9 (reconciliation after the ERP-018 push, 2026-10-22):**
+| Check | Result |
+|---|---|
+| `git fetch` / `git pull --ff-only` | `c209436` -> `1079c7d` (`erp-018 dberrormapping`, 1 commit by the owner, 5 files: `PROJECT_TRACKER.md`, `server/app.ts`, `server/routes/_util.ts`, `tests/api.company.test.ts`, `tests/api.dbErrors.test.ts`) |
+| Code read | `pgError()` in `server/routes/_util.ts` (matches `name === "PostgresError"` through `.cause`, depth 5); `errorHandler` exported from `server/app.ts` (23505 / 23503 / 23514 -> 409, FK message chosen by HTTP method, everything else generic 500); matches decision S8 |
+| `pnpm exec drizzle-kit generate` (drift) | "No schema changes, nothing to migrate"; `git status --porcelain drizzle` empty |
+| `pnpm build` | exit 0 |
+| `pnpm test:db` run 1 and run 2 on `1079c7d` | both exit 0; **18 files, 421/421** each time; 0 occurrences of "Failed query" in the log |
+| `it.fails` count | 1 (`tests/api.stockOpening.test.ts`, ERP-017) |
+| Not run | GitHub Actions (no access); mutation checks (session 8's 5 checks were not repeated); the dev DB migration; any UI |
+| Note | Sandbox needed `apt-get update` before installing PostgreSQL 16 and a restart of the cluster between commands |
+
 
 **Session 8 (ERP-018, 2026-10-22):**
 | Check | Result |
@@ -277,7 +286,7 @@ Sandbox: Linux, Node 22, pnpm 12.14.0, throwaway PostgreSQL 16 databases (never 
 ### 2026-10-22 — Session 5 — ERP-014 (rest)
 - Added 126 API tests (product, stock opening + reconciliation, sub ledger, users + user access, company / branch / fiscal year); suite now 317. No production code changed. Found and recorded two defects as `it.fails` tests: ERP-018 (database errors answered 500 with SQL text), ERP-017 (stock opening large saves answer 500). Tracker corrected: commit state of ERP-003/015, module statuses, owner actions, stale "no migrations committed".
 - Owner actions: baseline refused (history existed), migrate applied, both term screens verified, `test:db` x2 running (result not reported).
-- Verification: section G. **Commit hash: none yet (patch).**
+- Verification: section G. **Commit hash: none yet (patch); the tests were later merged as `60a1cd0`.**
 
 ### 2026-10-22 — Session 6 — verification and tracker reconciliation (no code changed)
 - Fresh clone of `dbf5b4b`. Found the tracker one merge behind: the session-5 test patch was already merged (`60a1cd0`) and a Purchase Bill schema (4 commits, migrations 0003-0005, 21 DB tests) had been added by another session. Audited the schema and tests (read, plus counts from the live test DB), reproduced the CI steps (drift check, build, tests x2): all green, 338/338. Re-confirmed ERP-017/ERP-018 still present. Added ERP-020, ERP-021, decision S6, module row, risks and verification record.
@@ -287,15 +296,31 @@ Sandbox: Linux, Node 22, pnpm 12.14.0, throwaway PostgreSQL 16 databases (never 
 
 ### 2026-10-22 — Session 7 — re-pull after `69b5559`, purchase service audit (no code changed)
 - Pulled the owner's new commit (Purchase Order + Challan tables, migration 0006, purchase service layer, 73 tests). Re-ran drift check, build and tests twice: 411/411. Read the posting/reversal path and checked the database catalog: voucher balance and immutability are still not enforced by the database. Recorded: module rows, ERP-005 reframed (generalise the private writer), ERP-016 urgency up, ERP-020 narrowed to API/UI/stock accounting, new ERP-022, decision S7, an inventory-method question for the owner. ERP-009 reworded.
-- Files affected: `PROJECT_TRACKER.md`. **Commit hash: none (not committed).**
+- Files affected: `PROJECT_TRACKER.md`. **Commit hash: committed by the owner as `c209436`.**
 
 ### 2026-10-22 — Session 8 — ERP-018
 - Re-pulled (`c209436`, tracker only; identical to my session-7 tracker). Implemented ERP-018 red-first: `pgError()` + rewritten, exported `errorHandler`; 10 new tests; `it.fails` for ERP-018 became a plain test. 421/421 twice; 5 mutation checks caught. Recorded the three behaviour changes, decision S8, new ERP-023. No schema or migration change.
-- Files affected: `server/app.ts`, `server/routes/_util.ts`, `tests/api.company.test.ts`, `tests/api.dbErrors.test.ts` (new), `PROJECT_TRACKER.md`. **Commit hash: none (patch).**
+- Files affected: `server/app.ts`, `server/routes/_util.ts`, `tests/api.company.test.ts`, `tests/api.dbErrors.test.ts` (new), `PROJECT_TRACKER.md`. **Commit hash: `1079c7d` (committed and pushed by the owner).**
+
+### 2026-10-22 — Session 9 — reconciliation after the ERP-018 push (no code changed)
+- Pulled `1079c7d`, read the commit, re-ran drift check, build and the suite twice (421/421) on the pushed code, and updated this tracker: ERP-018 marked committed, working-tree and owner-action lines corrected, session 9 verification record and handoff added. A second, independent ERP-018 implementation (a separate `server/dbErrors.ts` and 21 tests, 432 passing) had been prepared before the pushed commit was seen; it was discarded as redundant. Its one extra idea, a generic message from `/api/health`, is already recorded in ERP-023.
+- Files affected: `PROJECT_TRACKER.md`. **Commit hash: none (delivered as a patch).**
 
 ---
 
-## HANDOFF (end of session 8)
+## HANDOFF (end of session 9)
+
+**Accomplished:** Reconciled the tracker with `main` = `1079c7d`: ERP-018 is committed and closed. Re-verified the pushed commit from a fresh pull: drift check clean, build exit 0, `pnpm test:db` twice, 18 files, 421/421.
+
+**Not accomplished / open:** no application code changed; GitHub Actions status unread (no access); migrations 0003-0006 not confirmed on the owner's dev DB; mutation checks of ERP-018 not repeated (session 8's 5 stand); ERP-016, ERP-005, ERP-017, ERP-022, ERP-020, ERP-023, ERP-002 open.
+
+**Repo state:** GitHub `main` = `1079c7d`, unchanged by me. One patch changes `PROJECT_TRACKER.md` only.
+
+**Next task:** ERP-016 (database-enforced Dr = Cr and posted-voucher immutability; trigger messages written for people with `ERRCODE = 'check_violation'` so ERP-018 turns them into 409), then ERP-005, ERP-017, ERP-022, ERP-020; ERP-023 (P3) any time. Owner decision still needed on the inventory method before ERP-020.
+
+---
+
+## (superseded) HANDOFF (end of session 8)
 
 **Accomplished:** ERP-018 done and verified in the sandbox: database constraint errors now answer a clear 409, unknown errors answer a generic 500 with details only in the log, 10 real-error tests added, the old known-defect test is now a plain test. Suite 421/421 twice, five mutation checks caught.
 
