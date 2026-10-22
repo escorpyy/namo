@@ -127,3 +127,14 @@ export const salesTermDocTypeEnum = pgEnum("SalesTermDocType", [
   "SALES_INVOICE",
   "SALES_RETURN",
 ]);
+
+// ============================================================
+// PURCHASE BILL
+// ============================================================
+
+// "Inv Type" dropdown on the purchase invoice screen.
+export const purchaseInvoiceTypeEnum = pgEnum("PurchaseInvoiceType", [
+  "LOCAL",
+  "IMPORT",
+  "TAXABLE_CAPITAL",
+]);
