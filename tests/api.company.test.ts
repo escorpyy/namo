@@ -163,10 +163,8 @@ describe.skipIf(!DB_READY)("Company, Branch and Fiscal Year masters (API)", () =
       expect((await tcRow()).retainedEarningsGLId).toBe(reGl);
     });
 
-    // KNOWN ISSUE (PROJECT_TRACKER ERP-018): drizzle-orm 0.44 wraps every database error in a DrizzleQueryError, so the Postgres code is on err.cause.code,
-    // but app.ts reads err.code. The 23505 / 23503 / 23514 "safety net" therefore never matches: the client gets 500 plus the SQL text instead of a clear 409.
-    // `it.fails` keeps CI green and starts FAILING once this is fixed: then change it to a plain `it`.
-    it.fails("deleting that ledger answers a clear 409, not a 500 with the SQL text", async () => {
+    // ERP-018 (fixed): drizzle wraps database errors, the Postgres code is on err.cause; app.ts now reads it there (tests/api.dbErrors.test.ts covers every code).
+    it("deleting that ledger answers a clear 409, not a 500 with the SQL text", async () => {
       const inUse = await del("general-ledger", reGl);
       expect(inUse.status).toBe(409);
       expect(String(inUse.body.message)).not.toMatch(/Failed query/);
