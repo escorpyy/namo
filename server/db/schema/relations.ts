@@ -18,6 +18,7 @@ import {
   salesTermDefault,
   salesDocumentTerm,
 } from "./billing";
+import { purchaseBill, purchaseBillLine, purchaseBillImportDetail } from "./purchaseBill";
 import {
   productGroup,
   productSubGroup,
@@ -72,6 +73,7 @@ export const companyRelations = relations(company, ({ one, many }) => ({
 
   purchaseTerms: many(purchaseTerm),
   salesTerms: many(salesTerm),
+  purchaseBills: many(purchaseBill),
 }));
 
 export const branchRelations = relations(branch, ({ one, many }) => ({
@@ -84,6 +86,7 @@ export const branchRelations = relations(branch, ({ one, many }) => ({
   cashBankVouchers: many(cashBankVoucher),
   openingBalances: many(openingBalance),
   stockOpeningBalances: many(stockOpeningBalance),
+  purchaseBills: many(purchaseBill),
 }));
 
 export const userRelations = relations(user, ({ many }) => ({
@@ -93,6 +96,8 @@ export const userRelations = relations(user, ({ many }) => ({
   journalVouchersCreated: many(journalVoucher, { relationName: "JVCreatedBy" }),
   cashBankVouchersPosted: many(cashBankVoucher, { relationName: "CBPostedBy" }),
   cashBankVouchersCreated: many(cashBankVoucher, { relationName: "CBCreatedBy" }),
+  purchaseBillsPosted: many(purchaseBill, { relationName: "PBPostedBy" }),
+  purchaseBillsCreated: many(purchaseBill, { relationName: "PBCreatedBy" }),
   cashBankLinesCleared: many(cashBankVoucherLine, {
     relationName: "CBLineClearedBy",
   }),
@@ -896,6 +901,96 @@ export const salesDocumentTermRelations = relations(
     generalLedger: one(generalLedger, {
       fields: [salesDocumentTerm.generalLedgerId],
       references: [generalLedger.id],
+    }),
+  }),
+);
+
+// ============================================================
+// PURCHASE BILL
+// ============================================================
+
+export const purchaseBillRelations = relations(purchaseBill, ({ one, many }) => ({
+  company: one(company, {
+    fields: [purchaseBill.companyId],
+    references: [company.id],
+  }),
+  branch: one(branch, {
+    fields: [purchaseBill.branchId],
+    references: [branch.id],
+  }),
+  vendorGL: one(generalLedger, {
+    fields: [purchaseBill.vendorGLId],
+    references: [generalLedger.id],
+  }),
+  subLedger: one(subLedger, {
+    fields: [purchaseBill.subLedgerId],
+    references: [subLedger.id],
+  }),
+  journalVoucher: one(journalVoucher, {
+    fields: [purchaseBill.journalVoucherId],
+    references: [journalVoucher.id],
+  }),
+  agent: one(agent, {
+    fields: [purchaseBill.agentId],
+    references: [agent.id],
+  }),
+  mainBill: one(purchaseBill, {
+    fields: [purchaseBill.mainBillId],
+    references: [purchaseBill.id],
+    relationName: "PBMain",
+  }),
+  additionalBills: many(purchaseBill, { relationName: "PBMain" }),
+  reversalOf: one(purchaseBill, {
+    fields: [purchaseBill.reversalOfId],
+    references: [purchaseBill.id],
+    relationName: "PBReversal",
+  }),
+  reversedBy: many(purchaseBill, { relationName: "PBReversal" }),
+  postedByUser: one(user, {
+    fields: [purchaseBill.postedBy],
+    references: [user.id],
+    relationName: "PBPostedBy",
+  }),
+  createdByUser: one(user, {
+    fields: [purchaseBill.createdBy],
+    references: [user.id],
+    relationName: "PBCreatedBy",
+  }),
+  lines: many(purchaseBillLine),
+  importDetail: one(purchaseBillImportDetail),
+}));
+
+export const purchaseBillLineRelations = relations(purchaseBillLine, ({ one }) => ({
+  purchaseBill: one(purchaseBill, {
+    fields: [purchaseBillLine.purchaseBillId],
+    references: [purchaseBill.id],
+  }),
+  product: one(product, {
+    fields: [purchaseBillLine.productId],
+    references: [product.id],
+  }),
+  location: one(location, {
+    fields: [purchaseBillLine.locationId],
+    references: [location.id],
+  }),
+  altUnit: one(productUnit, {
+    fields: [purchaseBillLine.altUnitId],
+    references: [productUnit.id],
+    relationName: "PBLineAltUnit",
+  }),
+  unit: one(productUnit, {
+    fields: [purchaseBillLine.unitId],
+    references: [productUnit.id],
+    relationName: "PBLineUnit",
+  }),
+}));
+
+export const purchaseBillImportDetailRelations = relations(
+  purchaseBillImportDetail,
+  ({ one }) => ({
+    purchaseBill: one(purchaseBill, {
+      fields: [purchaseBillImportDetail.purchaseBillId],
+      references: [purchaseBill.id],
     }),
   }),
 );

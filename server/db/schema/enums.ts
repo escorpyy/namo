@@ -127,3 +127,32 @@ export const salesTermDocTypeEnum = pgEnum("SalesTermDocType", [
   "SALES_INVOICE",
   "SALES_RETURN",
 ]);
+
+// ============================================================
+// PURCHASE BILL
+// ============================================================
+
+// Domestic or import purchase, chosen when the bill is issued. (The legacy
+// "Taxable Capital" option is gone: capital is now PurchaseType.)
+export const purchaseInvoiceTypeEnum = pgEnum("PurchaseInvoiceType", [
+  "LOCAL",
+  "IMPORT",
+]);
+
+// What was bought. Drives the VAT purchase book (goods vs service, capital vs
+// other) and which GL / valuation rules apply. Separate from invoiceType
+// (Local / Import) on purpose: an import can be goods or services, capital or not.
+export const purchaseTypeEnum = pgEnum("PurchaseType", [
+  "GOODS_PURCHASE_OTHERS",
+  "GOODS_PURCHASE_CAPITAL",
+  "SERVICE_PURCHASE_OTHERS",
+  "SERVICE_PURCHASE_CAPITAL",
+]);
+
+// How imported goods reached Nepal (Import/Transport tab).
+export const importTransportModeEnum = pgEnum("ImportTransportMode", [
+  "ROAD",
+  "AIR",
+  "RAIL",
+  "OTHER",
+]);
