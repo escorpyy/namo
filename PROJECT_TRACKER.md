@@ -409,8 +409,8 @@ Sandbox: Linux, Node 22, pnpm 12.14.0, throwaway PostgreSQL 16 databases (never 
 
 **Review items before merge:**
 1. Run `pnpm test:db` on the isolated local test database; confirm migration 0007 applies and all tests pass.
-2. Review deferred-trigger behavior for line moves between voucher IDs and test rollback semantics; add coverage if needed.
+2. The deferred trigger now checks both the old and new voucher IDs when a line is moved. Add a dedicated regression test for this path and confirm savepoint rollback behavior.
 3. Run `pnpm build` and the full DB suite, then inspect GitHub Actions.
-4. Fix any failures, update the tracker with actual evidence, and open a PR. Do not merge without verified checks.
+4. Fix any failures and update the tracker with actual evidence. Draft PR #3 is open: https://github.com/escorpyy/namo/pull/3. Do not merge without verified checks.
 
 **Design decision preserved:** vouchers can be edited while their accounting period is open; this task enforces balance only. Audit logging (ERP-024) and company lock date (ERP-025) remain separate tasks.
