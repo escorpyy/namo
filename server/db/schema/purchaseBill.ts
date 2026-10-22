@@ -13,11 +13,17 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { createdAt, money, updatedAt } from "./_helpers";
-import { documentTypeEnum, purchaseInvoiceTypeEnum } from "./enums";
+import {
+  documentTypeEnum,
+  importTransportModeEnum,
+  purchaseInvoiceTypeEnum,
+  purchaseTypeEnum,
+} from "./enums";
 import { branch, company, user } from "./core";
 import { generalLedger, subLedger } from "./accounting";
+import { journalVoucher } from "./vouchers";
 import { agent } from "./parties";
-import { product, productUnit } from "./products";
+import { location, product, productUnit } from "./products";
 
 // ============================================================
 // PURCHASE BILL  (legacy screen: "Purchase Invoice")
@@ -42,7 +48,10 @@ import { product, productUnit } from "./products";
 //   - dueDate = billDate + dueDays unless the user overrides it
 //   - qty = altQty * AlternateUnit.conversionFactor when an alt unit is used
 //   - fiscalYear must exist and be open for the company
-//   - an Import bill should carry an import detail row
+//   - an Import bill should carry an import detail row (the reverse is DB-enforced)
+//   - isPosted and journalVoucherId are set together by the posting service
+//   - landed cost: allocations are computed by the service, stored on lines
+//   - serial numbers are not modelled: StockDetail has no tracksSerial yet
 //
 // Drizzle returns numeric as string; use shared/decimal.ts for arithmetic.
 // ============================================================
@@ -59,7 +68,11 @@ export const purchaseBill = pgTable(
       .references(() => branch.id, { onDelete: "restrict" }),
 
     documentType: documentTypeEnum().notNull().default("PURCHASE_BILL"),
+    // Local / Import / Taxable Capital: the legacy "Inv Type" dropdown.
+    // IMPORT is the switch that enables PurchaseBillImportDetail.
     invoiceType: purchaseInvoiceTypeEnum().notNull().default("LOCAL"),
+    // Goods or service, capital or other (VAT purchase book classification).
+    purchaseType: purchaseTypeEnum().notNull().default("GOODS_PURCHASE_OTHERS"),
 
     // "Invoice No". Numbering restarts every fiscal year, so unique per
     // branch + fiscal year (vouchers are unique per branch only).
@@ -109,6 +122,12 @@ export const purchaseBill = pgTable(
       onDelete: "set null",
     }),
 
+    // The journal voucher this bill posted. Set together with isPosted; a
+    // reversal bill posts its own voucher. Needed to trace and reverse a bill.
+    journalVoucherId: integer().references(() => journalVoucher.id, {
+      onDelete: "restrict",
+    }),
+
     isPosted: boolean().notNull().default(false),
     postedAt: timestamp({ precision: 3 }),
     postedBy: integer().references(() => user.id, { onDelete: "set null" }),
@@ -134,6 +153,16 @@ export const purchaseBill = pgTable(
     index("PurchaseBill_subLedgerId_idx").on(t.subLedgerId),
     index("PurchaseBill_agentId_idx").on(t.agentId),
     index("PurchaseBill_mainBillId_idx").on(t.mainBillId),
+    index("PurchaseBill_purchaseType_idx").on(t.purchaseType),
+    // One voucher belongs to at most one bill.
+    uniqueIndex("PurchaseBill_journalVoucherId_key")
+      .on(t.journalVoucherId)
+      .where(sql`${t.journalVoucherId} IS NOT NULL`),
+    // A posted bill must say which voucher it posted.
+    check(
+      "PurchaseBill_posted_voucher_check",
+      sql`NOT ${t.isPosted} OR ${t.journalVoucherId} IS NOT NULL`,
+    ),
     index("PurchaseBill_fiscalYear_idx").on(t.fiscalYear),
     index("PurchaseBill_invoiceDate_idx").on(t.invoiceDate),
     check("PurchaseBill_dueDays_check", sql`${t.dueDays} >= 0`),
@@ -179,6 +208,25 @@ export const purchaseBillLine = pgTable(
     rate: money().notNull().default("0"),
     basicAmount: money().notNull().default("0"), // qty * rate
 
+    // Landed cost result (item 8). Header terms flagged distributeToLines are
+    // split over the lines in PurchaseDocumentTermAllocation; the sums are
+    // stored here so stock valuation does not recalculate them.
+    //   allocatedTermAmount = additive allocations - deductive allocations
+    //   landedAmount        = basicAmount + allocatedTermAmount
+    //   landedRate          = landedAmount / qty   (cost per stock unit)
+    allocatedTermAmount: money().notNull().default("0"),
+    landedAmount: money().notNull().default("0"),
+    landedRate: money().notNull().default("0"),
+
+    // Stock receipt data (item 7). Where the goods went in, and which batch.
+    // Required only when the product tracks batch / expiry: service layer.
+    locationId: integer().references(() => location.id, {
+      onDelete: "set null",
+    }),
+    batchNo: varchar({ length: 50 }),
+    manufactureDate: date({ mode: "date" }),
+    expiryDate: date({ mode: "date" }),
+
     createdAt: createdAt(),
   },
   (t) => [
@@ -189,6 +237,16 @@ export const purchaseBillLine = pgTable(
     index("PurchaseBillLine_productId_idx").on(t.productId),
     index("PurchaseBillLine_altUnitId_idx").on(t.altUnitId),
     index("PurchaseBillLine_unitId_idx").on(t.unitId),
+    index("PurchaseBillLine_locationId_idx").on(t.locationId),
+    index("PurchaseBillLine_batchNo_idx").on(t.productId, t.batchNo),
+    check(
+      "PurchaseBillLine_landed_check",
+      sql`${t.landedAmount} >= 0 AND ${t.landedRate} >= 0`,
+    ),
+    check(
+      "PurchaseBillLine_expiry_check",
+      sql`${t.manufactureDate} IS NULL OR ${t.expiryDate} IS NULL OR ${t.expiryDate} >= ${t.manufactureDate}`,
+    ),
     check("PurchaseBillLine_lineNumber_check", sql`${t.lineNumber} > 0`),
     check(
       "PurchaseBillLine_amounts_check",
@@ -202,8 +260,24 @@ export const purchaseBillLine = pgTable(
   ],
 );
 
-// "Import/Transport Details" tab. The tab was not visible in the screenshot,
-// so these columns are the usual import + transport fields, all optional.
+// "Import/Transport Details" tab.
+//
+// SWITCH: this row may exist only while PurchaseBill.invoiceType = 'IMPORT'.
+// The database enforces it (triggers in migration 0003): inserting a detail for
+// a non-import bill, or switching a bill away from IMPORT while a detail
+// exists, is rejected. The UI shows the tab only for import bills.
+//
+// Based on the Nepal import flow: the importer (or clearing agent) files the
+// customs declaration (Pragyapan Patra) at a customs office, pays customs duty,
+// excise and VAT, and customs certifies the import. The declaration number and
+// date are what the VAT purchase book and the import VAT claim refer to. Goods
+// normally also have a letter of credit (opened through a bank) and a bill of
+// lading / airway bill. A permit is needed only for restricted goods, so it is
+// optional here. Everything is optional except the switch: required fields
+// before posting are a service-layer rule (customsDeclarationNo for IMPORT).
+//
+// One declaration per bill. A bill cleared in several consignments, or one
+// declaration covering several bills, needs a separate declaration table later.
 export const purchaseBillImportDetail = pgTable(
   "PurchaseBillImportDetail",
   {
@@ -212,16 +286,37 @@ export const purchaseBillImportDetail = pgTable(
       .notNull()
       .references(() => purchaseBill.id, { onDelete: "cascade" }),
 
-    importPermitNo: varchar({ length: 30 }), // Pragyapan Patra
-    importPermitDate: date({ mode: "date" }),
+    // Customs declaration = Pragyapan Patra
     customsDeclarationNo: varchar({ length: 30 }),
     customsDeclarationDate: date({ mode: "date" }),
-    lcNo: varchar({ length: 30 }),
+    customsOffice: varchar({ length: 100 }), // entry point, e.g. Birgunj
+    countryOfOrigin: varchar({ length: 50 }),
 
+    // As assessed by customs, in NPR. These feed the import VAT claim and the
+    // landed cost; the bill's terms (PurchaseDocumentTerm) carry the postings.
+    assessableValue: money(),
+    customsDuty: money(),
+    exciseDuty: money(),
+    importVat: money(),
+    otherCustomsCharges: money(),
+
+    // Payment: letter of credit
+    lcNo: varchar({ length: 30 }),
+    lcDate: date({ mode: "date" }),
+    lcBankName: varchar({ length: 100 }),
+
+    // Shipment: bill of lading / airway bill / lorry receipt
+    transportMode: importTransportModeEnum(),
+    blAwbNo: varchar({ length: 30 }),
+    blAwbDate: date({ mode: "date" }),
     transporterName: varchar({ length: 100 }),
     vehicleNo: varchar({ length: 30 }),
     lrNo: varchar({ length: 30 }),
     lrDate: date({ mode: "date" }),
+
+    // Only for restricted goods
+    importPermitNo: varchar({ length: 30 }),
+    importPermitDate: date({ mode: "date" }),
 
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -229,6 +324,15 @@ export const purchaseBillImportDetail = pgTable(
   (t) => [
     uniqueIndex("PurchaseBillImportDetail_purchaseBillId_key").on(
       t.purchaseBillId,
+    ),
+    // The same declaration cannot be used by two bills of one company twice
+    // over: lookup index for the purchase book and duplicate checks.
+    index("PurchaseBillImportDetail_customsDeclarationNo_idx").on(
+      t.customsDeclarationNo,
+    ),
+    check(
+      "PurchaseBillImportDetail_amounts_check",
+      sql`coalesce(${t.assessableValue}, 0) >= 0 AND coalesce(${t.customsDuty}, 0) >= 0 AND coalesce(${t.exciseDuty}, 0) >= 0 AND coalesce(${t.importVat}, 0) >= 0 AND coalesce(${t.otherCustomsCharges}, 0) >= 0`,
     ),
   ],
 );

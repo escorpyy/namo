@@ -926,6 +926,10 @@ export const purchaseBillRelations = relations(purchaseBill, ({ one, many }) => 
     fields: [purchaseBill.subLedgerId],
     references: [subLedger.id],
   }),
+  journalVoucher: one(journalVoucher, {
+    fields: [purchaseBill.journalVoucherId],
+    references: [journalVoucher.id],
+  }),
   agent: one(agent, {
     fields: [purchaseBill.agentId],
     references: [agent.id],
@@ -964,6 +968,10 @@ export const purchaseBillLineRelations = relations(purchaseBillLine, ({ one }) =
   product: one(product, {
     fields: [purchaseBillLine.productId],
     references: [product.id],
+  }),
+  location: one(location, {
+    fields: [purchaseBillLine.locationId],
+    references: [location.id],
   }),
   altUnit: one(productUnit, {
     fields: [purchaseBillLine.altUnitId],

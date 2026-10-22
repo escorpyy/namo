@@ -138,3 +138,21 @@ export const purchaseInvoiceTypeEnum = pgEnum("PurchaseInvoiceType", [
   "IMPORT",
   "TAXABLE_CAPITAL",
 ]);
+
+// What was bought. Drives the VAT purchase book (goods vs service, capital vs
+// other) and which GL / valuation rules apply. Separate from invoiceType
+// (Local / Import) on purpose: an import can be goods or services, capital or not.
+export const purchaseTypeEnum = pgEnum("PurchaseType", [
+  "GOODS_PURCHASE_OTHERS",
+  "GOODS_PURCHASE_CAPITAL",
+  "SERVICE_PURCHASE_OTHERS",
+  "SERVICE_PURCHASE_CAPITAL",
+]);
+
+// How imported goods reached Nepal (Import/Transport tab).
+export const importTransportModeEnum = pgEnum("ImportTransportMode", [
+  "ROAD",
+  "AIR",
+  "RAIL",
+  "OTHER",
+]);
