@@ -11,31 +11,34 @@
 |---|---|
 | Repository | https://github.com/escorpyy/namo |
 | Default branch | `main` (verified via `origin/HEAD`) |
-| Active dev branch | `main` (no other branches exist) |
+| Active dev branch | `main`. Remote also lists `claude/purchase-bill-schema` (merged via PR #2; can be deleted). Owner commits straight to `main` |
 | Frontend | React 18 + Vite 5 + Tailwind 3 + TypeScript 5 |
 | Backend | Express 4 + TypeScript (run with `tsx`) |
 | Database / ORM | PostgreSQL 16 + Drizzle ORM 0.44.7 (committed migrations in `drizzle/`, applied with `pnpm db:migrate`; `db:push` only for throw-away experiments) |
 | Validation | zod, driven by `shared/masters.ts` (single source for UI + server) |
 | Deployment | None found. `npm run build && npm start` serves `dist/` from Express. `docker-compose.yml` = local Postgres only |
 | Release / milestone | None established (package version 0.1.0) |
-| Last actual audit | 2026-10-22 (session 5: fresh clone of GitHub, full local test run) |
+| Last actual audit | 2026-10-22 (session 7: re-pulled GitHub `main` = `69b5559`; CI-equivalent run: drift check, build, `pnpm test:db` twice; purchase service and posting path read) |
 
 ---
 
 ## B. Current project state
 
-- **Latest inspected commit:** `a2e6a31` (`party-tests`) on `origin/main`, verified by cloning GitHub on 2026-10-22 (session 5). It sits on `7547005` (ERP-003 + ERP-015 committed) and `0fd03ab` (ERP-004; its GitHub Actions run `39455007886` was **success**, incl. "Tests (unit + API integration)"). I could not read the Actions status of `7547005` / `a2e6a31` (GitHub API rate-limited from the sandbox): **owner to check the Actions tab**.
+- **Latest inspected commit:** `69b5559` (`purchase-order-challan-services`, 2026-10-22 13:31 +0545) on `origin/main`, fast-forwarded from `dbf5b4b` in session 7. It adds Purchase Order + Purchase Challan tables (migration 0006, 12 triggers), a **purchase service layer** (`server/services/purchase/`, 1,342 lines: order -> challan -> bill, term pricing, landed cost, posting to a journal voucher, reversal) and 73 tests. `dbf5b4b` and earlier: see change log. GitHub Actions status of any commit after `0fd03ab` is **still unread** (API rate-limited from the sandbox): **owner to check the Actions tab**.
 - **Branch:** `main`
-- **Working tree (end of session 5):** ERP-001, ERP-004, ERP-003, ERP-015 and the party tests are on GitHub (`dc3a184`, `0fd03ab`, `7547005`, `a2e6a31`). **Uncommitted, delivered as one patch:** five new ERP-014 test files (`tests/api.product.test.ts`, `api.stockOpening.test.ts`, `api.subLedger.test.ts`, `api.userAccess.test.ts`, `api.company.test.ts`) and this tracker. **No production code was changed.**
+- **Working tree:** clean clone at `69b5559`; the only local change is this tracker update (sessions 6 and 7 changed **no code**).
 - **Package manager:** pnpm (owner's choice). `package-lock.json` removed in the ERP-004 changes.
-- **Phase:** Foundation / master-data, with an automated safety net (tests + CI) and committed migrations. **No transactional accounting yet** (no vouchers, sales, purchases, reports).
+- **Phase:** Foundation / master-data, with an automated safety net (tests + CI) and committed migrations. Purchase documents (order, challan, bill) now exist as tables, DB triggers **and a tested service layer that can post and reverse a balanced journal voucher** (service tests only: **no route, no screen, no auth**). Everything else transactional is still missing: generic voucher posting, sales, reports.
 
-### Verified complete (this session, with evidence in section G)
+### Verified complete (session 6 evidence in section G; earlier items from sessions 1-5)
 - Master CRUD engine + the 22 master screens' API layer starts and serves (health, list, create, validation, delete guard exercised for the two term masters only; other masters not re-tested this session).
 - Purchase Term / Sales Term masters (after ERP-001 fix); both screens confirmed in the browser by the owner (2026-10-22).
+- (Session 7) `69b5559`: migrations 0000-0006 apply on an empty DB, seed runs, `drizzle-kit generate` reports no drift, `pnpm build` succeeds, **411/411 tests pass, twice in a row** (17 files).
+- (Session 7) Purchase service **as exercised by its own tests**: draft pricing, landed cost, order -> challan -> bill quantity control, posting with Dr = Cr, immutability after posting, reversal, additional bills. 32 service + 15 calculation + 26 order/challan DB + 21 bill DB tests pass. Not mutation-checked (see G).
 - (Session 5) API tests now cover Product (31), Stock Opening + reconciliation (44), Sub Ledger (11), Users + User Access (14), Company / Branch / Fiscal Year (26); evidence in section G.
 
 ### Partially implemented
+- **Purchase Order -> Challan -> Bill (schema + service, no API/UI):** tables in `server/db/schema/purchaseOrder.ts`, `purchaseChallan.ts`, `purchaseBill.ts` (migrations 0003-0006); rules in the database (same-company links, import detail only on IMPORT bills, additional bill one level, term/allocation checks, unique numbers per branch + fiscal year, posted bill must name its voucher) and in the service (`server/services/purchase/*`): totals from lines + terms in exact arithmetic, due date, alt-qty conversion, fiscal year must exist / be active / be open, per-branch-and-year numbering under a transaction advisory lock, bill quantity capped by challan/order (with optional tolerance), landed cost for stock valuation, post = one journal voucher (Dr purchase/asset ledgers and additive terms, Cr deductive terms, Cr vendor), reverse = new posted bill + voucher with Dr/Cr swapped. **Gaps:** nothing calls the service (no route, no UI); `actorUserId` is passed in by the caller (no auth, ERP-002); Dr = Cr is checked **in application code only** (ERP-016); no stock ledger or inventory-account posting exists (purchases go to the product's purchase ledger; landed cost is stored on lines only); no concurrent-request tests; the 73 new tests were not mutation-checked.
 - Opening Balance grid: API tested (17 tests); UI **not** checked.
 - Stock Opening grid + stock reconciliation: API tested (44 tests, session 5); UI **not** checked.
 - Billing-terms schema: master tables done; document-level tables (`*DocumentTerm`, allocation) exist in schema with no documents to attach to.
@@ -43,11 +46,11 @@
 
 ### Confirmed missing
 - Authentication, authorization, tenant isolation.
-- Journal Voucher / Cash-Bank Voucher posting (schema only: `server/db/schema/vouchers.ts`; no routes, no UI, no balance enforcement).
-- Sales, Purchase, Returns, Inventory movements, Tax/VAT, Depreciation.
+- Generic Journal Voucher / Cash-Bank Voucher posting (a private voucher writer exists inside the purchase service only: `writeVoucher` in `server/services/purchase/purchaseBill.ts`; no routes, no UI; **no database enforcement of Dr = Cr or of posted-voucher immutability**: the only triggers on `JournalVoucher` / `JournalVoucherLine` are the company-consistency ones, checked in the catalog).
+- Purchase documents as a usable feature (service exists, no routes or UI), Sales documents, Returns, Inventory movements / stock ledger, Tax/VAT, Depreciation.
 - Reports (Trial Balance, P&L, Balance Sheet, Ledger).
 - Fiscal-year close workflow; closed-period posting control.
-- Linting, committed migrations, deployment config, backup/restore procedure. (Tests + CI now exist: ERP-004.)
+- Linting, deployment config, backup/restore procedure. (Tests + CI exist: ERP-004; migrations are committed: ERP-003.)
 
 ### Blockers and risks
 - **Risk (confirmed; owner chose to defer login on 2026-10-20 — ERP-002):** No auth. **Do not expose this app on a shared network or cloud with real data until ERP-002 is done.** `companyId` comes from the query string; `userId` for audit/lock comes from the request body (`server/routes/openingBalance.ts` lines ~100, ~158). Any client can read/write any company and impersonate any user.
@@ -57,13 +60,18 @@
 - **Mitigated (ERP-004):** `main` was non-compiling across 6 commits without anyone being alerted. Tests + CI now cover this (first CI run, on `0fd03ab`, green).
 - **Risk (code-read, NOT reproduced):** `server/routes/openingBalance.ts` checks "locked/closed" before its write transaction (PUT) and computes balance before setting the lock (POST /lock), without row locking, so a concurrent save and lock could interleave (ERP-012).
 - **Latent (confirmed by test):** `toCents` truncates beyond 2 decimals while `mulRound2` rounds half-up (`shared/decimal.ts`). Today `toCents` only sees 2-decimal strings (`stockRecon.ts`), so no live effect (ERP-011).
-- **Defect (reproduced, session 5 — ERP-018):** database errors never reach the 409 mapping in `server/app.ts`. drizzle-orm 0.44.7 wraps every database error in a `DrizzleQueryError`: probes showed `err.code` is `undefined` and the Postgres code sits on `err.cause.code` (seen for 23503 foreign key, 23505 unique, 23514 trigger/check). The handler reads `err.code`, so all three become **HTTP 500 with the SQL text and parameters in the message**. Reproduced through the API: deleting a ledger that is a company's Retained Earnings GL returns 500 ("Failed query: delete from ... params: ..."). The session-3 claim "check violations (23514) surface as HTTP 409" is therefore **not true at runtime**. Mostly masked today because routes pre-check; it matters for races and for any new code path that relies on the database as the safety net (vouchers!). The 23514 case was shown at the database layer (cross-company `OpeningBalance` insert), not through an API route.
-- **Defect (reproduced, session 5 — ERP-017):** `PUT /api/stock-opening` has a 5000-row limit that can never trigger: `express.json()` keeps its 100 KB default (about 1,300 minimal rows; fewer with batch/expiry) and an oversized body is answered 500 (same handler gap). Saving a few thousand stock lines in one go fails with a server error.
+- **Defect (reproduced session 5, STILL PRESENT in `dbf5b4b`: `server/app.ts` lines 42-49 read `err.code`; the `it.fails` test in `tests/api.company.test.ts` still passes as expected-failure — ERP-018):** database errors never reach the 409 mapping in `server/app.ts`. drizzle-orm 0.44.7 wraps every database error in a `DrizzleQueryError`: probes showed `err.code` is `undefined` and the Postgres code sits on `err.cause.code` (seen for 23503 foreign key, 23505 unique, 23514 trigger/check). The handler reads `err.code`, so all three become **HTTP 500 with the SQL text and parameters in the message**. Reproduced through the API: deleting a ledger that is a company's Retained Earnings GL returns 500 ("Failed query: delete from ... params: ..."). The session-3 claim "check violations (23514) surface as HTTP 409" is therefore **not true at runtime**. Mostly masked today because routes pre-check; it matters for races and for any new code path that relies on the database as the safety net (vouchers!). The 23514 case was shown at the database layer (cross-company `OpeningBalance` insert), not through an API route.
+- **Defect (reproduced session 5, STILL PRESENT in `dbf5b4b`: `server/app.ts` line 17 is a bare `express.json()` — ERP-017):** `PUT /api/stock-opening` has a 5000-row limit that can never trigger: `express.json()` keeps its 100 KB default (about 1,300 minimal rows; fewer with batch/expiry) and an oversized body is answered 500 (same handler gap). Saving a few thousand stock lines in one go fails with a server error.
 - **Observation:** 22 master list endpoints took ~4 s total in the AI sandbox but ~1.3 s on the owner's machine (his `pnpm test:db` output). Probably a slow sandbox, not a defect; ERP-013 downgraded to "measure only if it shows up in real use".
 - **Resolved by ERP-003 (committed `7547005`):** that FK now has an explicit short name (`PurchaseDocTermAlloc_documentTermId_fk`); no identifier in the migrations exceeds 63 chars (scanned).
 - **Resolved in ERP-004 changes:** single lockfile (`pnpm-lock.yaml`); README now says pnpm; `pnpm-workspace.yaml` `allowBuilds` placeholder set (`esbuild: true`) because a fresh/CI `pnpm install` failed on it.
 
 ---
+
+- **Risk (new, session 6):** the Purchase Bill tables rely on a polymorphic link (`PurchaseDocumentTerm.documentType` + `documentId`, no foreign key) that is checked by triggers (`check_purchase_bill_term`, `check_purchase_bill_allocation`, cleanup on delete). That is covered by the 21 DB tests, but the same pattern will be needed for Sales; keep every new document type in that trigger set. Also: bill totals are not DB-checked against their lines, so a future service bug could store inconsistent totals (see ERP-020).
+- **Risk (confirmed in the catalog, session 7 — raises ERP-016 priority):** real code now writes posted vouchers, yet the database has no balance constraint and no immutability guard on `JournalVoucher` / `JournalVoucherLine` (no CHECK or UNIQUE on either beyond keys; only `namo_company_consistency` triggers). A future code path, a manual SQL fix or a bug could store an unbalanced or edited posted voucher without the database objecting. Not reproduced as an exploit; absence of the constraint was read from `pg_trigger` / `pg_constraint`.
+- **Accounting-policy question (session 7, for the owner):** the posting debits each product's *purchase ledger* and no stock ledger / inventory movement exists, while landed cost is computed per line for valuation. Is Namo meant to use a periodic method (purchases expense, stock adjusted at period end) or a perpetual one (Dr Inventory on receipt)? Not assumed; it decides ERP-020's stock and COGS design.
+- **Unverified (session 6/7):** migrations 0003-0006 on (a) the owner's existing dev DB (owner must run `pnpm db:migrate`), (b) a legacy `db:push` DB, (c) a DB containing rows that violate the new rules. Only the fresh-DB path was run.
 
 ## C. Module inventory
 
@@ -78,12 +86,13 @@
 | **Purchase Term / Sales Term** | **COMPLETE (masters only)** | `shared/masters.ts` `termMaster()`, `server/masters.ts` CFG, `server/db/schema/billing.ts`; 16/16 API checks (section G) | Term-default assignment (party/product) has no UI; document terms have no consumer | calc engine (ERP-009) |
 | Opening Balance (API) | COMPLETE for current scope; UI NEEDS TESTING | `server/routes/openingBalance.ts`; 17 API tests (validation, exact totals, Dr=Cr before lock, edit blocked when locked/closed, restore) | `userId` trusted from client; possible lock/save race (ERP-012) | UI check; ERP-012 |
 | Stock Opening + Reconciliation | TESTED (API, 44 tests, session 5); UI NEEDS TESTING | `server/routes/stockOpening.ts`, `stockRecon.ts`, `tests/api.stockOpening.test.ts` (value = Qty × Rate, decimals per unit, batch/expiry, uniqueness, all-or-nothing, lock/closed, per-branch reconciliation) | 5000-row cap unreachable, large saves answer 500 (ERP-017) | UI check; ERP-017 |
-| Journal / Cash-Bank Vouchers | MISSING (schema only) | `server/db/schema/vouchers.ts` | No balanced-entry enforcement | ERP-005/006 |
-| Sales / Purchase documents | MISSING | — | — | ERP-009 |
+| Purchase Order / Challan / Bill (+ additional bill, reversal) | **PARTIAL: schema + service + tests; no API, no UI, no auth** | `server/db/schema/purchase{Order,Challan,Bill}.ts`, `drizzle/0003-0006`, `server/services/purchase/*` (11 files), `tests/db.purchaseBill.test.ts` (21), `tests/db.purchaseOrderChallan.test.ts` (26), `tests/service.purchase.test.ts` (32), `tests/purchase.calc.test.ts` (15) | Dr = Cr only in app code; no stock ledger; no concurrency tests; tests not mutation-checked | routes, screens, permissions, ERP-005/016 integration (ERP-020) |
+| Journal / Cash-Bank Vouchers | PARTIAL: schema + one private writer in the purchase service (posts and reverses); no generic service, route or UI | `server/db/schema/vouchers.ts`, `writeVoucher` in `server/services/purchase/purchaseBill.ts` | No DB-enforced Dr = Cr or immutability (ERP-016) | ERP-005 (generalise the writer), ERP-006, ERP-016 |
+| Sales documents | MISSING | — | — | ERP-009 |
 | Reports | MISSING | — | — | ERP-008 |
 | Auth / permissions | MISSING (deferred by owner) | — | see risks | ERP-002 |
-| Tests / CI | GOOD for the API layer: 317 tests locally (session 5); GitHub green for `0fd03ab`, later commits not checked by me | `tests/`, `vitest.config.ts`, `.github/workflows/ci.yml`, `scripts/test-db.mjs` | no UI tests; 2 known-defect tests use `it.fails` (ERP-017, ERP-018); General Ledger / Location custom rules untested (ERP-019) | owner: check Actions; ERP-017/018/019 |
-| Migrations + DB integrity (account hierarchy + all tenant tables) | COMPLETE (committed `7547005`) | `drizzle/0000-0002`, `server/db/migrate.ts`, `server/db/baseline.ts`, `tests/db.integrity.test.ts` (8), `tests/db.companyConsistency.test.ts` (15) | voucher balance not DB-enforced (no vouchers yet) | ERP-005, ERP-016 |
+| Tests / CI | GOOD for the API + DB layers: **411 tests in 17 files, pass twice in a row (session 7)**; GitHub green for `0fd03ab`, later commits not checked by me | `tests/`, `vitest.config.ts`, `.github/workflows/ci.yml`, `scripts/test-db.mjs` | no UI tests; 2 known-defect tests use `it.fails` (ERP-017, ERP-018); General Ledger / Location custom rules untested (ERP-019) | owner: check Actions; ERP-017/018/019 |
+| Migrations + DB integrity (account hierarchy + all tenant tables + purchase bill) | COMPLETE for current scope (0000-0002 in `7547005`; 0003-0005 in `dbf5b4b`; 0006 in `69b5559`) | `drizzle/0000-0006`, `server/db/migrate.ts`, `server/db/baseline.ts`, `tests/db.integrity.test.ts` (8), `tests/db.companyConsistency.test.ts` (15), `tests/db.purchaseBill.test.ts` (21), `tests/db.purchaseOrderChallan.test.ts` (26) | voucher balance not DB-enforced (no vouchers yet) | ERP-005, ERP-016 |
 
 ---
 
@@ -95,34 +104,36 @@
 | ERP-004 | Test + CI baseline | P1 | **Done (pushed `0fd03ab`; first CI run green)** | Prevent a repeat of ERP-001; safety net for accounting work | — | Vitest; unit tests for decimal + master definitions; API integration tests (master registry/CRUD, term rules, opening balance); GitHub Actions runs build + tests on Postgres | 154 tests pass; mutation checks; fresh-copy CI replay (section G). First GitHub Actions run (`39455007886`) green |
 | ERP-002 | Authentication, authorization, tenant isolation | P0 | **Deferred by owner (2026-10-20)** | Stop cross-company access and user spoofing before any real data | Decision: auth approach (see F) | Login; server derives user + allowed companies from session; every route checks company membership and role; `userId` never read from body; tests for cross-tenant denial | Authz tests |
 | ERP-003 | Commit real migrations; move invariants into DB | P1 | **Done (committed `7547005`)** | Reviewable, repeatable schema changes | — | `drizzle/` un-ignored; baseline migration; GL company triggers (+ parent-ledger rule, group/sub-group move guards, pre-flight on dirty data); fresh-DB and legacy-DB upgrade paths; FK name fixed; CI drift check | See section G (fresh DB, legacy `db:push` DB, dirty DB, idempotence, drift, 162 tests) |
-| ERP-005 | Journal Voucher posting service | P1 | Backlog | First real financial transaction | ERP-014 (ERP-015 done; ERP-002 deferred: service takes an explicit `actorUserId` so real auth plugs in later; until then it is dev-only) | Atomic post; Σdebit = Σcredit enforced in service **and** DB; fiscal-year open + not closed; GL active/company-scoped; numbering; reversal (never edit posted); audit fields | Concrete Dr/Cr example tests |
+| ERP-005 | Journal Voucher posting service: **generalise** the purchase service's private `writeVoucher` / balance check / reversal into one shared service (do not build a second poster) | P1 | Backlog | First real financial transaction | ERP-014 (ERP-015 done; ERP-002 deferred: service takes an explicit `actorUserId` so real auth plugs in later; until then it is dev-only) | Atomic post; Σdebit = Σcredit enforced in service **and** DB; fiscal-year open + not closed; GL active/company-scoped; numbering; reversal (never edit posted); audit fields | Concrete Dr/Cr example tests |
 | ERP-006 | Cash/Bank Voucher | P1 | Backlog | Receipts/payments | ERP-005 | Same controls as ERP-005 | Tests |
 | ERP-007 | Fiscal-year close + period lock | P2 | Backlog | Audit freeze | ERP-005 | Close blocks posting; carry-forward creates openings (schema has roll-forward trace column) | Tests |
 | ERP-008 | Reports: Ledger, Trial Balance, P&L, Balance Sheet | P2 | Backlog | Financial visibility | ERP-005 | TB balances; BS equation holds; ties to control accounts | Tests |
-| ERP-009 | Sales & Purchase documents + terms calc engine | P2 | Backlog | Core trade workflow | ERP-005, ERP-008 | Terms calculated in `sequence` order, SINGLE_TERM base earlier, landed-cost allocation, posts journal | Tests |
+| ERP-009 | Sales documents; reuse the purchase terms calc engine (`server/services/purchase/terms.ts`, `docTerms.ts`) | P2 | Backlog (purchase side done under ERP-020's service) | Core trade workflow | ERP-005, ERP-008 | Terms calculated in `sequence` order, SINGLE_TERM base earlier, landed-cost allocation, posts journal | Tests |
 | ERP-010 | Hygiene: single lockfile, README/package manager, FK name length | P3 | **Done** (lockfile + README in `0fd03ab`; FK rename in `7547005`) | Maintainability | — | Lockfile + README done; FK now has an explicit short name (ERP-003) | Clean install |
 | ERP-011 | Align `toCents` (truncates) with `mulRound2` (rounds) | P3 | Backlog | Avoid 1-paisa drift if both are ever mixed | — | One documented rounding rule; test updated (currently characterizes truncation) | `tests/decimal.test.ts` |
 | ERP-012 | Close lock/save race in opening balance | P2 | Backlog | Locked balances must not change | ERP-004 | Check lock/closed state and write inside one transaction with a row lock; concurrent test | Concurrency test |
-| ERP-016 | Per-voucher balance (Dr = Cr) and posted-voucher immutability enforced in the database | P1 | Backlog | Books cannot be unbalanced or silently edited even by a buggy code path | ERP-005 design | Deferred constraint trigger on voucher lines + status guard; tests with concrete Dr/Cr examples | Red-first DB tests |
+| ERP-016 | Per-voucher balance (Dr = Cr) and posted-voucher immutability enforced in the database (**now more urgent: purchase posting already writes vouchers with the check in app code only**) | P1 | Backlog | Books cannot be unbalanced or silently edited even by a buggy code path | ERP-005 design | Deferred constraint trigger on voucher lines + status guard; tests with concrete Dr/Cr examples | Red-first DB tests |
 | ERP-013 | Master list latency | P3 | Backlog (low) | Snappy screens | — | Only if slowness appears in real use on the owner's machine (his run: 22 lists in ~1.3 s) | Timing |
 | ERP-015 | DB-level company consistency for all tenant-scoped links (OpeningBalance, StockOpening, SubLedger, Party, Voucher tables…) | P1 | **Done (committed `7547005`)** | A bug or new code path must not be able to mix companies' books | ERP-003 | Registry-driven generic trigger (`namo.company_source`/`company_link`) covering every tenant-scoped table; completeness test fails CI if a new FK is unregistered; audit function; migration with dirty-data pre-flight | 15 tests red-then-green; mutation checks; legacy + dirty upgrade paths (section G) |
-| ERP-014 | Extend tests: party, product, stock opening + reconciliation, sub-ledger, user access, company/branch/fiscal-year masters | P1 | **Done (party pushed `a2e6a31`; the other five files are in the session-5 patch, uncommitted)** | Cover the remaining existing workflows before building on them | ERP-004 | Each route has success + failure + invariant tests | 317/317 locally (191 before + 126 new); mutation checks on every file; table row counts identical across repeated runs (section G). Owner: apply patch, `pnpm test:db` twice, commit, check CI |
+| ERP-014 | Extend tests: party, product, stock opening + reconciliation, sub-ledger, user access, company/branch/fiscal-year masters | P1 | **Done (party `a2e6a31`; the other five files `60a1cd0`, merged to `main` in `dbf5b4b`)** | Cover the remaining existing workflows before building on them | ERP-004 | Each route has success + failure + invariant tests | 317/317 in session 5; **re-verified in session 6 on the merged `main`: 338/338 twice** (317 + 21 purchase-bill DB tests). Mutation checks on every file (session 5). Remaining owner item: check the GitHub Actions run |
 | ERP-018 | Map database errors correctly: read `err.cause?.code` (fall back to `err.code`); never return SQL text to clients | P1 | **Backlog (reproduced)** | The DB safety net must answer 409, and clients must never see SQL | — | `server/app.ts` handler maps 23505 / 23503 / 23514 to 409 with a safe message; unknown 500s return a generic message (details only in the server log); the `it.fails` test in `tests/api.company.test.ts` becomes a plain `it`; one test that reaches 23514 through an API route | The `it.fails` test starts failing the moment the fix lands |
 | ERP-017 | Stock opening: a save of more than ~1,300 rows answers 500; the 5000-row rule is unreachable | P2 | **Backlog (reproduced)** | Large catalogues must save, or be refused with a clear message | ERP-018 (same error handler) | Raise the JSON body limit for that route (or save in pages); `entity.too.large` answered 413 with a message; the 5000-row rule reachable and tested; the `it.fails` test in `tests/api.stockOpening.test.ts` becomes a plain `it` | Same signal |
 | ERP-019 | Tests for the remaining custom master rules: General Ledger (parent hierarchy and cycles, party-linked ledgers, "Requires Sub Ledger" toggle), Location hierarchy, Account Group / Sub Group, and the simple masters (Area, Sub Area, Agent, Unit, Tax Rate, Stock Category, Product Group) | P2 | Backlog | Finish covering every existing master before building on them | ERP-004 | Success + failure + invariant tests per master | CI green |
+
+| ERP-020 | Purchase documents: API routes + screens (order, challan, bill), permissions, and the stock/inventory accounting decision | P2 | Backlog (service layer **done** in `69b5559`) | Make the existing service usable | ERP-018, ERP-016, ERP-002 (or an explicit dev-only actor), owner's inventory-method answer (section B) | Routes call `server/services/purchase` only (no duplicated logic); server-side validation and company scoping; errors map to 4xx; screens for order, challan, bill with keyboard entry; route tests incl. cross-company denial and double-post; stock ledger / inventory posting per the owner's decision | Route tests + manual UI check |
+| ERP-022 | Harden the purchase layer: mutation-check the 73 new tests; add concurrent tests (two posts of one bill, two numberings, billing the same challan quantity twice) | P2 | Backlog | Prove the service holds under real use | — | Each business rule broken on purpose makes a test fail; concurrent tests pass; any race found is fixed | Mutation + concurrency runs |
+| ERP-021 | Housekeeping: delete merged branch `claude/purchase-bill-schema`; decide whether tracker/PR descriptions should record the purchase-bill design rules (currently only in schema comments and migration SQL) | P3 | Backlog | Tidy repo | — | Branch removed by the owner; design rules mirrored in section F | — |
 
 ---
 
 ## E. Current task and next action
 
-- **Current task:** ERP-014 (tests for the existing untested routes) — **done locally, delivered as a patch, uncommitted.** Party was done earlier (`a2e6a31`).
-- **Objective:** Cover the existing workflows before building transactional accounting on top of them.
-- **Work done (session 5):** 126 new API integration tests in five files: Product 31, Stock Opening + reconciliation 44, Sub Ledger 11, Users + User Access 14, Company / Branch / Fiscal Year 26. Suite: 317 tests in 13 files, all passing locally. Every file was mutation-checked (a business rule broken on purpose; the tests failed each time; production files restored, git clean). Each file removes what it creates (identical table row counts across repeated runs). **No production code was changed.** Two real defects were found and are recorded as `it.fails` tests so CI stays green: ERP-018 and ERP-017 (section B, section D).
-- **Files changed (uncommitted):** `tests/api.product.test.ts`, `tests/api.stockOpening.test.ts`, `tests/api.subLedger.test.ts`, `tests/api.userAccess.test.ts`, `tests/api.company.test.ts` (all new) and `PROJECT_TRACKER.md`.
-- **Owner actions (2026-10-22):** `pnpm db:baseline` — refused, migration history already existed (nothing changed); `pnpm db:migrate` — "Migrations applied"; Purchase Term + Sales Term screens — both show up in the browser; `pnpm test:db` twice in a row — the owner was running it when this was written, **result not reported to me**.
-- **Remaining for ERP-014:** apply the patch (`git apply`), run `pnpm test:db` twice on Windows (expect 317 passing both times), commit, push, check the GitHub Actions run (also for `7547005` and `a2e6a31`, which I could not check).
-- **Blocker:** none technical.
-- **Single best next action:** **ERP-018** (small, P1): make `server/app.ts` read `err.cause?.code`. Reason: ERP-005 / ERP-016 will rely on database constraints (Dr = Cr, posted-voucher immutability) answering a clear 409, and today those errors would surface as 500 with SQL text. Then **ERP-005 + ERP-016** together (Journal Voucher posting with DB-enforced balance). ERP-017 is a small follow-up in the same handler; ERP-019 (remaining masters' tests) can run in parallel.
+- **Current task:** none in progress. Session 7 was verification and tracker reconciliation again (no code changed): the owner pushed `69b5559` after my session-6 audit, so the tracker was one commit behind a second time.
+- **What session 7 established:** `69b5559` builds, migrates, seeds and passes 411/411 twice. It contains a purchase service that already posts and reverses balanced journal vouchers. The database still does not enforce Dr = Cr or voucher immutability. ERP-017 / ERP-018 are unchanged and still open.
+- **Files changed this session:** `PROJECT_TRACKER.md` only (not committed, not pushed).
+- **Owner actions still open:** (1) check GitHub Actions for `7547005`, `a2e6a31`, `60a1cd0`, `dbf5b4b`, `69b5559`; (2) run `pnpm db:migrate` on the dev DB (applies 0003-0006) and report; (3) commit this tracker; (4) answer the inventory-method question (section B) before ERP-020; (5) optionally delete the merged branch.
+- **Blocker:** none technical. No GitHub write access or Actions status from the sandbox.
+- **Single best next action: ERP-018** (P1, small; `server/app.ts` must read `err.cause?.code`, generic message for unknown 500s, turn the `it.fails` test in `tests/api.company.test.ts` into a plain `it`). Then **ERP-016** (DB-enforced Dr = Cr and posted-voucher immutability; the purchase service's existing tests become the regression suite and must stay green), then ERP-005 (generalise the voucher writer), ERP-017, ERP-022, ERP-020. Order reason: the purchase layer already depends on a database safety net that does not exist yet.
 
 ---
 
@@ -144,7 +155,12 @@
 - (S4) Implementation notes: trigger fires only when a company-relevant column is written (`UPDATE OF ...`); named `namo_company_consistency` so the more specific ERP-003 triggers (uppercase names) run first and their messages win; no row locks (company is immutable, so a parent's company cannot change underneath a check); functions are VOLATILE so they see rows written earlier in the same transaction. Cost: a few indexed lookups per write to registered tables.
 - (S5) A test that documents a **reproduced defect** uses `it.fails` with a comment naming the ERP id: CI stays green, and the test starts failing once the defect is fixed, which is the signal to turn it into a plain `it`. Two exist: ERP-017 (`tests/api.stockOpening.test.ts`), ERP-018 (`tests/api.company.test.ts`). Tests remove the data they create; users cannot be deleted through the API, so `tests/api.userAccess.test.ts` removes its own users directly in the database. The company/branch/fiscal-year tests build everything inside a throw-away **inactive** company so it never shows in the header switcher and the seeded companies are only read.
 
+- (S6) **Purchase Bill design, as merged by the owner in PR #2 (taken from the schema comments and migrations; I did not independently confirm these business rules with the owner):** (a) invoice number unique per branch + fiscal year (vouchers stay unique per branch); (b) `invoiceType` (LOCAL / IMPORT) and `purchaseType` (goods/service x capital/other) are separate; the legacy \"Taxable Capital\" option was retired; (c) billing terms are not columns on the bill: they live in `PurchaseDocumentTerm` with `documentType = PURCHASE_BILL`; (d) an ADDITIONAL purchase is a second bill pointing at a main bill (one level only) and may allocate ADDITIONAL-category terms to the main bill's lines (landed cost); (e) vendor is a ledger (e.g. CASH A/C), not necessarily a Party; (f) credit limit, balances, stock qty and total qty are computed on read, not stored; (g) serial numbers are not modelled. Consequence: all totals and posting are service-layer duties (ERP-020). Nepal-specific VAT purchase-book rules are referenced by `purchaseType` but not verified against statute.
+
+- (S7) **Purchase service design, as pushed in `69b5559` (read from the code; not confirmed with the owner):** services live in `server/services/purchase/` and are called with an explicit `actor.userId` and run inside one transaction (`inTx`); numbering is per branch + fiscal year under `pg_advisory_xact_lock`; a bill's quantity is capped by its challan / order (with optional tolerance); a posted bill is immutable and is undone only by a **reversal bill** (new posted bill + voucher with Dr/Cr swapped, only once, not itself reversible, blocked while live additional bills exist); posting writes one voucher: Dr purchase/asset ledger per line and additive terms, Cr deductive terms, Cr vendor; **landed cost is for valuation only and is never double-booked**; posting refuses missing ledgers, zero totals, missing batch/expiry on tracked products, and IMPORT bills without a customs declaration number. Consequence: ERP-005 should reuse this voucher writer; ERP-016 must keep these flows valid.
+
 **Assumptions awaiting owner confirmation:**
+- Inventory method (periodic vs perpetual) and where stock is valued: see section B. Not assumed.
 - Auth approach when ERP-002 resumes; deployment target; Nepal-specific tax/calendar rules (unspecified, not assumed); "Master Account" as an enum on Account Group.
 - Owner's dev DB: baseline preserves it; recreating is the alternative.
 - That a SubLedger with neither ledger nor party is not a real use case (the migration refuses existing ones rather than guessing).
@@ -154,6 +170,38 @@
 ## G. Verification record
 
 Sandbox: Linux, Node 22, pnpm 12.14.0, throwaway PostgreSQL 16 databases (never the owner's DB). Owner independently ran `pnpm test:db` on Windows for ERP-004: 154/154. GitHub Actions run `39455007886` on `0fd03ab`: success (install, schema+seed, build, tests).
+
+**Session 7 (re-pull + purchase service audit, 2026-10-22):**
+| Check | Result |
+|---|---|
+| `git fetch` / `git pull --ff-only` | `dbf5b4b` -> `69b5559` (1 commit by the owner, 23 files, +14,422 lines); upstream did not touch `PROJECT_TRACKER.md` |
+| `pnpm install --frozen-lockfile` | OK |
+| `pnpm exec drizzle-kit generate` (drift) | \"No schema changes\"; `git status --porcelain drizzle` empty |
+| `pnpm build` | exit 0 |
+| `pnpm test:db` run 1 and run 2 | both exit 0; **17 files, 411/411 passed** each time |
+| Count check | 411 = 338 + 26 (`db.purchaseOrderChallan`) + 32 (`service.purchase`) + 15 (`purchase.calc`) |
+| Posting path read | `server/services/purchase/purchaseBill.ts` lines ~255-380: Dr = Cr compared in app code (`dr !== cr` -> HTTP 500, nothing posted); fiscal year checked by `resolveFiscalYear` (exists, active, not closed, date inside); reversal swaps Dr/Cr |
+| Database enforcement check (live test DB catalog) | `JournalVoucher` and `JournalVoucherLine` have only the `namo_company_consistency` trigger and no CHECK/UNIQUE constraints besides keys and the two unique indexes: **no DB-level balance or immutability** |
+| Consumers | grep of `server`, `src`, `shared` for `services/purchase`: no route or UI uses it; routes folder has no purchase file |
+| Concurrency | no `Promise.all` / concurrent test in `tests/service.purchase.test.ts`; numbering uses an advisory lock, bill locking uses `FOR UPDATE` (read, not stress-tested) |
+| Not run | GitHub Actions (rate-limited); mutation checks of the 73 new tests; dev-DB migration; runtime server/UI; legacy and dirty-data upgrade paths for 0006 |
+
+**Session 6 (fresh clone + reconciliation, 2026-10-22) — superseded by session 7 for current counts (338 then; 411 now):**
+| Check | Result |
+|---|---|
+| `git clone https://github.com/escorpyy/namo` | OK; `main` = `dbf5b4b`; branches: `main`, `claude/purchase-bill-schema`; clean tree |
+| Sandbox | Node 22.22.2, pnpm 12.14.0, PostgreSQL 16 installed via apt (throw-away DB `namoerp_test`) |
+| `pnpm install --frozen-lockfile` | OK |
+| `pnpm exec drizzle-kit generate` (CI drift check) | \"No schema changes, nothing to migrate\"; `git status --porcelain drizzle` empty |
+| `pnpm build` (tsc --noEmit + vite build) | exit 0, 1602 modules, built in ~3 s |
+| `pnpm test:db` run 1 (migrate 0000-0005, seed, vitest) | exit 0; **14 files, 338/338 passed** |
+| `pnpm test:db` run 2 (immediately after) | exit 0; **14 files, 338/338 passed** (shows repeatability) |
+| Count check | 338 = 317 (session 5) + 21 (`tests/db.purchaseBill.test.ts`) |
+| Known defects still present | `it.fails` at `tests/api.stockOpening.test.ts:189` (ERP-017) and `tests/api.company.test.ts:169` (ERP-018); handler in `server/app.ts` still reads `err.code`; `express.json()` still default |
+| Purchase Bill structure | `drizzle-kit` listed `PurchaseBill` (31 cols, 12 indexes, 10 FKs), `PurchaseBillLine` (19 / 6 / 5), `PurchaseBillImportDetail` (20 / 2 / 1); 8 non-internal triggers on the three tables in the test DB; no route, service or UI references them (grep of `server`, `src`, `shared`) |
+| GitHub Actions status | **Not read**: unauthenticated API call returned \"rate limit exceeded\" |
+
+**Session 6 not verified:** GitHub Actions; migrations 0003-0005 on the owner's dev DB, on a legacy `db:push` DB, or over dirty data; the server running end to end (`pnpm start`) and any UI; mutation checks of `tests/db.purchaseBill.test.ts` (I did not break any rule to prove those 21 tests fail when they should; the file was read for coverage only); concurrency; lint (no linter configured). The expected stderr noise in the test log (a Postgres foreign-key error dump) comes from the ERP-018 known-defect path and did not fail anything.
 
 **Session 5 (ERP-014 tests, 2026-10-22):**
 | Check | Result |
@@ -182,7 +230,7 @@ Sandbox: Linux, Node 22, pnpm 12.14.0, throwaway PostgreSQL 16 databases (never 
 
 **Not verified / not run:** ERP-003/ERP-015 steps on real GitHub Actions; the baseline path on the owner's actual dev DB; behavior under truly concurrent transactions (design reasoned, not stress-tested); trigger overhead on large data (not measured); migrations on Supabase/Neon; rollback/down migrations (none; recovery = restore from backup, and no backup/restore procedure exists yet); lint; (the browser check of the two term screens was done by the owner on 2026-10-22).
 
-**Manual verification still required:** after applying the session-5 patch, `pnpm test:db` twice in a row on Windows (expect 317 passing both times; the owner was running it, result not reported); GitHub Actions status for the latest commits. Purchase Term / Sales Term screens: **verified by the owner on 2026-10-22.**
+**Manual verification still required:** `pnpm db:migrate` on the owner's dev DB (applies 0003-0006), then `pnpm test:db` on Windows (expect 411 passing; run it twice); GitHub Actions status for `7547005`, `a2e6a31`, `60a1cd0`, `dbf5b4b`, `69b5559`. Purchase Term / Sales Term screens: **verified by the owner on 2026-10-22.**
 
 ---
 
@@ -209,9 +257,37 @@ Sandbox: Linux, Node 22, pnpm 12.14.0, throwaway PostgreSQL 16 databases (never 
 - Owner actions: baseline refused (history existed), migrate applied, both term screens verified, `test:db` x2 running (result not reported).
 - Verification: section G. **Commit hash: none yet (patch).**
 
+### 2026-10-22 — Session 6 — verification and tracker reconciliation (no code changed)
+- Fresh clone of `dbf5b4b`. Found the tracker one merge behind: the session-5 test patch was already merged (`60a1cd0`) and a Purchase Bill schema (4 commits, migrations 0003-0005, 21 DB tests) had been added by another session. Audited the schema and tests (read, plus counts from the live test DB), reproduced the CI steps (drift check, build, tests x2): all green, 338/338. Re-confirmed ERP-017/ERP-018 still present. Added ERP-020, ERP-021, decision S6, module row, risks and verification record.
+- Files affected: `PROJECT_TRACKER.md`. **Commit hash: none (not committed).**
+
 ---
 
-## HANDOFF (end of session 5)
+### 2026-10-22 — Session 7 — re-pull after `69b5559`, purchase service audit (no code changed)
+- Pulled the owner's new commit (Purchase Order + Challan tables, migration 0006, purchase service layer, 73 tests). Re-ran drift check, build and tests twice: 411/411. Read the posting/reversal path and checked the database catalog: voucher balance and immutability are still not enforced by the database. Recorded: module rows, ERP-005 reframed (generalise the private writer), ERP-016 urgency up, ERP-020 narrowed to API/UI/stock accounting, new ERP-022, decision S7, an inventory-method question for the owner. ERP-009 reworded.
+- Files affected: `PROJECT_TRACKER.md`. **Commit hash: none (not committed).**
+
+---
+
+## HANDOFF (end of session 7)
+
+**Accomplished:** `main` at `69b5559` verified from a fresh pull: install, drift check, build, 411/411 tests twice. Tracker reconciled with the new purchase service and its accounting behaviour; risks and priorities updated.
+
+**Not accomplished / open:** no code changed or committed; Actions status unread; migrations 0003-0006 not confirmed on the owner's dev DB; nothing exercised at runtime (no route or UI exists for the new service); the 73 new tests not mutation-checked; ERP-018 / ERP-017 / ERP-016 / ERP-002 open.
+
+**Repo state:** GitHub `main` = `69b5559`, unchanged by me. Updated `PROJECT_TRACKER.md` is **saved in the sandbox working tree and delivered as a file; not committed, not pushed**.
+
+**Next task:** ERP-018, then ERP-016 (DB-enforced Dr = Cr and voucher immutability), then ERP-005, ERP-017, ERP-022, ERP-020. Owner decision needed on the inventory method before ERP-020.
+
+---
+
+## (superseded) HANDOFF (end of session 6)
+
+**Accomplished:** Fresh clone of GitHub `main` (`dbf5b4b`) verified; tracker reconciled (338/338 then). Superseded by the session-7 handoff above.
+
+---
+
+## (superseded) HANDOFF (end of session 5)
 
 **Accomplished:** ERP-014 finished locally: 126 new API tests (suite 317), every file mutation-checked and self-cleaning. Two real defects found and recorded (ERP-018, ERP-017). Tracker brought in line with the repository (commit state, module statuses, owner actions).
 
