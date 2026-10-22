@@ -43,6 +43,13 @@
       "when": 1792631013221,
       "tag": "0005_purchase_bill_additional",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792631500000,
+      "tag": "0006_purchase_order_challan",
+      "breakpoints": true
     }
   ]
 }

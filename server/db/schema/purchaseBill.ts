@@ -24,6 +24,8 @@ import { generalLedger, subLedger } from "./accounting";
 import { journalVoucher } from "./vouchers";
 import { agent } from "./parties";
 import { location, product, productUnit } from "./products";
+import { purchaseOrder, purchaseOrderLine } from "./purchaseOrder";
+import { purchaseChallan, purchaseChallanLine } from "./purchaseChallan";
 
 // ============================================================
 // PURCHASE BILL  (legacy screen: "Purchase Invoice")
@@ -51,6 +53,7 @@ import { location, product, productUnit } from "./products";
 //   - an Import bill should carry an import detail row (the reverse is DB-enforced)
 //   - isPosted and journalVoucherId are set together by the posting service
 //   - landed cost: allocations are computed by the service, stored on lines
+//   - billed qty may not exceed the challan / order line's pending qty
 //   - serial numbers are not modelled: StockDetail has no tracksSerial yet
 //
 // Drizzle returns numeric as string; use shared/decimal.ts for arithmetic.
@@ -97,10 +100,14 @@ export const purchaseBill = pgTable(
     vendorInvoiceDate: date({ mode: "date" }),
 
     // "Ch No" / "O/A No": the challan (goods receipt) and order this bill
-    // closes. Plain references until challan / purchase order tables exist;
-    // then they become foreign keys.
-    challanNo: varchar({ length: 30 }),
-    orderNo: varchar({ length: 30 }),
+    // closes. Both optional: a service or cash purchase has neither. The line
+    // level links (challanLineId / purchaseOrderLineId) say which lines.
+    purchaseChallanId: integer().references(() => purchaseChallan.id, {
+      onDelete: "restrict",
+    }),
+    purchaseOrderId: integer().references(() => purchaseOrder.id, {
+      onDelete: "restrict",
+    }),
 
     // "Due Days" + "Date" next to it
     dueDays: integer().notNull().default(0),
@@ -157,6 +164,8 @@ export const purchaseBill = pgTable(
     index("PurchaseBill_subLedgerId_idx").on(t.subLedgerId),
     index("PurchaseBill_agentId_idx").on(t.agentId),
     index("PurchaseBill_mainBillId_idx").on(t.mainBillId),
+    index("PurchaseBill_purchaseChallanId_idx").on(t.purchaseChallanId),
+    index("PurchaseBill_purchaseOrderId_idx").on(t.purchaseOrderId),
     index("PurchaseBill_purchaseType_idx").on(t.purchaseType),
     // One voucher belongs to at most one bill.
     uniqueIndex("PurchaseBill_journalVoucherId_key")
@@ -196,6 +205,17 @@ export const purchaseBillLine = pgTable(
       .references(() => product.id, { onDelete: "restrict" }),
     // "Particular": defaults to the product description, editable per line.
     particular: varchar({ length: 256 }),
+
+    // What this line bills. The challan line must belong to the bill's own
+    // challan, the order line to the bill's own order, and the product must
+    // match (enforced by the database). Quantity left to bill on a challan /
+    // order line is derived from these links, not stored.
+    challanLineId: integer().references(() => purchaseChallanLine.id, {
+      onDelete: "restrict",
+    }),
+    purchaseOrderLineId: integer().references(() => purchaseOrderLine.id, {
+      onDelete: "restrict",
+    }),
 
     // First Uom pair: the alternate unit the goods were bought in.
     altQty: money(),
@@ -239,6 +259,8 @@ export const purchaseBillLine = pgTable(
       t.lineNumber,
     ),
     index("PurchaseBillLine_productId_idx").on(t.productId),
+    index("PurchaseBillLine_challanLineId_idx").on(t.challanLineId),
+    index("PurchaseBillLine_purchaseOrderLineId_idx").on(t.purchaseOrderLineId),
     index("PurchaseBillLine_altUnitId_idx").on(t.altUnitId),
     index("PurchaseBillLine_unitId_idx").on(t.unitId),
     index("PurchaseBillLine_locationId_idx").on(t.locationId),

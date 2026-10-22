@@ -18,6 +18,8 @@ import {
   salesTermDefault,
   salesDocumentTerm,
 } from "./billing";
+import { purchaseOrder, purchaseOrderLine } from "./purchaseOrder";
+import { purchaseChallan, purchaseChallanLine } from "./purchaseChallan";
 import { purchaseBill, purchaseBillLine, purchaseBillImportDetail } from "./purchaseBill";
 import {
   productGroup,
@@ -956,6 +958,14 @@ export const purchaseBillRelations = relations(purchaseBill, ({ one, many }) => 
     references: [user.id],
     relationName: "PBCreatedBy",
   }),
+  purchaseChallan: one(purchaseChallan, {
+    fields: [purchaseBill.purchaseChallanId],
+    references: [purchaseChallan.id],
+  }),
+  purchaseOrder: one(purchaseOrder, {
+    fields: [purchaseBill.purchaseOrderId],
+    references: [purchaseOrder.id],
+  }),
   lines: many(purchaseBillLine),
   importDetail: one(purchaseBillImportDetail),
 }));
@@ -972,6 +982,14 @@ export const purchaseBillLineRelations = relations(purchaseBillLine, ({ one }) =
   location: one(location, {
     fields: [purchaseBillLine.locationId],
     references: [location.id],
+  }),
+  challanLine: one(purchaseChallanLine, {
+    fields: [purchaseBillLine.challanLineId],
+    references: [purchaseChallanLine.id],
+  }),
+  purchaseOrderLine: one(purchaseOrderLine, {
+    fields: [purchaseBillLine.purchaseOrderLineId],
+    references: [purchaseOrderLine.id],
   }),
   altUnit: one(productUnit, {
     fields: [purchaseBillLine.altUnitId],
@@ -994,3 +1012,119 @@ export const purchaseBillImportDetailRelations = relations(
     }),
   }),
 );
+
+// ============================================================
+// PURCHASE ORDER
+// ============================================================
+
+export const purchaseOrderRelations = relations(purchaseOrder, ({ one, many }) => ({
+  company: one(company, {
+    fields: [purchaseOrder.companyId],
+    references: [company.id],
+  }),
+  branch: one(branch, {
+    fields: [purchaseOrder.branchId],
+    references: [branch.id],
+  }),
+  vendorGL: one(generalLedger, {
+    fields: [purchaseOrder.vendorGLId],
+    references: [generalLedger.id],
+  }),
+  subLedger: one(subLedger, {
+    fields: [purchaseOrder.subLedgerId],
+    references: [subLedger.id],
+  }),
+  agent: one(agent, {
+    fields: [purchaseOrder.agentId],
+    references: [agent.id],
+  }),
+  lines: many(purchaseOrderLine),
+  challans: many(purchaseChallan),
+  bills: many(purchaseBill),
+}));
+
+export const purchaseOrderLineRelations = relations(purchaseOrderLine, ({ one, many }) => ({
+  purchaseOrder: one(purchaseOrder, {
+    fields: [purchaseOrderLine.purchaseOrderId],
+    references: [purchaseOrder.id],
+  }),
+  product: one(product, {
+    fields: [purchaseOrderLine.productId],
+    references: [product.id],
+  }),
+  altUnit: one(productUnit, {
+    fields: [purchaseOrderLine.altUnitId],
+    references: [productUnit.id],
+    relationName: "POLineAltUnit",
+  }),
+  unit: one(productUnit, {
+    fields: [purchaseOrderLine.unitId],
+    references: [productUnit.id],
+    relationName: "POLineUnit",
+  }),
+  challanLines: many(purchaseChallanLine),
+  billLines: many(purchaseBillLine),
+}));
+
+// ============================================================
+// PURCHASE CHALLAN
+// ============================================================
+
+export const purchaseChallanRelations = relations(purchaseChallan, ({ one, many }) => ({
+  company: one(company, {
+    fields: [purchaseChallan.companyId],
+    references: [company.id],
+  }),
+  branch: one(branch, {
+    fields: [purchaseChallan.branchId],
+    references: [branch.id],
+  }),
+  vendorGL: one(generalLedger, {
+    fields: [purchaseChallan.vendorGLId],
+    references: [generalLedger.id],
+  }),
+  subLedger: one(subLedger, {
+    fields: [purchaseChallan.subLedgerId],
+    references: [subLedger.id],
+  }),
+  agent: one(agent, {
+    fields: [purchaseChallan.agentId],
+    references: [agent.id],
+  }),
+  purchaseOrder: one(purchaseOrder, {
+    fields: [purchaseChallan.purchaseOrderId],
+    references: [purchaseOrder.id],
+  }),
+  lines: many(purchaseChallanLine),
+  bills: many(purchaseBill),
+}));
+
+export const purchaseChallanLineRelations = relations(purchaseChallanLine, ({ one, many }) => ({
+  purchaseChallan: one(purchaseChallan, {
+    fields: [purchaseChallanLine.purchaseChallanId],
+    references: [purchaseChallan.id],
+  }),
+  product: one(product, {
+    fields: [purchaseChallanLine.productId],
+    references: [product.id],
+  }),
+  purchaseOrderLine: one(purchaseOrderLine, {
+    fields: [purchaseChallanLine.purchaseOrderLineId],
+    references: [purchaseOrderLine.id],
+  }),
+  location: one(location, {
+    fields: [purchaseChallanLine.locationId],
+    references: [location.id],
+  }),
+  altUnit: one(productUnit, {
+    fields: [purchaseChallanLine.altUnitId],
+    references: [productUnit.id],
+    relationName: "PCLineAltUnit",
+  }),
+  unit: one(productUnit, {
+    fields: [purchaseChallanLine.unitId],
+    references: [productUnit.id],
+    relationName: "PCLineUnit",
+  }),
+  billLines: many(purchaseBillLine),
+}));

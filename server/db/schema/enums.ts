@@ -156,3 +156,20 @@ export const importTransportModeEnum = pgEnum("ImportTransportMode", [
   "RAIL",
   "OTHER",
 ]);
+
+// ============================================================
+// PURCHASE ORDER
+// ============================================================
+
+// Lifecycle of an order. "Fully received" / "fully billed" are NOT states:
+// they are derived from challan and bill quantities, so they cannot drift.
+//   DRAFT     - being keyed in, freely editable
+//   APPROVED  - sent to the vendor; lines are locked (service layer)
+//   CLOSED    - finished (received/billed, or short-closed by the user)
+//   CANCELLED - withdrawn before it was fulfilled
+export const purchaseOrderStatusEnum = pgEnum("PurchaseOrderStatus", [
+  "DRAFT",
+  "APPROVED",
+  "CLOSED",
+  "CANCELLED",
+]);
