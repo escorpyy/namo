@@ -68,7 +68,7 @@ export const purchaseBill = pgTable(
       .references(() => branch.id, { onDelete: "restrict" }),
 
     documentType: documentTypeEnum().notNull().default("PURCHASE_BILL"),
-    // Local / Import / Taxable Capital: the legacy "Inv Type" dropdown.
+    // Domestic (LOCAL) or IMPORT, chosen when the bill is issued.
     // IMPORT is the switch that enables PurchaseBillImportDetail.
     invoiceType: purchaseInvoiceTypeEnum().notNull().default("LOCAL"),
     // Goods or service, capital or other (VAT purchase book classification).
@@ -113,8 +113,12 @@ export const purchaseBill = pgTable(
 
     remarks: varchar({ length: 1024 }),
 
-    // An additional invoice (freight, clearing charges, ...) can point at the
-    // main invoice it belongs to. See the note in billing.ts.
+    // ADDITIONAL PURCHASE. When set, this bill is an additional invoice of the
+    // main bill: it carries the actual additional charges (import duty, excise,
+    // exchange charges, rounding variance, CSF, CVF, ...) as ADDITIONAL-category
+    // purchase terms. Terms that distribute to lines re-value the MAIN bill's
+    // stock (see the allocation rules in migration 0005). One level only: a main
+    // bill cannot itself be additional.
     mainBillId: integer().references((): AnyPgColumn => purchaseBill.id, {
       onDelete: "restrict",
     }),
@@ -270,7 +274,8 @@ export const purchaseBillLine = pgTable(
 // Based on the Nepal import flow: the importer (or clearing agent) files the
 // customs declaration (Pragyapan Patra) at a customs office, pays customs duty,
 // excise and VAT, and customs certifies the import. The declaration number and
-// date are what the VAT purchase book and the import VAT claim refer to. Goods
+// date are what the VAT purchase book and the import VAT claim refer to. The
+// customs charges themselves are entered on the additional purchase as terms. Goods
 // normally also have a letter of credit (opened through a bank) and a bill of
 // lading / airway bill. A permit is needed only for restricted goods, so it is
 // optional here. Everything is optional except the switch: required fields
@@ -292,13 +297,8 @@ export const purchaseBillImportDetail = pgTable(
     customsOffice: varchar({ length: 100 }), // entry point, e.g. Birgunj
     countryOfOrigin: varchar({ length: 50 }),
 
-    // As assessed by customs, in NPR. These feed the import VAT claim and the
-    // landed cost; the bill's terms (PurchaseDocumentTerm) carry the postings.
-    assessableValue: money(),
-    customsDuty: money(),
-    exciseDuty: money(),
-    importVat: money(),
-    otherCustomsCharges: money(),
+    // No duty / excise / VAT amounts here: those are purchase terms on the
+    // additional purchase (PurchaseDocumentTerm), not columns.
 
     // Payment: letter of credit
     lcNo: varchar({ length: 30 }),
@@ -329,10 +329,6 @@ export const purchaseBillImportDetail = pgTable(
     // over: lookup index for the purchase book and duplicate checks.
     index("PurchaseBillImportDetail_customsDeclarationNo_idx").on(
       t.customsDeclarationNo,
-    ),
-    check(
-      "PurchaseBillImportDetail_amounts_check",
-      sql`coalesce(${t.assessableValue}, 0) >= 0 AND coalesce(${t.customsDuty}, 0) >= 0 AND coalesce(${t.exciseDuty}, 0) >= 0 AND coalesce(${t.importVat}, 0) >= 0 AND coalesce(${t.otherCustomsCharges}, 0) >= 0`,
     ),
   ],
 );

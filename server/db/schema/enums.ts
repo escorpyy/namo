@@ -132,11 +132,11 @@ export const salesTermDocTypeEnum = pgEnum("SalesTermDocType", [
 // PURCHASE BILL
 // ============================================================
 
-// "Inv Type" dropdown on the purchase invoice screen.
+// Domestic or import purchase, chosen when the bill is issued. (The legacy
+// "Taxable Capital" option is gone: capital is now PurchaseType.)
 export const purchaseInvoiceTypeEnum = pgEnum("PurchaseInvoiceType", [
   "LOCAL",
   "IMPORT",
-  "TAXABLE_CAPITAL",
 ]);
 
 // What was bought. Drives the VAT purchase book (goods vs service, capital vs

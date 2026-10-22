@@ -36,6 +36,13 @@
       "when": 1792630327809,
       "tag": "0004_purchase_bill_import_stock",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792631013221,
+      "tag": "0005_purchase_bill_additional",
+      "breakpoints": true
     }
   ]
 }

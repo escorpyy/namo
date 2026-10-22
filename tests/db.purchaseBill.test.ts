@@ -20,7 +20,7 @@ describe.skipIf(!DB_READY)("purchase bill (database level)", () => {
     return (await tx.execute(q))[0].id as number;
   };
 
-  type Co = { co: number; br: number; vendor: number; product: number; unit: number; loc: number; jv: number };
+  type Co = { co: number; br: number; vendor: number; product: number; unit: number; loc: number; jv: number; general: number; additional: number; additionalDistr: number };
 
   async function company(tx: any, tag: string, side: string): Promise<Co> {
     const c = (s: string) => `${s}${side}${tag}`.slice(0, 20);
@@ -36,7 +36,11 @@ describe.skipIf(!DB_READY)("purchase bill (database level)", () => {
     const loc = await ins(tx, "Location", { companyId: co, code: c("LC"), name: "Loc", updatedAt: NOW });
     const jv = await ins(tx, "JournalVoucher", { companyId: co, branchId: br, voucherNumber: c("JV"), voucherDate: "2025-08-01", fiscalYear: "2082/83", updatedAt: NOW });
     await ins(tx, "JournalVoucherLine", { journalVoucherId: jv, lineNumber: 1, generalLedgerId: vendor });
-    return { co, br, vendor, product, unit, loc, jv };
+    // Terms: a GENERAL one, and two ADDITIONAL ones (one spreads over item lines = landed cost).
+    const general = await ins(tx, "PurchaseTerm", { companyId: co, code: c("T1"), name: "Discount", nature: "DEDUCTIVE", category: "GENERAL", updatedAt: NOW });
+    const additional = await ins(tx, "PurchaseTerm", { companyId: co, code: c("T2"), name: "Exchange charge", nature: "ADDITIVE", category: "ADDITIONAL", updatedAt: NOW });
+    const additionalDistr = await ins(tx, "PurchaseTerm", { companyId: co, code: c("T3"), name: "Import duty", nature: "ADDITIVE", category: "ADDITIONAL", distributeToLines: true, allocationBasis: "VALUE", updatedAt: NOW });
+    return { co, br, vendor, product, unit, loc, jv, general, additional, additionalDistr };
   }
 
   const run = async (body: (tx: any, A: Co, B: Co) => Promise<void>) => {
@@ -106,12 +110,12 @@ describe.skipIf(!DB_READY)("purchase bill (database level)", () => {
       });
     });
 
-    it("one import detail per bill; negative customs amounts are refused", async () => {
+    it("one import detail per bill; the retired Taxable Capital type is gone", async () => {
       await run(async (tx, A) => {
         const id = await bill(tx, A, { invoiceType: "IMPORT" });
         await ins(tx, "PurchaseBillImportDetail", { updatedAt: NOW, purchaseBillId: id });
         await refused(tx, () => ins(tx, "PurchaseBillImportDetail", { updatedAt: NOW, purchaseBillId: id }), "23505", /purchaseBillId/);
-        await refused(tx, () => tx.execute(sql`update "PurchaseBillImportDetail" set "customsDuty" = -1 where "purchaseBillId" = ${id}`), CHECK, /amounts_check/);
+        await refused(tx, () => tx.execute(sql`update "PurchaseBill" set "invoiceType" = 'TAXABLE_CAPITAL' where id = ${id}`), "22P02", /PurchaseInvoiceType/);
       });
     });
   });
@@ -172,6 +176,98 @@ describe.skipIf(!DB_READY)("purchase bill (database level)", () => {
         const id = await bill(tx, A);
         await refused(tx, () => ins(tx, "PurchaseBillLine", { purchaseBillId: id, lineNumber: 1, productId: B.product, qty: 1, unitId: A.unit }), CHECK, /company/i);
         await refused(tx, () => tx.execute(sql`update "PurchaseBill" set "companyId" = ${B.co} where id = ${id}`), CHECK, /cannot be changed|company/i);
+      });
+    });
+  });
+
+
+  describe("additional purchase and its terms", () => {
+    const term = (tx: any, A: Co, billId: number, termId: number, over: Record<string, unknown> = {}) =>
+      ins(tx, "PurchaseDocumentTerm", { companyId: A.co, documentType: "PURCHASE_BILL", documentId: billId, termId, sequence: 100, nature: "ADDITIVE", calcBase: "ITEM_VALUE", calcType: "AMOUNT", inputAmount: 100, updatedAt: NOW, ...over });
+    const lineOf = (tx: any, A: Co, billId: number, n = 1) =>
+      ins(tx, "PurchaseBillLine", { purchaseBillId: billId, lineNumber: n, productId: A.product, qty: 10, unitId: A.unit, rate: 5, basicAmount: 50 });
+
+    it("an additional bill must point at a main bill, one level only", async () => {
+      await run(async (tx, A) => {
+        const main = await bill(tx, A, { invoiceType: "IMPORT" });
+        const add = await bill(tx, A, { mainBillId: main });
+        await refused(tx, () => bill(tx, A, { mainBillId: add }), CHECK, /itself an additional bill/i);
+        await refused(tx, () => tx.execute(sql`update "PurchaseBill" set "mainBillId" = ${add} where id = ${main}`), CHECK, /(already has additional|itself an additional)/i);
+      });
+    });
+
+    it("an ADDITIONAL term (import duty, excise, CSF...) is allowed on an additional bill, refused on a main bill", async () => {
+      await run(async (tx, A) => {
+        const main = await bill(tx, A, { invoiceType: "IMPORT" });
+        const add = await bill(tx, A, { mainBillId: main });
+        await term(tx, A, add, A.additional);
+        await refused(tx, () => term(tx, A, main, A.additional), CHECK, /only be entered on an additional purchase bill/i);
+        await term(tx, A, main, A.general, { nature: "DEDUCTIVE" }); // GENERAL terms stay fine on a main bill
+      });
+    });
+
+    it("a PURCHASE_BILL term must point at a real bill of its own company", async () => {
+      await run(async (tx, A, B) => {
+        await refused(tx, () => term(tx, A, 999999, A.general), CHECK, /does not exist/i);
+        const other = await bill(tx, B);
+        await refused(tx, () => term(tx, A, other, A.general), CHECK, /company/i);
+      });
+    });
+
+    it("a line-level term must sit on a line of that very bill", async () => {
+      await run(async (tx, A) => {
+        const b1 = await bill(tx, A);
+        const b2 = await bill(tx, A);
+        const l2 = await lineOf(tx, A, b2);
+        await refused(tx, () => term(tx, A, b1, A.general, { documentLineId: l2 }), CHECK, /not a line of purchase bill/i);
+      });
+    });
+
+    it("landed cost: an additional bill's term can be allocated to lines of the MAIN bill (stock valuation)", async () => {
+      await run(async (tx, A) => {
+        const main = await bill(tx, A, { invoiceType: "IMPORT" });
+        const l1 = await lineOf(tx, A, main, 1);
+        const l2 = await lineOf(tx, A, main, 2);
+        const add = await bill(tx, A, { mainBillId: main });
+        const t = await term(tx, A, add, A.additionalDistr, { distributeToLines: true, allocationBasis: "VALUE" });
+        await ins(tx, "PurchaseDocumentTermAllocation", { documentTermId: t, documentLineId: l1, allocatedAmount: 60 });
+        await ins(tx, "PurchaseDocumentTermAllocation", { documentTermId: t, documentLineId: l2, allocatedAmount: 40 });
+      });
+    });
+
+    it("allocation to a line of an unrelated bill is refused; so is allocating a line-level term", async () => {
+      await run(async (tx, A) => {
+        const main = await bill(tx, A, { invoiceType: "IMPORT" });
+        const add = await bill(tx, A, { mainBillId: main });
+        const unrelated = await bill(tx, A);
+        const lu = await lineOf(tx, A, unrelated);
+        const t = await term(tx, A, add, A.additionalDistr, { distributeToLines: true, allocationBasis: "VALUE" });
+        await refused(tx, () => ins(tx, "PurchaseDocumentTermAllocation", { documentTermId: t, documentLineId: lu, allocatedAmount: 1 }), CHECK, /neither the bill of this term/i);
+        await refused(tx, () => ins(tx, "PurchaseDocumentTermAllocation", { documentTermId: t, documentLineId: 999999, allocatedAmount: 1 }), CHECK, /not a purchase bill line/i);
+      });
+    });
+
+    it("a main bill line cannot be deleted while an additional bill still allocates cost to it; its own allocations go with it", async () => {
+      await run(async (tx, A) => {
+        const main = await bill(tx, A, { invoiceType: "IMPORT" });
+        const l1 = await lineOf(tx, A, main, 1);
+        const add = await bill(tx, A, { mainBillId: main });
+        const t = await term(tx, A, add, A.additionalDistr, { distributeToLines: true, allocationBasis: "VALUE" });
+        await ins(tx, "PurchaseDocumentTermAllocation", { documentTermId: t, documentLineId: l1, allocatedAmount: 100 });
+        await refused(tx, () => tx.execute(sql`delete from "PurchaseBillLine" where id = ${l1}`), CHECK, /additional purchase bill/i);
+      });
+    });
+
+    it("deleting a bill removes its terms and their allocations", async () => {
+      await run(async (tx, A) => {
+        const b = await bill(tx, A);
+        const l = await lineOf(tx, A, b);
+        const t = await term(tx, A, b, A.general, { nature: "DEDUCTIVE", distributeToLines: true, allocationBasis: "VALUE" });
+        await ins(tx, "PurchaseDocumentTermAllocation", { documentTermId: t, documentLineId: l, allocatedAmount: 10 });
+        await tx.execute(sql`delete from "PurchaseBill" where id = ${b}`);
+        const n = async (q: any) => ((await tx.execute(q)) as any[])[0].n as number;
+        expect(await n(sql`select count(*)::int as n from "PurchaseDocumentTerm" where "documentType" = 'PURCHASE_BILL' and "documentId" = ${b}`)).toBe(0);
+        expect(await n(sql`select count(*)::int as n from "PurchaseDocumentTermAllocation" where "documentTermId" = ${t}`)).toBe(0);
       });
     });
   });
