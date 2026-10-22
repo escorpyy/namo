@@ -11,7 +11,7 @@
 |---|---|
 | Repository | https://github.com/escorpyy/namo |
 | Default branch | `main` (verified via `origin/HEAD`) |
-| Active dev branch | `main`. Remote also lists `claude/purchase-bill-schema` (merged via PR #2; can be deleted). Owner commits straight to `main` |
+| Active dev branch | `erp-016-db-voucher-balance` (ERP-016 work in progress; not merged). |
 | Frontend | React 18 + Vite 5 + Tailwind 3 + TypeScript 5 |
 | Backend | Express 4 + TypeScript (run with `tsx`) |
 | Database / ORM | PostgreSQL 16 + Drizzle ORM 0.44.7 (committed migrations in `drizzle/`, applied with `pnpm db:migrate`; `db:push` only for throw-away experiments) |
@@ -24,8 +24,8 @@
 
 ## B. Current project state
 
-- **Latest inspected commit:** `f6b8417` (tracker only: the session 9 tracker, committed by the owner, 2026-10-22 16:09 +0545) on top of `1079c7d` (`erp-018 dberrormapping`, 2026-10-22 16:03 +0545: the ERP-018 fix, its tests and the tracker) on top of `c209436` (tracker only) on top of `69b5559`. Details of `69b5559`: (`purchase-order-challan-services`, 2026-10-22 13:31 +0545) on `origin/main`, fast-forwarded from `dbf5b4b` in session 7. It adds Purchase Order + Purchase Challan tables (migration 0006, 12 triggers), a **purchase service layer** (`server/services/purchase/`, 1,342 lines: order -> challan -> bill, term pricing, landed cost, posting to a journal voucher, reversal) and 73 tests. `dbf5b4b` and earlier: see change log. GitHub Actions status of any commit after `0fd03ab` is **still unread** (API rate-limited from the sandbox): **owner to check the Actions tab** (now includes `c209436` and `1079c7d`).
-- **Branch:** `main`
+- **Latest inspected main commit before ERP-016:** `f6b8417`. ERP-016 branch created from `main`; migration, test and journal updates are in progress on `erp-016-db-voucher-balance`. Details of `69b5559`: (`purchase-order-challan-services`, 2026-10-22 13:31 +0545) on `origin/main`, fast-forwarded from `dbf5b4b` in session 7. It adds Purchase Order + Purchase Challan tables (migration 0006, 12 triggers), a **purchase service layer** (`server/services/purchase/`, 1,342 lines: order -> challan -> bill, term pricing, landed cost, posting to a journal voucher, reversal) and 73 tests. `dbf5b4b` and earlier: see change log. GitHub Actions status of any commit after `0fd03ab` is **still unread** (API rate-limited from the sandbox): **owner to check the Actions tab** (now includes `c209436` and `1079c7d`).
+- **Branch:** `erp-016-db-voucher-balance` (isolated work; `main` untouched).
 - **Working tree (session 10):** fresh clone at `f6b8417` (= `origin/main`); the only local change is this tracker update. Sessions 9 and 10 changed **no application code**; the last code change is the owner's ERP-018 commit `1079c7d`.
 - **Package manager:** pnpm (owner's choice). `package-lock.json` removed in the ERP-004 changes.
 - **Phase:** Foundation / master-data, with an automated safety net (tests + CI) and committed migrations. Purchase documents (order, challan, bill) now exist as tables, DB triggers **and a tested service layer that can post and reverse a balanced journal voucher** (service tests only: **no route, no screen, no auth**). Everything else transactional is still missing: generic voucher posting, sales, reports.
@@ -39,7 +39,7 @@
 - (Session 5) API tests now cover Product (31), Stock Opening + reconciliation (44), Sub Ledger (11), Users + User Access (14), Company / Branch / Fiscal Year (26); evidence in section G.
 
 ### Partially implemented
-- **Purchase Order -> Challan -> Bill (schema + service, no API/UI):** tables in `server/db/schema/purchaseOrder.ts`, `purchaseChallan.ts`, `purchaseBill.ts` (migrations 0003-0006); rules in the database (same-company links, import detail only on IMPORT bills, additional bill one level, term/allocation checks, unique numbers per branch + fiscal year, posted bill must name its voucher) and in the service (`server/services/purchase/*`): totals from lines + terms in exact arithmetic, due date, alt-qty conversion, fiscal year must exist / be active / be open, per-branch-and-year numbering under a transaction advisory lock, bill quantity capped by challan/order (with optional tolerance), landed cost for stock valuation, post = one journal voucher (Dr purchase/asset ledgers and additive terms, Cr deductive terms, Cr vendor), reverse = new posted bill + voucher with Dr/Cr swapped. **Gaps:** nothing calls the service (no route, no UI); `actorUserId` is passed in by the caller (no auth, ERP-002); Dr = Cr is checked **in application code only** (ERP-016); no stock ledger or inventory-account posting exists (purchases go to the product's purchase ledger; landed cost is stored on lines only); no concurrent-request tests; the 73 new tests were not mutation-checked.
+- **Purchase Order -> Challan -> Bill (schema + service, no API/UI):** tables in `server/db/schema/purchaseOrder.ts`, `purchaseChallan.ts`, `purchaseBill.ts` (migrations 0003-0006); rules in the database (same-company links, import detail only on IMPORT bills, additional bill one level, term/allocation checks, unique numbers per branch + fiscal year, posted bill must name its voucher) and in the service (`server/services/purchase/*`): totals from lines + terms in exact arithmetic, due date, alt-qty conversion, fiscal year must exist / be active / be open, per-branch-and-year numbering under a transaction advisory lock, bill quantity capped by challan/order (with optional tolerance), landed cost for stock valuation, post = one journal voucher (Dr purchase/asset ledgers and additive terms, Cr deductive terms, Cr vendor), reverse = new posted bill + voucher with Dr/Cr swapped. **Gaps:** nothing calls the service (no route, no UI); `actorUserId` is passed in by the caller (no auth, ERP-002); Dr = Cr is checked in application code; ERP-016 DB trigger migration is in progress and not yet runtime-verified; no stock ledger or inventory-account posting exists (purchases go to the product's purchase ledger; landed cost is stored on lines only); no concurrent-request tests; the 73 new tests were not mutation-checked.
 - Opening Balance grid: API tested (17 tests); UI **not** checked.
 - Stock Opening grid + stock reconciliation: API tested (44 tests, session 5); UI **not** checked.
 - Billing-terms schema: master tables done; document-level tables (`*DocumentTerm`, allocation) exist in schema with no documents to attach to.
@@ -47,7 +47,7 @@
 
 ### Confirmed missing
 - Authentication, authorization, tenant isolation.
-- Generic Journal Voucher / Cash-Bank Voucher posting (a private voucher writer exists inside the purchase service only: `writeVoucher` in `server/services/purchase/purchaseBill.ts`; no routes, no UI; **no database enforcement of Dr = Cr, no company lock date and no audit writer (decision S9: posted vouchers stay editable in an open period, so immutability is no longer the goal)**: the only triggers on `JournalVoucher` / `JournalVoucherLine` are the company-consistency ones, checked in the catalog).
+- Generic Journal Voucher / Cash-Bank Voucher posting (a private voucher writer exists inside the purchase service only: `writeVoucher` in `server/services/purchase/purchaseBill.ts`; no routes, no UI; **ERP-016 database enforcement is being added on an isolated branch; not yet verified. No company lock date and no audit writer (decision S9: posted vouchers stay editable in an open period, so immutability is no longer the goal)**: the only triggers on `JournalVoucher` / `JournalVoucherLine` are the company-consistency ones, checked in the catalog).
 - Purchase documents as a usable feature (service exists, no routes or UI), Sales documents, Returns, Inventory movements / stock ledger, Tax/VAT, Depreciation.
 - Reports (Trial Balance, P&L, Balance Sheet, Ledger).
 - Audit trail writer: the `AuditLog` table exists (`server/db/schema/core.ts`, created in `0000_baseline.sql`) but nothing writes to it: no trigger in migrations 0000-0006 and no code reference (read in session 10). Decision S9 needs it (ERP-024).
@@ -392,3 +392,25 @@ Sandbox: Linux, Node 22, pnpm 12.14.0, throwaway PostgreSQL 16 databases (never 
 **Repo state:** GitHub `main` = `a2e6a31`. One patch against it adds five test files and updates this tracker; it changes no production code.
 
 **Next task:** ERP-018 (database error mapping, small, P1), then ERP-005 + ERP-016 (Journal Voucher posting with DB-enforced balance). ERP-017 and ERP-019 are smaller follow-ups.
+
+
+---
+
+## Current handoff — ERP-016 in progress (2026-10-22)
+
+**Branch:** `erp-016-db-voucher-balance` (created from `main`; no changes made to `main`).
+
+**Changes committed to the branch so far:**
+- `drizzle/0007_voucher_balance.sql`: deferred PostgreSQL constraint triggers for posted Journal Vouchers and Cash/Bank Vouchers; line checks reject negative debit/credit and a line carrying both sides.
+- `drizzle/meta/_journal.json`: registers migration 0007.
+- `tests/db.voucherBalance.test.ts`: direct database tests for balanced posting, unbalanced journal/cash-bank posting, editing a posted voucher into imbalance, incomplete drafts, and invalid line amounts.
+
+**Important status:** ERP-016 is **NOT complete**. The GitHub connector can write files, but this session has not run PostgreSQL, migrations, typecheck/build, or the test suite. Do not describe the migration or tests as passing until run locally/CI.
+
+**Review items before merge:**
+1. Run `pnpm test:db` on the isolated local test database; confirm migration 0007 applies and all tests pass.
+2. Review deferred-trigger behavior for line moves between voucher IDs and test rollback semantics; add coverage if needed.
+3. Run `pnpm build` and the full DB suite, then inspect GitHub Actions.
+4. Fix any failures, update the tracker with actual evidence, and open a PR. Do not merge without verified checks.
+
+**Design decision preserved:** vouchers can be edited while their accounting period is open; this task enforces balance only. Audit logging (ERP-024) and company lock date (ERP-025) remain separate tasks.
