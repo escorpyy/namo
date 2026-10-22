@@ -34,7 +34,7 @@ import { product, productUnit } from "./products";
 //   Credit Limit / Current Balance / Outstanding Challan / Total Outstanding
 //     -> vendor ledger + CustomerDetail/VendorDetail, computed on read
 //   Stock Qty / Alt Stock Qty -> stock ledger, computed on read
-//   Total Qty / Total Alt Qty -> qty + freeQty, computed on read
+//   Total Qty / Total Alt Qty -> sums of the lines, computed on read
 //
 // Rules left to the service layer:
 //   - totals (basicAmount, termAmount, totalAmount) = sum of lines / terms
@@ -93,25 +93,10 @@ export const purchaseBill = pgTable(
     dueDays: integer().notNull().default(0),
     dueDate: date({ mode: "date" }),
 
-    // "Class" is a free code until its master is known.
-    classCode: varchar({ length: 10 }),
-
-    // "Currency" + "Rate". Rate converts one unit of currencyCode into the
-    // company base currency ("Total Amt In Rs").
-    currencyCode: varchar({ length: 3 }).notNull().default("NPR"),
-    exchangeRate: money().notNull().default("1"),
-
-    // "Address" tab: snapshot of the vendor at bill time, so a later edit of
-    // the master does not rewrite an old bill.
-    vendorAddress: varchar({ length: 255 }),
-    vendorPanNo: varchar({ length: 25 }),
-    shipToAddress: varchar({ length: 255 }),
-
     // Footer. All stored so reports and posting need no recalculation.
     basicAmount: money().notNull().default("0"), // sum of line basicAmount
     termAmount: money().notNull().default("0"), // net of additive/deductive terms
-    totalAmount: money().notNull().default("0"), // in bill currency
-    totalAmountBase: money().notNull().default("0"), // "Total Amt In Rs"
+    totalAmount: money().notNull().default("0"),
 
     remarks: varchar({ length: 1024 }),
 
@@ -152,7 +137,6 @@ export const purchaseBill = pgTable(
     index("PurchaseBill_fiscalYear_idx").on(t.fiscalYear),
     index("PurchaseBill_invoiceDate_idx").on(t.invoiceDate),
     check("PurchaseBill_dueDays_check", sql`${t.dueDays} >= 0`),
-    check("PurchaseBill_exchangeRate_check", sql`${t.exchangeRate} > 0`),
     check(
       "PurchaseBill_not_own_main_check",
       sql`${t.mainBillId} IS NULL OR ${t.mainBillId} <> ${t.id}`,
@@ -164,8 +148,7 @@ export const purchaseBill = pgTable(
   ],
 );
 
-// The grid: S.No, Particular, Alt Qty, Uom, Qty, Uom, Rate, Basic Amt,
-// plus "Free Qty" from the panel below it.
+// The grid: S.No, Particular, Alt Qty, Uom, Qty, Uom, Rate, Basic Amt.
 export const purchaseBillLine = pgTable(
   "PurchaseBillLine",
   {
@@ -192,7 +175,6 @@ export const purchaseBillLine = pgTable(
     unitId: integer()
       .notNull()
       .references(() => productUnit.id, { onDelete: "restrict" }),
-    freeQty: money().notNull().default("0"),
 
     rate: money().notNull().default("0"),
     basicAmount: money().notNull().default("0"), // qty * rate
@@ -210,7 +192,7 @@ export const purchaseBillLine = pgTable(
     check("PurchaseBillLine_lineNumber_check", sql`${t.lineNumber} > 0`),
     check(
       "PurchaseBillLine_amounts_check",
-      sql`${t.qty} >= 0 AND ${t.freeQty} >= 0 AND ${t.rate} >= 0 AND ${t.basicAmount} >= 0`,
+      sql`${t.qty} >= 0 AND ${t.rate} >= 0 AND ${t.basicAmount} >= 0`,
     ),
     // Alt qty and alt unit come as a pair.
     check(

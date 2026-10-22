@@ -17,16 +17,9 @@ CREATE TABLE "PurchaseBill" (
 	"orderNo" varchar(30),
 	"dueDays" integer DEFAULT 0 NOT NULL,
 	"dueDate" date,
-	"classCode" varchar(10),
-	"currencyCode" varchar(3) DEFAULT 'NPR' NOT NULL,
-	"exchangeRate" numeric(18, 6) DEFAULT '1' NOT NULL,
-	"vendorAddress" varchar(255),
-	"vendorPanNo" varchar(25),
-	"shipToAddress" varchar(255),
 	"basicAmount" numeric(18, 6) DEFAULT '0' NOT NULL,
 	"termAmount" numeric(18, 6) DEFAULT '0' NOT NULL,
 	"totalAmount" numeric(18, 6) DEFAULT '0' NOT NULL,
-	"totalAmountBase" numeric(18, 6) DEFAULT '0' NOT NULL,
 	"remarks" varchar(1024),
 	"mainBillId" integer,
 	"reversalOfId" integer,
@@ -37,7 +30,6 @@ CREATE TABLE "PurchaseBill" (
 	"createdAt" timestamp (3) DEFAULT now() NOT NULL,
 	"updatedAt" timestamp (3) NOT NULL,
 	CONSTRAINT "PurchaseBill_dueDays_check" CHECK ("PurchaseBill"."dueDays" >= 0),
-	CONSTRAINT "PurchaseBill_exchangeRate_check" CHECK ("PurchaseBill"."exchangeRate" > 0),
 	CONSTRAINT "PurchaseBill_not_own_main_check" CHECK ("PurchaseBill"."mainBillId" IS NULL OR "PurchaseBill"."mainBillId" <> "PurchaseBill"."id"),
 	CONSTRAINT "PurchaseBill_documentType_check" CHECK ("PurchaseBill"."documentType" = 'PURCHASE_BILL')
 );
@@ -68,12 +60,11 @@ CREATE TABLE "PurchaseBillLine" (
 	"altUnitId" integer,
 	"qty" numeric(18, 6) NOT NULL,
 	"unitId" integer NOT NULL,
-	"freeQty" numeric(18, 6) DEFAULT '0' NOT NULL,
 	"rate" numeric(18, 6) DEFAULT '0' NOT NULL,
 	"basicAmount" numeric(18, 6) DEFAULT '0' NOT NULL,
 	"createdAt" timestamp (3) DEFAULT now() NOT NULL,
 	CONSTRAINT "PurchaseBillLine_lineNumber_check" CHECK ("PurchaseBillLine"."lineNumber" > 0),
-	CONSTRAINT "PurchaseBillLine_amounts_check" CHECK ("PurchaseBillLine"."qty" >= 0 AND "PurchaseBillLine"."freeQty" >= 0 AND "PurchaseBillLine"."rate" >= 0 AND "PurchaseBillLine"."basicAmount" >= 0),
+	CONSTRAINT "PurchaseBillLine_amounts_check" CHECK ("PurchaseBillLine"."qty" >= 0 AND "PurchaseBillLine"."rate" >= 0 AND "PurchaseBillLine"."basicAmount" >= 0),
 	CONSTRAINT "PurchaseBillLine_alt_pair_check" CHECK (("PurchaseBillLine"."altQty" IS NULL) = ("PurchaseBillLine"."altUnitId" IS NULL))
 );
 --> statement-breakpoint
@@ -105,7 +96,8 @@ CREATE UNIQUE INDEX "PurchaseBillImportDetail_purchaseBillId_key" ON "PurchaseBi
 CREATE UNIQUE INDEX "PurchaseBillLine_purchaseBillId_lineNumber_key" ON "PurchaseBillLine" USING btree ("purchaseBillId","lineNumber");--> statement-breakpoint
 CREATE INDEX "PurchaseBillLine_productId_idx" ON "PurchaseBillLine" USING btree ("productId");--> statement-breakpoint
 CREATE INDEX "PurchaseBillLine_altUnitId_idx" ON "PurchaseBillLine" USING btree ("altUnitId");--> statement-breakpoint
-CREATE INDEX "PurchaseBillLine_unitId_idx" ON "PurchaseBillLine" USING btree ("unitId");--> statement-breakpoint
+CREATE INDEX "PurchaseBillLine_unitId_idx" ON "PurchaseBillLine" USING btree ("unitId");
+--> statement-breakpoint
 
 -- Company consistency (ERP-015 registry) for the new tenant-scoped tables.
 -- PurchaseBill carries its own companyId; lines and import detail get their company from the bill.

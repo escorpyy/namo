@@ -1,5 +1,5 @@
 {
-  "id": "3ea9e1ac-215c-4fb1-9fc8-a594cb99b089",
+  "id": "3ce8e373-c879-4d80-901e-2457f2c48bef",
   "prevId": "973317ec-1b07-4d48-85f9-185ec7c26e5b",
   "version": "7",
   "dialect": "postgresql",
@@ -8151,44 +8151,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "classCode": {
-          "name": "classCode",
-          "type": "varchar(10)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "currencyCode": {
-          "name": "currencyCode",
-          "type": "varchar(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'NPR'"
-        },
-        "exchangeRate": {
-          "name": "exchangeRate",
-          "type": "numeric(18, 6)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'1'"
-        },
-        "vendorAddress": {
-          "name": "vendorAddress",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "vendorPanNo": {
-          "name": "vendorPanNo",
-          "type": "varchar(25)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "shipToAddress": {
-          "name": "shipToAddress",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": false
-        },
         "basicAmount": {
           "name": "basicAmount",
           "type": "numeric(18, 6)",
@@ -8205,13 +8167,6 @@
         },
         "totalAmount": {
           "name": "totalAmount",
-          "type": "numeric(18, 6)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'0'"
-        },
-        "totalAmountBase": {
-          "name": "totalAmountBase",
           "type": "numeric(18, 6)",
           "primaryKey": false,
           "notNull": true,
@@ -8578,10 +8533,6 @@
           "name": "PurchaseBill_dueDays_check",
           "value": "\"PurchaseBill\".\"dueDays\" >= 0"
         },
-        "PurchaseBill_exchangeRate_check": {
-          "name": "PurchaseBill_exchangeRate_check",
-          "value": "\"PurchaseBill\".\"exchangeRate\" > 0"
-        },
         "PurchaseBill_not_own_main_check": {
           "name": "PurchaseBill_not_own_main_check",
           "value": "\"PurchaseBill\".\"mainBillId\" IS NULL OR \"PurchaseBill\".\"mainBillId\" <> \"PurchaseBill\".\"id\""
@@ -8773,13 +8724,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "freeQty": {
-          "name": "freeQty",
-          "type": "numeric(18, 6)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'0'"
-        },
         "rate": {
           "name": "rate",
           "type": "numeric(18, 6)",
@@ -8934,7 +8878,7 @@
         },
         "PurchaseBillLine_amounts_check": {
           "name": "PurchaseBillLine_amounts_check",
-          "value": "\"PurchaseBillLine\".\"qty\" >= 0 AND \"PurchaseBillLine\".\"freeQty\" >= 0 AND \"PurchaseBillLine\".\"rate\" >= 0 AND \"PurchaseBillLine\".\"basicAmount\" >= 0"
+          "value": "\"PurchaseBillLine\".\"qty\" >= 0 AND \"PurchaseBillLine\".\"rate\" >= 0 AND \"PurchaseBillLine\".\"basicAmount\" >= 0"
         },
         "PurchaseBillLine_alt_pair_check": {
           "name": "PurchaseBillLine_alt_pair_check",
