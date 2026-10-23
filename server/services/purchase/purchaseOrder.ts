@@ -129,6 +129,17 @@ export function cancelPurchaseOrder(id: number, _actor: Actor, opts: Opts = {}) 
   });
 }
 
+// Delete is for a draft only. Nothing can refer to a DRAFT (challans need an APPROVED order, bills a non-draft one), and the database
+// removes its lines, terms and allocations with it. An approved order that was never used is cancelled, not deleted.
+export function deletePurchaseOrder(id: number, _actor: Actor, opts: Opts = {}) {
+  return inTx(opts.tx, async (tx) => {
+    const o = await lockOrder(tx, id);
+    if (o.status !== "DRAFT") throw new HttpError(409, `Order is ${o.status}; only a DRAFT can be deleted. Cancel or close it instead.`);
+    await tx.delete(S.purchaseOrder).where(eq(S.purchaseOrder.id, id));
+    return { id, deleted: true as const };
+  });
+}
+
 // Ordered / received / billed / pending for each line of an order, worked out from the documents.
 export function getPurchaseOrderProgress(id: number, opts: Opts = {}) {
   return inTx(opts.tx, async (tx) => {

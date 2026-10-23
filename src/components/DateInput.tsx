@@ -9,11 +9,12 @@ interface Props {
   hasError: boolean;
   onBlurField: () => void;
   compact?: boolean; // grid cell: dusre calendar ka hint nahi
+  disabled?: boolean;
 }
 
 // User apne preferred calendar (BS/AD) me type karta hai; form me hamesha AD jaata hai.
 // Digits type karo, dashes apne aap lagte hain (20820401 -> 2082-04-01).
-export function DateInput({ fieldName, value, onChange, calendar, hasError, onBlurField, compact }: Props) {
+export function DateInput({ fieldName, value, onChange, calendar, hasError, onBlurField, compact, disabled }: Props) {
   const show = (v: string) => (v.startsWith("?") ? v.slice(1) : v === "" ? "" : calendar === "BS" ? (adToBs(v) ?? "") : v);
   const [text, setText] = useState(show(value));
 
@@ -39,8 +40,8 @@ export function DateInput({ fieldName, value, onChange, calendar, hasError, onBl
     <div className="relative">
       <input
         data-nav data-field={fieldName} autoComplete="off" inputMode="numeric" maxLength={10}
-        placeholder={`YYYY-MM-DD (${calendar})`} value={text} aria-invalid={hasError}
-        className={`fld tabular-nums ${other ? "pr-28" : ""} ${hasError ? "fld-err" : ""}`}
+        placeholder={`YYYY-MM-DD (${calendar})`} value={text} disabled={disabled} aria-invalid={hasError}
+        className={`fld tabular-nums ${other ? "pr-28" : ""} ${hasError ? "fld-err" : ""} ${disabled ? "bg-slate-100 text-slate-600" : ""}`}
         onChange={(e) => onInput(e.target.value)} onFocus={(e) => e.currentTarget.select()} onBlur={onBlurField}
       />
       {other && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500 tabular-nums pointer-events-none">{other}</span>}

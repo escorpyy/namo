@@ -323,6 +323,16 @@ export function postPurchaseBill(id: number, actor: Actor, opts: Opts & QtyOpts 
   });
 }
 
+// Delete is for a draft only; a posted bill is undone by reversing it. Lines, import detail, terms and allocations go with it.
+export function deletePurchaseBill(id: number, _actor: Actor, opts: Opts = {}) {
+  return inTx(opts.tx, async (tx) => {
+    const b = await lockBill(tx, id);
+    if (b.isPosted) throw new HttpError(409, "A posted bill cannot be deleted. Reverse it instead.");
+    await tx.delete(S.purchaseBill).where(eq(S.purchaseBill.id, id));
+    return { id, deleted: true as const };
+  });
+}
+
 const voucherNumberFor = (b: { id: number; invoiceNumber: string; fiscalYear: string }) => {
   const n = `PB-${b.fiscalYear}-${b.invoiceNumber}`;
   return n.length <= 30 ? n : `PB-${b.id}`;

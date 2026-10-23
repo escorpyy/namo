@@ -17,11 +17,12 @@ interface Props {
   fieldName: string;
   placeholder?: string;
   hasError?: boolean;
+  disabled?: boolean;
 }
 
 // Input me seedha type karo (extra search box nahi). Dropdown sirf focus/typing/ArrowDown par khulta hai
 // aur absolute overlay hai, layout me jagah nahi leta.
-export function Combobox({ value, options, onChange, onCommit, onBlurField, fieldName, placeholder, hasError }: Props) {
+export function Combobox({ value, options, onChange, onCommit, onBlurField, fieldName, placeholder, hasError, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -77,8 +78,9 @@ export function Combobox({ value, options, onChange, onCommit, onBlurField, fiel
         ref={inputRef}
         data-nav
         data-field={fieldName}
-        className={`fld pr-7 ${hasError ? "fld-err" : ""}`}
+        className={`fld pr-7 ${hasError ? "fld-err" : ""} ${disabled ? "bg-slate-100 text-slate-600" : ""}`}
         autoComplete="off"
+        disabled={disabled}
         role="combobox"
         aria-expanded={open}
         placeholder={placeholder}
@@ -102,7 +104,7 @@ export function Combobox({ value, options, onChange, onCommit, onBlurField, fiel
         onKeyDown={onKeyDown}
       />
       <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
-      {open && (
+      {open && !disabled && (
         <ul
           role="listbox"
           onMouseDown={(e) => e.preventDefault()} // click par input blur na ho

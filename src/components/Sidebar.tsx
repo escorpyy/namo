@@ -7,7 +7,7 @@ import {
 import { MASTERS } from "../../shared/masters";
 
 // Master-engine ke bahar ki custom screens (grid etc.)
-export const CUSTOM_SCREENS = ["opening-balance", "stock-opening"];
+export const CUSTOM_SCREENS = ["opening-balance", "stock-opening", "purchase-orders", "purchase-challans", "purchase-bills"];
 
 type Item = { id: string; label: string; icon: React.ElementType };
 type Section = { id: string; label: string; icon: React.ElementType; items: Item[] };
@@ -47,6 +47,14 @@ const sections: Section[] = [
     ],
   },
   {
+    id: "purchase", label: "Purchase", icon: ShoppingCart,
+    items: [
+      { id: "purchase-orders", label: "Purchase Order", icon: ClipboardList },
+      { id: "purchase-challans", label: "Purchase Challan", icon: Package },
+      { id: "purchase-bills", label: "Purchase Bill", icon: Receipt },
+    ],
+  },
+  {
     id: "billing", label: "Billing", icon: Receipt,
     items: [
       { id: "purchase-terms", label: "Purchase Term", icon: ShoppingCart },
@@ -81,7 +89,7 @@ interface Props {
 }
 
 export function Sidebar({ collapsed, active, onToggle, onNavigate, onNotify }: Props) {
-  const [open, setOpen] = useState<Record<string, boolean>>({ accounts: true, parties: true, inventory: true, billing: true, admin: true, vouchers: false });
+  const [open, setOpen] = useState<Record<string, boolean>>({ accounts: true, parties: true, inventory: true, purchase: true, billing: true, admin: true, vouchers: false });
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
     const btns = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("button[data-sb]"));

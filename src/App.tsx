@@ -7,6 +7,9 @@ import { StatusBar } from "./components/StatusBar";
 import MasterScreen from "./screens/MasterScreen";
 import OpeningBalanceScreen from "./screens/OpeningBalanceScreen";
 import StockOpeningScreen from "./screens/StockOpeningScreen";
+import PurchaseOrderScreen from "./screens/purchase/PurchaseOrderScreen";
+import PurchaseChallanScreen from "./screens/purchase/PurchaseChallanScreen";
+import PurchaseBillScreen from "./screens/purchase/PurchaseBillScreen";
 import { MASTERS } from "../shared/masters";
 
 export default function App() {
@@ -20,6 +23,7 @@ export default function App() {
   const [calendar, setCalendar] = useState<"BS" | "AD">(() => (localStorage.getItem("cal") as "BS" | "AD") ?? "BS");
   const [status, setStatus] = useState<StatusInfo>({ mode: "new", count: 0, shown: 0, message: "Loading…", kind: "info" });
   const [note, setNote] = useState<{ text: string; n: number } | null>(null);
+  const [fromChallan, setFromChallan] = useState<{ id: number; n: number } | null>(null);
   const dirtyRef = useRef(false);
 
   const pickDefaults = (c: ContextData["companies"][number]) => {
@@ -101,7 +105,16 @@ export default function App() {
       <div className="flex-1 min-h-0 flex">
         <Sidebar collapsed={collapsed} active={screen} onToggle={toggleSidebar} onNavigate={navigate} onNotify={(text) => setNote({ text, n: Date.now() })} />
         {/* key: screen ya company badalne par list reload + form reset */}
-        {screen === "stock-opening" ? (
+        {screen.startsWith("purchase-") && screen !== "purchase-terms" ? (() => {
+          const k = `${screen}:${companyId}:${branchId}:${fyId}`;
+          const pp = {
+            companyId, branchId, userId: ctx.user.id, branchName: co.branches.find((b) => b.id === branchId)?.name ?? "-",
+            fyCode: co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-", calendar, setStatus, dirtyRef, externalMessage: note,
+          };
+          return screen === "purchase-orders" ? <PurchaseOrderScreen key={k} {...pp} />
+            : screen === "purchase-challans" ? <PurchaseChallanScreen key={k} {...pp} onCreateBill={(id) => { setFromChallan({ id, n: Date.now() }); dirtyRef.current = false; setScreen("purchase-bills"); }} />
+            : <PurchaseBillScreen key={k} {...pp} fromChallan={fromChallan} />;
+        })() : screen === "stock-opening" ? (
           <StockOpeningScreen
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} fyId={fyId}
             branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}

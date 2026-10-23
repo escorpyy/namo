@@ -10,6 +10,7 @@ import { contextRouter } from "./routes/context";
 import { masterRouters } from "./masters";
 import { openingBalanceRouter } from "./routes/openingBalance";
 import { stockOpeningRouter } from "./routes/stockOpening";
+import { purchaseRouter } from "./routes/purchase";
 import { HttpError, pgError } from "./routes/_util";
 
 export const app = express();
@@ -27,6 +28,7 @@ app.get("/api/health", async (_req, res) => {
 app.use("/api/context", contextRouter);
 app.use("/api/opening-balance", openingBalanceRouter);
 app.use("/api/stock-opening", stockOpeningRouter);
+app.use("/api/purchase", purchaseRouter);
 for (const { key, router } of masterRouters) app.use(`/api/masters/${key}`, router);
 
 // Production: build ki hui React app yahin se serve hoti hai (npm run build && npm start)

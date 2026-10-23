@@ -5,3 +5,4 @@ export * from "./purchaseBill";
 export type { LineInput } from "./lines";
 export type { TermInput } from "./docTerms";
 export type { Actor, Tx } from "./common";
+export * from "./queries";

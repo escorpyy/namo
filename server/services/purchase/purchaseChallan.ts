@@ -154,6 +154,16 @@ export function confirmPurchaseChallan(id: number, actor: Actor, opts: Opts & { 
   });
 }
 
+// Delete is for an unconfirmed challan only (a bill needs a confirmed one, so nothing can refer to it).
+export function deletePurchaseChallan(id: number, _actor: Actor, opts: Opts = {}) {
+  return inTx(opts.tx, async (tx) => {
+    const c = await lockChallan(tx, id);
+    if (c.isConfirmed) throw new HttpError(409, "A confirmed challan cannot be deleted; it is a record of goods received.");
+    await tx.delete(S.purchaseChallan).where(eq(S.purchaseChallan.id, id));
+    return { id, deleted: true as const };
+  });
+}
+
 // Received / billed / pending-to-bill for each line of a challan.
 export function getPurchaseChallanProgress(id: number, opts: Opts = {}) {
   return inTx(opts.tx, async (tx) => {
