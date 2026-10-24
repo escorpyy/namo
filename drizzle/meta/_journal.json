@@ -50,6 +50,13 @@
       "when": 1792631500000,
       "tag": "0006_purchase_order_challan",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792827633978,
+      "tag": "0007_voucher_balance",
+      "breakpoints": true
     }
   ]
 }
