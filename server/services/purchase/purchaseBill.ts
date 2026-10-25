@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { withInitialPostedChildInsert } from "../../db/audit";
 import * as S from "../../db/schema";
 import { HttpError } from "../../routes/_util";
 import { type Actor, type Opts, type Tx, addDays, assertBranch, assertVendorLedger, idList, inActorTx, inTx, nextNumber, optDate, parseDate, resolveFiscalYear, today } from "./common";
@@ -340,10 +341,12 @@ const voucherNumberFor = (b: { id: number; invoiceNumber: string; fiscalYear: st
 
 async function writeVoucher(tx: Tx, h: { companyId: number; branchId: number; voucherNumber: string; voucherDate: Date; fiscalYear: string; remarks: string; reversalOfId: number | null }, rows: JvRow[], actor: Actor) {
   const [v] = await tx.insert(S.journalVoucher).values({ ...h, isPosted: true, postedAt: new Date(), postedBy: actor.userId, createdBy: actor.userId }).returning({ id: S.journalVoucher.id });
-  let n = 1;
-  for (const r of rows) {
-    await tx.insert(S.journalVoucherLine).values({ journalVoucherId: v.id, lineNumber: n++, generalLedgerId: r.generalLedgerId, debit: fmt(r.debit, 2), credit: fmt(r.credit, 2), narration: r.narration, agentId: r.agentId ?? null });
-  }
+  await withInitialPostedChildInsert(tx, "JournalVoucherLine", v.id, async () => {
+    let n = 1;
+    for (const r of rows) {
+      await tx.insert(S.journalVoucherLine).values({ journalVoucherId: v.id, lineNumber: n++, generalLedgerId: r.generalLedgerId, debit: fmt(r.debit, 2), credit: fmt(r.credit, 2), narration: r.narration, agentId: r.agentId ?? null });
+    }
+  });
   return v.id;
 }
 
@@ -388,16 +391,20 @@ export function reversePurchaseBill(id: number, actor: Actor, opts: Opts & { dat
     // copy lines and terms (amounts as they were; no challan / order links, no allocations)
     const olines = await tx.select().from(S.purchaseBillLine).where(eq(S.purchaseBillLine.purchaseBillId, orig.id)).orderBy(asc(S.purchaseBillLine.lineNumber));
     const lineMap = new Map<number, number>();
-    for (const l of olines) {
-      const { id: oldId, purchaseBillId: _b, challanLineId: _c, purchaseOrderLineId: _o, createdAt: _t, ...rest } = l;
-      const [nl] = await tx.insert(S.purchaseBillLine).values({ ...rest, purchaseBillId: rb.id }).returning({ id: S.purchaseBillLine.id });
-      lineMap.set(oldId, nl.id);
-    }
+    await withInitialPostedChildInsert(tx, "PurchaseBillLine", rb.id, async () => {
+      for (const l of olines) {
+        const { id: oldId, purchaseBillId: _b, challanLineId: _c, purchaseOrderLineId: _o, createdAt: _t, ...rest } = l;
+        const [nl] = await tx.insert(S.purchaseBillLine).values({ ...rest, purchaseBillId: rb.id }).returning({ id: S.purchaseBillLine.id });
+        lineMap.set(oldId, nl.id);
+      }
+    });
     const oterms = await tx.select().from(S.purchaseDocumentTerm).where(and(eq(S.purchaseDocumentTerm.documentType, "PURCHASE_BILL"), eq(S.purchaseDocumentTerm.documentId, orig.id)));
-    for (const t of oterms) {
-      const { id: _i, createdAt: _c, updatedAt: _u, documentId: _d, documentLineId, ...rest } = t;
-      await tx.insert(S.purchaseDocumentTerm).values({ ...rest, documentId: rb.id, documentLineId: documentLineId ? lineMap.get(documentLineId)! : null });
-    }
+    await withInitialPostedChildInsert(tx, "PurchaseDocumentTerm", rb.id, async () => {
+      for (const t of oterms) {
+        const { id: _i, createdAt: _c, updatedAt: _u, documentId: _d, documentLineId, ...rest } = t;
+        await tx.insert(S.purchaseDocumentTerm).values({ ...rest, documentId: rb.id, documentLineId: documentLineId ? lineMap.get(documentLineId)! : null });
+      }
+    });
 
     if (orig.mainBillId) {
       const ml = await tx.select({ id: S.purchaseBillLine.id }).from(S.purchaseBillLine).where(eq(S.purchaseBillLine.purchaseBillId, orig.mainBillId));

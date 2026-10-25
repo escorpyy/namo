@@ -11,13 +11,18 @@ export const auditRouter = Router();
 
 const ACTIONS = ["INSERT", "UPDATE", "DELETE"] as const;
 const DEFAULT_LIMIT = 50, MAX_LIMIT = 200;
+const MAX_PG_INTEGER = 2_147_483_647n;
+const MAX_PG_BIGINT = 9_223_372_036_854_775_807n;
 
-const posInt = (v: unknown, name: string) => {
-  const s = String(v);
-  if (!/^[1-9]\d{0,17}$/.test(s)) throw new HttpError(400, `${name} must be a positive whole number.`, name);
+const posInt = (s: string, name: string, max: bigint) => {
+  if (!/^[1-9]\d{0,18}$/.test(s) || BigInt(s) > max) throw new HttpError(400, `${name} must be a positive whole number in range.`, name);
   return s;
 };
-const one = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
+const one = (v: unknown, name: string): string | undefined => {
+  if (v === undefined) return undefined;
+  if (typeof v !== "string" || v === "") throw new HttpError(400, `${name} must be provided once as a non-empty value.`, name);
+  return v;
+};
 
 // Fields whose value differs between the old and the new row. updatedAt always moves, so it would only be noise.
 const changedFields = (o: any, n: any): string[] => {
@@ -29,19 +34,23 @@ const changedFields = (o: any, n: any): string[] => {
 // Newest first. `before` is the nextBefore of the previous page; nextBefore is null on the last page. Ids are strings (bigint).
 auditRouter.get("/", wrap(async (req, res) => {
   const q = req.query;
-  if (one(q.companyId) === undefined) throw new HttpError(400, "companyId is required.", "companyId");
-  const companyId = posInt(q.companyId, "companyId");
+  const companyValue = one(q.companyId, "companyId");
+  if (companyValue === undefined) throw new HttpError(400, "companyId is required.", "companyId");
+  const companyId = posInt(companyValue, "companyId", MAX_PG_INTEGER);
 
-  const tableName = one(q.tableName);
+  const tableName = one(q.tableName, "tableName");
   if (tableName !== undefined && !(AUDITED_TABLES as readonly string[]).includes(tableName)) throw new HttpError(400, `tableName must be one of: ${AUDITED_TABLES.join(", ")}.`, "tableName");
-  const action = one(q.action);
+  const action = one(q.action, "action");
   if (action !== undefined && !(ACTIONS as readonly string[]).includes(action)) throw new HttpError(400, `action must be one of: ${ACTIONS.join(", ")}.`, "action");
-  const changedBy = one(q.changedBy) === undefined ? undefined : posInt(q.changedBy, "changedBy");
-  const before = one(q.before) === undefined ? undefined : posInt(q.before, "before");
-  const recordId = one(q.recordId);
+  const changedByValue = one(q.changedBy, "changedBy");
+  const changedBy = changedByValue === undefined ? undefined : posInt(changedByValue, "changedBy", MAX_PG_INTEGER);
+  const beforeValue = one(q.before, "before");
+  const before = beforeValue === undefined ? undefined : posInt(beforeValue, "before", MAX_PG_BIGINT);
+  const recordId = one(q.recordId, "recordId");
   let limit = DEFAULT_LIMIT;
-  if (one(q.limit) !== undefined) {
-    const s = String(q.limit);
+  const limitValue = one(q.limit, "limit");
+  if (limitValue !== undefined) {
+    const s = limitValue;
     limit = /^\d{1,4}$/.test(s) ? Number(s) : 0;
     if (limit < 1 || limit > MAX_LIMIT) throw new HttpError(400, `limit must be between 1 and ${MAX_LIMIT}.`, "limit");
   }

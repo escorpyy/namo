@@ -36,3 +36,32 @@ export async function readAuditContext(tx: Execer): Promise<RawAuditContext> {
 export async function restoreAuditContext(tx: Execer, raw: RawAuditContext): Promise<void> {
   await tx.execute(sql`select set_config('namo.actor_user_id', ${raw.user}, true), set_config('namo.change_reason', ${raw.reason}, true)`);
 }
+
+// Initial posting sometimes creates an already-posted header and its child rows in one service call (the purchase journal
+// voucher and reversal copies). The DB reason guard allows those children only while this exact table/parent pair is scoped.
+// Capture/restore the raw transaction settings so nested writers cannot leak that one-time permission to later statements.
+export async function withInitialPostedChildInsert<T>(tx: Execer, table: string, parentId: number, fn: () => Promise<T>): Promise<T> {
+  const rows = (await tx.execute(sql`
+    select coalesce(current_setting('namo.initial_posted_child_table', true), '') as "table",
+           coalesce(current_setting('namo.initial_posted_child_parent_id', true), '') as "parentId"
+  `)) as unknown as { table: string; parentId: string }[];
+  const previous = rows[0];
+  await tx.execute(sql`
+    select set_config('namo.initial_posted_child_table', ${table}, true),
+           set_config('namo.initial_posted_child_parent_id', ${String(parentId)}, true)
+  `);
+  let completed = false;
+  try {
+    const result = await fn();
+    completed = true;
+    return result;
+  } finally {
+    // If fn failed, its enclosing savepoint/transaction rolls back these settings with the writes.
+    if (completed) {
+      await tx.execute(sql`
+        select set_config('namo.initial_posted_child_table', ${previous.table}, true),
+               set_config('namo.initial_posted_child_parent_id', ${previous.parentId}, true)
+      `);
+    }
+  }
+}

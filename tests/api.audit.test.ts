@@ -117,6 +117,13 @@ describe.skipIf(!DB_READY)("audit trail API", () => {
     ["unknown action", "companyId=1&action=TRUNCATE"],
     ["before not a number", "companyId=1&before=x"],
     ["changedBy not a number", "companyId=1&changedBy=me"],
+    ["companyId above PostgreSQL integer range", "companyId=2147483648"],
+    ["changedBy above PostgreSQL integer range", "companyId=1&changedBy=2147483648"],
+    ["before above PostgreSQL bigint range", "companyId=1&before=9223372036854775808"],
+    ["repeated tableName", "companyId=1&tableName=JournalVoucher&tableName=OpeningBalance"],
+    ["repeated action", "companyId=1&action=INSERT&action=DELETE"],
+    ["repeated recordId", "companyId=1&recordId=1&recordId=2"],
+    ["repeated limit", "companyId=1&limit=10&limit=20"],
   ])("refuses %s with 400", async (_n, qs) => {
     const r = await get(qs);
     expect(r.status).toBe(400);

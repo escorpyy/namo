@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
+import { withInitialPostedChildInsert } from "../server/db/audit";
 import { DB_READY, uniq } from "./helpers";
 
 // ERP-024 part 2: decision S9 says a reason is REQUIRED to edit or delete a posted document. The database enforces it:
@@ -72,11 +73,11 @@ describe.skipIf(!DB_READY)("reason required to change a posted document (databas
   const jv = (tx: any, f: Fx, posted: boolean) =>
     ins(tx, "JournalVoucher", { companyId: f.co, branchId: f.br, voucherNumber: `J${posted ? "P" : "D"}${f.tag}`.slice(0, 20), voucherDate: "2025-08-01", fiscalYear: "2082/83", isPosted: posted, updatedAt: NOW });
   const jline = (tx: any, v: number, n: number, gl: number, debit: string, credit: string) =>
-    ins(tx, "JournalVoucherLine", { journalVoucherId: v, lineNumber: n, generalLedgerId: gl, debit, credit });
+    withInitialPostedChildInsert(tx, "JournalVoucherLine", v, () => ins(tx, "JournalVoucherLine", { journalVoucherId: v, lineNumber: n, generalLedgerId: gl, debit, credit }));
   const cbv = (tx: any, f: Fx, posted: boolean) =>
     ins(tx, "CashBankVoucher", { companyId: f.co, branchId: f.br, voucherNumber: `C${posted ? "P" : "D"}${f.tag}`.slice(0, 20), voucherDate: "2025-08-01", fiscalYear: "2082/83", isPosted: posted, updatedAt: NOW });
   const cline = (tx: any, v: number, n: number, gl: number, debit: string, credit: string) =>
-    ins(tx, "CashBankVoucherLine", { cashBankVoucherId: v, lineNumber: n, generalLedgerId: gl, debit, credit });
+    withInitialPostedChildInsert(tx, "CashBankVoucherLine", v, () => ins(tx, "CashBankVoucherLine", { cashBankVoucherId: v, lineNumber: n, generalLedgerId: gl, debit, credit }));
 
   it("exactly the posted-document tables carry the reason trigger (opening balances do not)", async () => {
     const t = await rows(db, sql`select c.relname as t from pg_trigger g join pg_class c on c.oid = g.tgrelid where g.tgname = 'Audit_reason' and not g.tgisinternal order by 1`);
@@ -159,6 +160,33 @@ describe.skipIf(!DB_READY)("reason required to change a posted document (databas
       });
     });
 
+    it("existing posted vouchers require a reason for added or inbound lines; initial creation remains allowed", async () => {
+      await run(async (tx, f) => {
+        const jPosted = await jv(tx, f, true);
+        await jline(tx, jPosted, 1, f.rent, "10", "0");
+        await jline(tx, jPosted, 2, f.cash, "0", "10");
+        const jDraft = await jv(tx, f, false);
+        const jDraftLine = await jline(tx, jDraft, 1, f.rent, "0", "0");
+
+        const cPosted = await cbv(tx, f, true);
+        await cline(tx, cPosted, 1, f.rent, "10", "0");
+        await cline(tx, cPosted, 2, f.cash, "0", "10");
+        const cDraft = await cbv(tx, f, false);
+        const cDraftLine = await cline(tx, cDraft, 1, f.rent, "0", "0");
+
+        await refused(tx, () => tx.execute(sql`insert into "JournalVoucherLine" ("journalVoucherId", "lineNumber", "generalLedgerId", "debit", "credit") values (${jPosted}, 3, ${f.rent}, 1, 0)`));
+        await refused(tx, () => tx.execute(sql`update "JournalVoucherLine" set "journalVoucherId" = ${jPosted}, "lineNumber" = 3 where id = ${jDraftLine}`));
+        await refused(tx, () => tx.execute(sql`insert into "CashBankVoucherLine" ("cashBankVoucherId", "lineNumber", "generalLedgerId", "debit", "credit") values (${cPosted}, 3, ${f.rent}, 1, 0)`));
+        await refused(tx, () => tx.execute(sql`update "CashBankVoucherLine" set "cashBankVoucherId" = ${cPosted}, "lineNumber" = 3 where id = ${cDraftLine}`));
+
+        await acting(tx, f.user, "add approved voucher lines");
+        await jline(tx, jPosted, 3, f.rent, "1", "0");
+        await jline(tx, jPosted, 4, f.cash, "0", "1");
+        await cline(tx, cPosted, 3, f.rent, "1", "0");
+        await cline(tx, cPosted, 4, f.cash, "0", "1");
+      });
+    });
+
     it("a company deleted with its posted vouchers is not blocked on their lines (the voucher itself is the gate)", async () => {
       await run(async (tx, f) => {
         const v = await jv(tx, f, true);
@@ -221,6 +249,51 @@ describe.skipIf(!DB_READY)("reason required to change a posted document (databas
         await tx.execute(sql`update "PurchaseBill" set "vendorInvoiceNo" = 'V-2' where id = ${s.id}`);
         const log = await rows(tx, sql`select "reason" from "AuditLog" where "tableName" = 'PurchaseBill' and "recordId" = ${String(s.id)} order by id desc limit 1`);
         expect(log[0].reason).toBe("vendor invoice number corrected");
+      });
+    });
+
+    it("existing posted bills require a reason for added or inbound lines, import details, terms and allocations", async () => {
+      const importBillIn = (fx: Fx) => ({
+        ...billIn(fx),
+        invoiceType: "IMPORT" as const,
+        importDetail: { customsDeclarationNo: `CD-${fx.tag}` },
+      });
+      await run(async (tx, f) => {
+        const termId = await ins(tx, "PurchaseTerm", {
+          companyId: f.co, code: `F${f.tag}`.slice(0, 20), name: "Freight", category: "GENERAL", nature: "ADDITIVE",
+          isProductwise: false, isMandatory: false, sequence: 10, defaultCalcType: "AMOUNT", defaultValue: "1",
+          calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "VALUE", generalLedgerId: f.purchase, updatedAt: NOW,
+        });
+        const docTerm = (billId: number) => ins(tx, "PurchaseDocumentTerm", {
+          companyId: f.co, documentType: "PURCHASE_BILL", documentId: billId, termId,
+          sequence: 10, nature: "ADDITIVE", calcBase: "ITEM_VALUE", generalLedgerId: f.purchase,
+          distributeToLines: true, allocationBasis: "VALUE", calcType: "AMOUNT", inputAmount: "1",
+          baseAmount: "100", calculatedAmount: "1", isOverridden: false, finalAmount: "1", updatedAt: NOW,
+        });
+        const p = await svc.savePurchaseBill(importBillIn(f), ACTOR(f), { tx });
+        await svc.postPurchaseBill(p.id, ACTOR(f), { tx });
+        const postedBill = p.id;
+        const [{ id: postedLine }] = await rows(tx, sql`select id from "PurchaseBillLine" where "purchaseBillId" = ${postedBill}`);
+
+        const d = await svc.savePurchaseBill(billIn(f), ACTOR(f), { tx });
+        const [{ id: draftLine }] = await rows(tx, sql`select id from "PurchaseBillLine" where "purchaseBillId" = ${d.id}`);
+        const draftTerm = await docTerm(d.id);
+        const draftAllocation = await ins(tx, "PurchaseDocumentTermAllocation", { documentTermId: draftTerm, documentLineId: draftLine, allocatedAmount: "1" });
+
+        await refused(tx, () => tx.execute(sql`update "PurchaseBillLine" set "purchaseBillId" = ${postedBill}, "lineNumber" = 2 where id = ${draftLine}`));
+        await refused(tx, () => tx.execute(sql`
+          insert into "PurchaseBillLine" ("purchaseBillId", "lineNumber", "productId", "qty", "unitId", "rate", "basicAmount")
+          select ${postedBill}, 99, "productId", "qty", "unitId", "rate", "basicAmount" from "PurchaseBillLine" where id = ${draftLine}
+        `));
+        await refused(tx, () => tx.execute(sql`insert into "PurchaseBillImportDetail" ("purchaseBillId") values (${postedBill})`));
+        await refused(tx, () => tx.execute(sql`update "PurchaseDocumentTerm" set "documentId" = ${postedBill} where id = ${draftTerm}`));
+        await refused(tx, () => docTerm(postedBill));
+
+        await acting(tx, f.user, "add an approved posted-bill charge");
+        const postedTerm = await docTerm(postedBill);
+        await acting(tx, null, "");
+        await refused(tx, () => tx.execute(sql`update "PurchaseDocumentTermAllocation" set "documentTermId" = ${postedTerm}, "documentLineId" = ${postedLine} where id = ${draftAllocation}`));
+        await refused(tx, () => tx.execute(sql`insert into "PurchaseDocumentTermAllocation" ("documentTermId", "documentLineId", "allocatedAmount") values (${postedTerm}, ${postedLine}, '1')`));
       });
     });
 
