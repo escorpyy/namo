@@ -18,15 +18,15 @@
 | Validation | zod, driven by `shared/masters.ts` (single source for UI + server) |
 | Deployment | None found. `npm run build && npm start` serves `dist/` from Express. `docker-compose.yml` = local Postgres only |
 | Release / milestone | None established (package version 0.1.0) |
-| Last actual audit | 2026-10-25 (session 14: ERP-024 part 1 written and verified locally as a patch on top of `624a73c`; `pnpm test:db` passed 490/490 twice on local PostgreSQL 16; `pnpm build` passed; Drizzle drift check clean; 12 mutation checks caught. Not committed or pushed by session 14. No owner dev-DB migration, browser UI check, GitHub Actions review or concurrency run). Previous audit, 2026-10-24 (session 13: applied ERP-016 as `624a73c`; `pnpm test:db` passed 466/466 twice on local PostgreSQL 16; `pnpm build` passed; Drizzle drift check reported no changes. No owner dev-DB migration, browser UI check, GitHub Actions review, concurrency run, or mutation checks were performed in session 13). |
+| Last actual audit | 2026-10-25 (session 15: ERP-024 part 1 applied as `b7f4882`; `pnpm test:db` passed 490/490 twice on disposable PostgreSQL 16; `pnpm build` passed; Drizzle found no schema changes. No owner DB migration, Actions check, UI, concurrency or mutation checks in session 15. Review caveats are recorded below). |
 
 ---
 
 ## B. Current project state
 
-- **Latest inspected application commit:** `624a73c` (ERP-016: database-enforced voucher balancing, migration 0007 and 22 tests), on top of tracker commit `2869c1b`; pushed to GitHub `main` in session 13. No application code changed in session 13 beyond applying this patch.
+- **Latest inspected application commit:** `b7f4882` (ERP-024 part 1: database audit trail, migration 0008 and 24 tests), on top of `d3621a2`; pushed to GitHub `main` in session 15.
 - **Branch:** `main`
-- **Working tree (session 13 after this update):** clean; ERP-016 commit `624a73c` and the tracker update are on GitHub `main`.
+- **Working tree (session 15 after this update):** clean; ERP-024 commit `b7f4882` and the tracker update are on GitHub `main`.
 - **Package manager:** pnpm (owner's choice). `package-lock.json` removed in the ERP-004 changes.
 - **Phase:** Foundation / master-data, with purchase documents wired through schema/DB triggers, service, API routes, and React screens. The database-backed purchase/API tests now pass in the sandbox; manual UI/end-to-end verification remains open, as does owner dev-DB migration verification. Authentication remains absent. Generic vouchers, sales, and reports are still missing.
 
@@ -47,16 +47,17 @@
 
 ### Confirmed missing
 - Authentication, authorization, tenant isolation.
-- **Generic** Journal Voucher / Cash-Bank Voucher posting remains missing (no generic service, route, or UI); purchase-bill routes now invoke the private writer in `server/services/purchase/purchaseBill.ts`. Dr = Cr is now enforced by the database at commit (ERP-016, session 12, migration 0007); there is still no company lock date and no audit writer; S9 says posted vouchers stay editable in open periods, with audit/lock controls still outstanding.
+- **Generic** Journal Voucher / Cash-Bank Voucher posting remains missing (no generic service, route, or UI); purchase-bill routes invoke the private writer in `server/services/purchase/purchaseBill.ts`. Dr = Cr is enforced at commit (ERP-016, migration 0007); audit trail part 1 now logs selected financial tables (ERP-024, migration 0008), but direct INSERTs into AuditLog are not restricted. Company lock date and required-reason controls remain open; S9 allows edits in open periods.
 - Purchase documents now have service, API routes, and UI screens; their DB/API tests passed in session 13, but the screens have not been manually verified. Stock ledger/inventory accounting, Sales documents, Returns, Tax/VAT, and Depreciation remain missing.
 - Reports (Trial Balance, P&L, Balance Sheet, Ledger).
-- Audit trail: **part 1 written in session 14 (patch, migration 0008, not yet applied to `main`)**: a database trigger now logs every INSERT / UPDATE / DELETE of vouchers and lines, purchase bills / lines / import detail / terms / allocations and opening balances, with company, user and reason, and the log is append-only. **Still missing (ERP-024 remainder):** requiring a reason to edit or delete a POSTED document (no edit path exists until ERP-026), audit views / API, history before migration 0008, and the real user until ERP-002 (the user is whatever `userId` the caller sends). Stock openings, masters, orders and challans are not audited (S11).
+- Audit trail: **part 1 implemented and pushed in session 15 (`b7f4882`, migration 0008)**: a database trigger logs INSERT / UPDATE / DELETE for vouchers and lines, purchase bills / lines / import detail / terms / allocations, and opening balances, with company, caller-supplied user, and optional reason. UPDATE, DELETE, and TRUNCATE are blocked. **Remaining:** direct INSERTs by a role with table access can forge log rows; caller-supplied actor is not authenticated (ERP-002), and the opening-balance route does not reject inactive users; nested service savepoints leave transaction-local actor/reason settings in the outer transaction; require reasons for posted-document edits (with ERP-026), add log-read API/views, decide whether orders/challans/stock openings are audited, and resolve history before migration 0008. Do not treat the log as tamper-proof until the DB-role/insert issue is addressed.
 - Company lock (closing) date: no such column in the schema; only the year-level `FiscalYear.isClosed` and `isOpeningBalanceLocked` exist. Decision S9 needs it (ERP-025).
 - Fiscal-year close workflow; closed-period posting control.
 - Linting, deployment config, backup/restore procedure. (Tests + CI exist: ERP-004; migrations are committed: ERP-003.)
 
 ### Blockers and risks
 - **Risk (confirmed; owner chose to defer login on 2026-10-20 — ERP-002):** No auth. The purchase routes also accept `companyId` and `userId` from the request body/query; there is no user-to-company or role authorization. Do not expose this app on a shared network or cloud with real data until ERP-002 is done. Existing opening-balance routes likewise trust caller-supplied company/user identifiers.
+- **ERP-024 audit-trail caveat (reviewed session 15):** the trigger blocks UPDATE / DELETE / TRUNCATE but does not prevent a database role with INSERT permission from fabricating AuditLog rows; the runtime role/privilege model is not separated. `inActorTx` uses transaction-local settings in a nested savepoint, which remain set in the caller transaction after savepoint release. Opening-balance writes also accept an existing inactive user id. These are follow-ups before relying on the trail as tamper-proof.
 - **Resolved by ERP-003 (committed `7547005`):** migrations are committed (`drizzle/0000_baseline.sql`, `0001_account_company_integrity.sql` + `meta/`); `drizzle/` is no longer gitignored; `pnpm db:migrate` / `db:baseline` / CI drift check added. **Owner's dev DB (2026-10-22): `pnpm db:baseline` refused with "Migration history already exists; nothing to baseline" (exit code 1 is how that script reports a refusal; it changes nothing), so the DB already had migration history; `pnpm db:migrate` then reported "Migrations applied".**
 - **Resolved by ERP-003 (committed `7547005`):** the account-hierarchy company invariant (`GeneralLedger.companyId` = its Account Group's company; parent ledger same company) is now enforced by 3 DB triggers. Before the fix the DB accepted such rows (proven by 6 failing tests); the API already rejected them ("Sub Group not found in this company"), so the master screens were never exposed.
 - **Resolved by ERP-015 (committed `7547005`):** the cross-company gap on the other tables (e.g. `OpeningBalance` accepted `companyId=2` pointing at a company-1 ledger) is closed for all 41 registered tables / 68 links by one registry-driven trigger; a record's company can no longer change. Voucher posting now exists in the purchase-bill service, voucher balance (Dr = Cr) is DB-enforced from migration 0007 (ERP-016, session 12).
@@ -127,7 +128,7 @@
 | ERP-022 | Harden the purchase layer: mutation-check the 73 service tests and 23 API tests; add concurrent tests (two posts of one bill, two numberings, billing the same challan quantity twice) | P2 | Backlog | Prove the service and routes hold under real use | — | Each business rule broken on purpose makes a test fail; concurrent tests pass; any race found is fixed | Mutation + concurrency runs |
 | ERP-023 | Error-handling follow-ups from ERP-018: make `translate()` in `server/services/purchase/common.ts` use `pgError()` (it has its own copy of the `.cause` logic); decide answers for other client-fixable SQLSTATEs now generic 500 (23502 not-null, 22001 too long, 22003 out of range, 22P02 bad text); `/api/health` still returns the raw error message | P3 | Backlog | One consistent, safe error contract | ERP-018 committed (**satisfied: `1079c7d`**) | Single helper; chosen codes mapped to 400/409 with tests; health returns no internals | Tests |
 | ERP-021 | Housekeeping: delete merged branch `claude/purchase-bill-schema`; decide whether tracker/PR descriptions should record the purchase-bill design rules (currently only in schema comments and migration SQL) | P3 | Backlog | Tidy repo | — | Branch removed by the owner; design rules mirrored in section F | — |
-| ERP-024 | Audit trail for financial documents (vouchers and lines, purchase bills and lines, opening balances): who, when, old and new values, written by the database and not by callers | P1 | **PART 1 DONE as a patch (session 14, migration 0008; not yet committed): trigger, company on the log, user and reason settings, append-only guard, 24 tests. Open: reason required for posted-document edits, audit views** | In an open period posted documents may be edited, so every change must be traceable (S9) | ERP-002 for a real user id (until then the service's `actorUserId`, passed to the database per transaction) | Done in part 1: generic trigger writes INSERT / UPDATE / DELETE rows to `AuditLog` for 10 tables; changed-by from the per-transaction setting `namo.actor_user_id`, reason from `namo.change_reason`; UPDATE, DELETE and TRUNCATE on `AuditLog` refused; `companyId` added (S11). **Remaining:** a non-empty reason must be required to edit or delete a posted document (owner answer, S9) and stored with the row; do this together with ERP-026 and the lock date (ERP-025); a way to read the log per company; decide whether orders, challans and stock openings are audited | `tests/db.auditTrail.test.ts` (24); 12 mutation checks |
+| ERP-024 | Audit trail for financial documents: who, when, old and new values, written by the database | P1 | **PART 1 DONE and pushed in `b7f4882`; integrity follow-ups remain** | In an open period posted documents may be edited, so every change must be traceable (S9) | ERP-002 for authenticated actor identity | Part 1: trigger logs changes to 10 tables, company and caller actor/reason settings, UPDATE/DELETE/TRUNCATE guards, `companyId` (S11). **Open:** prevent forged direct INSERTs by runtime DB roles; ensure actor/reason context does not leak past nested savepoints; validate active actors on opening-balance writes; require a reason for posted-document changes with ERP-026; add per-company log reads; decide whether orders, challans and stock openings are audited | `tests/db.auditTrail.test.ts` (24); patch author reports 12 mutations caught; not repeated in session 15 |
 | ERP-025 | Company lock (closing) date and its override | P1 | Backlog | Freeze old periods without closing the whole year, like the QuickBooks closing date (S9) | ERP-024, ERP-016 | One lock date per company; creating, editing or deleting a voucher, voucher line, bill or other covered document dated on or before it is refused (database guard plus service check); override only with the lock password or an admin permission (either, per the owner); every override is audit-logged; the password is stored hashed and never appears in the tracker, logs or error messages; until ERP-002 only the password path can exist (roles are not enforced); covered documents: vouchers and their lines, purchase bills and their lines (terms and allocations included); the override allows one edit at a time (asked again for the next, no standing unlock window), needs a reason and is audit-logged (my choices, S9); the relation to `FiscalYear.isClosed` is stated and tested | Tests: before / on / after the date, override, wrong password |
 | ERP-026 | Purchase service: allow editing and deleting a posted bill in an open period | P2 | Backlog | Match S9; today a posted bill is refused edits ("A posted bill cannot be edited. Reverse it and enter a correct one.", `purchaseBill.ts`) and corrected only by reversal | ERP-024, ERP-025, ERP-016 | Editing a posted bill re-prices, re-checks quantities against challan and order, and rewrites its voucher in the same transaction (still balanced), audit-logged; refused on or before the lock date; reversal still works; the additional-bill and reverse-once rules are reviewed; the existing "cannot be edited" tests are rewritten on purpose, not deleted; confirmed challans and approved orders keep today's rules (my choice, S9) | Service tests; mutation checks |
 | ERP-027 | IRD edition: a separate, later version of the app | P3 | Not started (owner decision 2026-10-22: made later, separately) | Meet IRD requirements when the time comes | Requirements written from IRD's own documents first | Not specified and not assumed. This item exists so nothing in the SME edition is taken to be IRD-compliant. Expectation, unverified: stricter rules on editing posted documents. Recommendation, not decided: keep the editing and locking rules in one module so the second edition can replace them | — |
@@ -136,12 +137,12 @@
 
 ## E. Current task and next action
 
-- **Current task:** ERP-024 part 1 is finished and delivered as a patch (session 14), waiting to be applied and pushed. ERP-016 is on `main` as `624a73c`.
+- **Current task:** none in progress. ERP-024 part 1 was applied, validated and pushed as `b7f4882` in session 15; tracker update is pushed on top.
 - **What session 12/13 established (run, not read):** against a local PostgreSQL 16 test DB, baseline `2869c1b` passed 444/444; after ERP-016 the full suite passed 466/466 twice across 20 files. Session 13 independently repeated both full-suite runs, `pnpm build`, and the Drizzle migration-generation check (no schema changes). Only the ERP-017 `it.fails` tests remain.
 - **Files changed for ERP-016:** `drizzle/0007_voucher_balance.sql` (new), `drizzle/meta/0007_snapshot.json` (new, generated), `drizzle/meta/_journal.json`, `tests/db.voucherBalance.test.ts` (new), `PROJECT_TRACKER.md`. Session 13 changed only the tracker after applying commit `624a73c`.
-- **Owner actions still open:** (1) run `pnpm db:migrate` on the owner dev DB for migrations 0003-0007; migration 0007 refuses dirty unbalanced vouchers and lists their ids; (2) manually verify Purchase Order, Challan, and Bill screens; (3) check GitHub Actions for `624a73c`; (4) answer the inventory-method question (section B) before ERP-020; (5) optionally delete merged branch `claude/purchase-bill-schema`; (6) confirm or change choices 2-4 in decision S9.
-- **Blocker:** no technical blocker; the owner dev-DB migration, browser verification, and GitHub Actions status remain unconfirmed.
-- **Single best next action (session 14): apply the ERP-024 patch, then ERP-025 (lock date).** The original ERP-024 plan, now mostly done, was: a generic database trigger that writes every INSERT / UPDATE / DELETE of vouchers and their lines, purchase bills and their lines, and opening balances to `AuditLog` (who, when, old and new values), with changed-by taken from a per-transaction setting and UPDATE/DELETE on `AuditLog` refused. Reason: S9 lets posted documents be edited in an open period, and ERP-016 is now done, so the audit log is the next protection. The `companyId` question is settled (S11). Then, in this order: ERP-025 (lock date), ERP-026 (edit a posted bill, with the required reason), ERP-005 (generalise the voucher writer), ERP-017, ERP-022, ERP-020. ERP-007 follows ERP-025.
+- **Owner actions still open:** (1) run `pnpm db:migrate` on the owner dev DB for 0003-0008; migration 0008 refuses if AuditLog already contains rows, which need investigation; (2) do not rely on AuditLog as tamper-proof until direct INSERT/DB-role access is addressed; (3) check GitHub Actions for `b7f4882`; (4) manually verify Purchase Order, Challan, and Bill screens; (5) answer the inventory-method question before ERP-020; (6) confirm or change choices 2-4 in decision S9.
+- **Blocker:** no build/test blocker. AuditLog integrity is incomplete until direct INSERT access and caller-supplied actor identity are addressed; owner dev-DB migration, browser verification, and GitHub Actions status remain unconfirmed.
+- **Single best next action (session 15): harden ERP-024 audit integrity before relying on the log, then ERP-025 (company lock date).** Restrict forged AuditLog inserts through a defensible runtime DB-role/trigger design; prevent audit-context leakage across nested savepoints; and validate active opening-balance actors. Then complete the posted-document reason rule with ERP-026, add company-scoped audit views, and decide on order/challan/stock-opening coverage. ERP-007 follows ERP-025; ERP-005, ERP-017, ERP-022 and ERP-020 remain in the recorded order after these controls.
 
 ---
 
@@ -186,6 +187,16 @@
 ## G. Verification record
 
 Sandbox: Linux, Node 22, pnpm 12.14.0, throwaway PostgreSQL 16 databases (never the owner's DB). Owner independently ran `pnpm test:db` on Windows for ERP-004: 154/154. GitHub Actions run `39455007886` on `0fd03ab`: success (install, schema+seed, build, tests).
+
+**Session 15 (apply and independently verify ERP-024 part 1, 2026-10-25):**
+| Check | Result |
+|---|---|
+| Repository state | Applied uploaded patch as `b7f4882` on top of `d3621a2`; pushed to `escorpyy/namo` `main` with tracker update on top |
+| `pnpm build` | exit 0; TypeScript and Vite production build passed |
+| `pnpm exec drizzle-kit generate` | "No schema changes, nothing to migrate" |
+| `pnpm test:db`, run 1 and run 2 | both exit 0 on disposable local PostgreSQL 16; **21 files, 490/490 tests** each time |
+| Review / not repeated | Review found direct AuditLog INSERTs can be forged by a role with table access; caller actor is untrusted, opening-balance does not reject inactive users, nested savepoint settings persist in the outer transaction. Session 14 reports 12 mutation checks caught; not repeated in session 15 |
+| Not run | Owner dev-DB migration, GitHub Actions, browser/manual UI, concurrency |
 
 **Session 14 (ERP-024 part 1, 2026-10-25):**
 | Check | Result |
@@ -328,7 +339,7 @@ Sandbox: Linux, Node 22, pnpm 12.14.0, throwaway PostgreSQL 16 databases (never 
 
 **Not verified / not run:** ERP-003/ERP-015 steps on real GitHub Actions; the baseline path on the owner's actual dev DB; behavior under truly concurrent transactions (design reasoned, not stress-tested); trigger overhead on large data (not measured); migrations on Supabase/Neon; rollback/down migrations (none; recovery = restore from backup, and no backup/restore procedure exists yet); lint; (the browser check of the two term screens was done by the owner on 2026-10-22).
 
-**Manual verification still required:** owner to run `pnpm db:migrate` on the dev DB (0003-0007; fresh test DB migration and full suite passed in session 13); manually check Purchase Order, Challan, and Bill screens; check GitHub Actions for `624a73c`. Purchase Term / Sales Term screens: **verified by the owner on 2026-10-22.**
+**Manual verification still required:** owner to run `pnpm db:migrate` on the dev DB (0003-0008; session 15 tested migrations only on a disposable local database; investigate any existing AuditLog rows before migration 0008); manually check Purchase Order, Challan, and Bill screens; check GitHub Actions for `b7f4882`. Purchase Term / Sales Term screens: **verified by the owner on 2026-10-22.**
 
 ---
 
@@ -396,17 +407,35 @@ Sandbox: Linux, Node 22, pnpm 12.14.0, throwaway PostgreSQL 16 databases (never 
 - Fresh clone (`d3621a2`), baseline 466/466. Implemented red-first: migration 0008 (`AuditLog` companyId + reason, changedBy restrict, generic `namo.audit_row` trigger on 10 financial tables, append-only guard), `server/db/audit.ts`, `inActorTx` in the purchase services, user setting in the opening-balance save, 24 tests. 490/490 twice, build and drift check clean, 12 mutation checks caught (one survivor led to a new test). Recorded decision S11; ERP-024 part 1 done, remainder listed; next action ERP-025.
 - Files affected: `drizzle/0008_audit_trail.sql`, `drizzle/meta/0008_snapshot.json`, `drizzle/meta/_journal.json`, `server/db/schema/core.ts`, `server/db/audit.ts` (new), `server/services/purchase/{common,purchaseBill,purchaseChallan,purchaseOrder}.ts`, `server/routes/openingBalance.ts`, `tests/db.auditTrail.test.ts` (new), `tests/db.companyConsistency.test.ts` (comment only), `PROJECT_TRACKER.md`. **Commit hash: none (delivered as a patch).**
 
+
+### 2026-10-25 — Session 15 — apply and push ERP-024 part 1
+- Applied the uploaded patch as commit `b7f4882` on top of `d3621a2`; independently ran `pnpm build`, Drizzle generation check (no schema changes), and `pnpm test:db` twice on disposable local PostgreSQL 16; both runs passed 21 files / 490 tests.
+- Updated the tracker with current verification and review caveats: direct AuditLog inserts can be forged by a role with write access; actor identity remains caller-supplied; nested savepoint settings persist in the outer transaction; opening-balance actor validation is weaker than the purchase routes.
+- Session 14 reports 12 mutation checks caught; not repeated in session 15. Owner dev-DB migration, GitHub Actions, browser/UI, and concurrency checks remain open.
+
 ---
 
-## HANDOFF (end of session 14)
+## HANDOFF (end of session 15)
 
-**Accomplished:** ERP-024 part 1: the database now writes an audit row (company, user, reason, old and new row) for every change to vouchers and their lines, purchase bills and their lines / terms / import detail, and opening balances; the log cannot be edited, deleted or truncated. Suite 490/490 twice, build and drift check clean, 12 mutation checks caught.
+**Accomplished:** Applied ERP-024 part 1 as `b7f4882` and pushed it with the tracker update to `main`. Migration 0008 logs changes to 10 selected financial tables; `pnpm build` passed, Drizzle reported no schema changes, and the PostgreSQL 16 full suite passed 490/490 twice.
 
-**Not accomplished / open:** patch not yet applied or pushed; reason-required rule for posted documents (needs ERP-026), a way to read the log, and any audit of orders / challans / stock openings are not built; owner dev-DB migration (0003-0008), browser check of purchase screens, GitHub Actions status and concurrency checks remain unconfirmed. ERP-002 still deferred, so the user in the log is whatever the caller sends.
+**Not accomplished / open:** Direct AuditLog INSERTs can be forged by a database role with table access; transaction-local actor/reason values persist after nested savepoint release; opening-balance audit accepts an inactive but existing user id. Reasons for posted-document changes, audit reads, and audit of orders/challans/stock openings remain open. Owner dev-DB migration, GitHub Actions, browser/UI and concurrency checks were not performed in session 15. Session 14's 12 mutation checks were not repeated.
 
-**Repo state:** GitHub `main` = `d3621a2` (ERP-016 `624a73c` plus tracker commit). The ERP-024 changes are one patch on top of it.
+**Repo state:** ERP-024 commit `b7f4882` and this tracker update are pushed to GitHub `main`; working tree is clean.
 
-**Next task:** apply the patch, then ERP-025 (lock date, with override and reason), ERP-026, ERP-005, ERP-017, ERP-022, ERP-020; ERP-007 after ERP-025. Owner decision still needed on the inventory method.
+**Next task:** Harden AuditLog insertion privileges/actor context and validate the opening-balance actor before treating this log as tamper-proof; then ERP-025 (lock date), ERP-026, ERP-005, ERP-017, ERP-022, and ERP-020. ERP-007 follows ERP-025. Owner decision still needed on the inventory method.
+
+---
+
+## (superseded) HANDOFF (end of session 14)
+
+**Accomplished at end of session 14:** ERP-024 part 1 was written and verified locally: migration 0008 adds a database trigger audit trail for selected financial tables, with company, actor and reason; the log blocks UPDATE/DELETE/TRUNCATE. The suite passed 490/490 twice, build and drift check were clean, and the patch author reported 12 mutation checks caught.
+
+**Open at end of session 14:** patch not yet applied or pushed; reason-required rule for posted documents, audit reads, and auditing orders/challans/stock openings were not built; owner dev-DB migration, browser check, GitHub Actions and concurrency checks remained unconfirmed. ERP-002 was still deferred.
+
+**Repo state at end of session 14:** GitHub `main` = `d3621a2`; ERP-024 was delivered as a patch.
+
+**Next task at end of session 14:** apply the patch, then ERP-025 (lock date, with override and reason), ERP-026, ERP-005, ERP-017, ERP-022, ERP-020; ERP-007 after ERP-025. Owner decision still needed on the inventory method.
 
 ---
 
