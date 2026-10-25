@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import * as S from "../../db/schema";
 import { HttpError } from "../../routes/_util";
-import { type Actor, type Opts, type Tx, addDays, assertBranch, assertVendorLedger, idList, inTx, nextNumber, optDate, parseDate, resolveFiscalYear, today } from "./common";
+import { type Actor, type Opts, type Tx, addDays, assertBranch, assertVendorLedger, idList, inActorTx, inTx, nextNumber, optDate, parseDate, resolveFiscalYear, today } from "./common";
 import { assertMandatoryTerms, recalcTerms, saveTerms, type TermInput } from "./docTerms";
 import { landed } from "./landed";
 import { resolveLines, type LineInput, type ResolvedLine } from "./lines";
@@ -127,7 +127,7 @@ async function recalcBill(tx: Tx, billId: number, mainBillId: number | null) {
 }
 
 export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: Opts & QtyOpts = {}) {
-  return inTx(opts.tx, async (tx) => {
+  return inActorTx(actor, opts.tx, async (tx) => {
     const invoiceDate = parseDate(input.invoiceDate, "invoiceDate");
     const invoiceType = input.invoiceType ?? "LOCAL";
     const dueDays = input.dueDays ?? 0;
@@ -252,7 +252,7 @@ async function purchaseLedgerOf(tx: Tx, l: { productId: number }, p: { code: str
 
 // POST: checks everything that could not be checked while drafting, writes the journal voucher, and locks the bill.
 export function postPurchaseBill(id: number, actor: Actor, opts: Opts & QtyOpts = {}) {
-  return inTx(opts.tx, async (tx) => {
+  return inActorTx(actor, opts.tx, async (tx) => {
     const bill = await lockBill(tx, id);
     if (bill.isPosted) throw new HttpError(409, "Bill is already posted.");
     await resolveFiscalYear(tx, bill.companyId, bill.invoiceDate, bill.fiscalYear);
@@ -324,8 +324,8 @@ export function postPurchaseBill(id: number, actor: Actor, opts: Opts & QtyOpts 
 }
 
 // Delete is for a draft only; a posted bill is undone by reversing it. Lines, import detail, terms and allocations go with it.
-export function deletePurchaseBill(id: number, _actor: Actor, opts: Opts = {}) {
-  return inTx(opts.tx, async (tx) => {
+export function deletePurchaseBill(id: number, actor: Actor, opts: Opts = {}) {
+  return inActorTx(actor, opts.tx, async (tx) => {
     const b = await lockBill(tx, id);
     if (b.isPosted) throw new HttpError(409, "A posted bill cannot be deleted. Reverse it instead.");
     await tx.delete(S.purchaseBill).where(eq(S.purchaseBill.id, id));
@@ -350,7 +350,7 @@ async function writeVoucher(tx: Tx, h: { companyId: number; branchId: number; vo
 // REVERSE a posted bill: a reversal bill (copy, no links, so quantities free up) plus a voucher with Dr and Cr swapped.
 // The original is never edited. An additional bill's reversal also takes its charges back off the main bill's landed cost.
 export function reversePurchaseBill(id: number, actor: Actor, opts: Opts & { date?: string | Date; reason?: string } = {}) {
-  return inTx(opts.tx, async (tx) => {
+  return inActorTx({ ...actor, reason: opts.reason }, opts.tx, async (tx) => {
     const orig = await lockBill(tx, id);
     if (!orig.isPosted) throw new HttpError(409, "Only a posted bill can be reversed. Edit or delete a draft instead.");
     if (orig.reversalOfId) throw new HttpError(409, "A reversal cannot itself be reversed.");

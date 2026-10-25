@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../db";
+import { setAuditContext } from "../db/audit";
 import * as S from "../db/schema";
 import { HttpError, wrap } from "./_util";
 import { stockMismatches } from "./stockRecon";
@@ -137,6 +138,7 @@ openingBalanceRouter.put("/", wrap(async (req, res) => {
 
   let saved = 0, deleted = 0;
   await db.transaction(async (tx) => {
+    await setAuditContext(tx, { userId }); // the audit trail (ERP-024) records who saved these balances
     for (const c of clean) {
       const [ex] = await tx.select({ id: OB.id }).from(OB).where(and(
         eq(OB.fiscalYearId, fyId), eq(OB.branchId, branchId), eq(OB.generalLedgerId, c.gl.id),

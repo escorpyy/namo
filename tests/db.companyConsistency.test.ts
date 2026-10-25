@@ -9,7 +9,10 @@ describe.skipIf(!DB_READY)("company consistency across all tenant-scoped tables 
   let db: any;
   class Rollback extends Error {}
   const NOW = sql`now()`;
-  const GLOBAL_TABLES = ["User", "AuditLog"]; // not tenant-scoped on purpose
+  // Not in the company registry on purpose. User is global. AuditLog (ERP-024, S11) does carry a companyId, but it is an
+  // append-only history that outlives a company, so it has no foreign key and no "must still match" rule; the audit trigger
+  // fills the company from the audited row (tests/db.auditTrail.test.ts).
+  const GLOBAL_TABLES = ["User", "AuditLog"];
 
   beforeAll(async () => {
     ({ db } = await import("../server/db"));

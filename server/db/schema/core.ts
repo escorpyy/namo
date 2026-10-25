@@ -212,23 +212,34 @@ export const fiscalYear = pgTable(
 );
 
 // ============================================================
-// AUDIT LOG (generic, DB-trigger based)
+// AUDIT LOG (generic, DB-trigger based; ERP-024)
+// Written only by the database (namo.audit_row, migration 0008) for the financial tables listed there, and
+// append-only: UPDATE, DELETE and TRUNCATE are refused. Callers never insert here.
+// companyId is a plain number on purpose, NOT a foreign key: history must outlive the company (and a log that can
+// never be edited cannot be set to null when a company goes). changedBy is "no action" for the same reason: a user who
+// appears in the log cannot be deleted (deactivate instead).
 // ============================================================
 
 export const auditLog = pgTable(
   "AuditLog",
   {
     id: bigserial({ mode: "bigint" }).primaryKey(),
+    // Company of the audited row, worked out by the trigger (never supplied by the application).
+    companyId: integer().notNull(),
     tableName: varchar({ length: 63 }).notNull(),
     recordId: text().notNull(),
     action: auditActionEnum().notNull(),
     oldData: jsonb(),
     newData: jsonb(),
-    changedBy: integer().references(() => user.id, { onDelete: "set null" }),
+    // From the per-transaction setting namo.actor_user_id (server/db/audit.ts). Null = no user was supplied.
+    changedBy: integer().references(() => user.id, { onDelete: "restrict" }),
+    // From the per-transaction setting namo.change_reason. Null = none given.
+    reason: text(),
     changedAt: timestamp({ precision: 3 }).notNull().defaultNow(),
   },
   (t) => [
     index("AuditLog_tableName_recordId_idx").on(t.tableName, t.recordId),
     index("AuditLog_changedAt_idx").on(t.changedAt),
+    index("AuditLog_companyId_changedAt_idx").on(t.companyId, t.changedAt),
   ],
 );

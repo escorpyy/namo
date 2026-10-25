@@ -1,7 +1,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import * as S from "../../db/schema";
 import { HttpError } from "../../routes/_util";
-import { type Actor, type Opts, type Tx, assertBranch, assertVendorLedger, inTx, nextNumber, optDate, parseDate, resolveFiscalYear } from "./common";
+import { type Actor, type Opts, type Tx, assertBranch, assertVendorLedger, inActorTx, inTx, nextNumber, optDate, parseDate, resolveFiscalYear } from "./common";
 import { assertMandatoryTerms, recalcTerms, saveTerms, type TermInput } from "./docTerms";
 import { resolveLines, type LineInput } from "./lines";
 import { ZERO, fmt, toMicro } from "./money";
@@ -36,7 +36,7 @@ async function lockOrder(tx: Tx, id: number) {
 }
 
 export function savePurchaseOrder(input: PurchaseOrderInput, actor: Actor, opts: Opts = {}) {
-  return inTx(opts.tx, async (tx) => {
+  return inActorTx(actor, opts.tx, async (tx) => {
     const orderDate = parseDate(input.orderDate, "orderDate");
     const expectedDate = optDate(input.expectedDate, "expectedDate");
     if (expectedDate && expectedDate < orderDate) throw new HttpError(400, "Expected date cannot be before the order date.", "expectedDate");
@@ -90,7 +90,7 @@ export function savePurchaseOrder(input: PurchaseOrderInput, actor: Actor, opts:
 }
 
 export function approvePurchaseOrder(id: number, actor: Actor, opts: Opts = {}) {
-  return inTx(opts.tx, async (tx) => {
+  return inActorTx(actor, opts.tx, async (tx) => {
     const o = await lockOrder(tx, id);
     if (o.status !== "DRAFT") throw new HttpError(409, `Order is ${o.status}; only a DRAFT can be approved.`);
     await resolveFiscalYear(tx, o.companyId, o.orderDate, o.fiscalYear);
@@ -106,7 +106,7 @@ export function approvePurchaseOrder(id: number, actor: Actor, opts: Opts = {}) 
 
 // Short-close: nothing more will be received or billed against it (whatever is still pending is abandoned).
 export function closePurchaseOrder(id: number, actor: Actor, opts: Opts = {}) {
-  return inTx(opts.tx, async (tx) => {
+  return inActorTx(actor, opts.tx, async (tx) => {
     const o = await lockOrder(tx, id);
     if (o.status !== "APPROVED") throw new HttpError(409, `Order is ${o.status}; only an APPROVED order can be closed.`);
     await tx.update(S.purchaseOrder).set({ status: "CLOSED", closedAt: new Date(), closedBy: actor.userId, updatedAt: new Date() }).where(eq(S.purchaseOrder.id, id));
@@ -115,8 +115,8 @@ export function closePurchaseOrder(id: number, actor: Actor, opts: Opts = {}) {
 }
 
 // Cancel is for an order nobody has acted on. Once a challan or bill refers to it, close it instead.
-export function cancelPurchaseOrder(id: number, _actor: Actor, opts: Opts = {}) {
-  return inTx(opts.tx, async (tx) => {
+export function cancelPurchaseOrder(id: number, actor: Actor, opts: Opts = {}) {
+  return inActorTx(actor, opts.tx, async (tx) => {
     const o = await lockOrder(tx, id);
     if (o.status !== "DRAFT" && o.status !== "APPROVED") throw new HttpError(409, `Order is ${o.status}; it cannot be cancelled.`);
     const [{ n }] = (await tx.execute(sql`
@@ -131,8 +131,8 @@ export function cancelPurchaseOrder(id: number, _actor: Actor, opts: Opts = {}) 
 
 // Delete is for a draft only. Nothing can refer to a DRAFT (challans need an APPROVED order, bills a non-draft one), and the database
 // removes its lines, terms and allocations with it. An approved order that was never used is cancelled, not deleted.
-export function deletePurchaseOrder(id: number, _actor: Actor, opts: Opts = {}) {
-  return inTx(opts.tx, async (tx) => {
+export function deletePurchaseOrder(id: number, actor: Actor, opts: Opts = {}) {
+  return inActorTx(actor, opts.tx, async (tx) => {
     const o = await lockOrder(tx, id);
     if (o.status !== "DRAFT") throw new HttpError(409, `Order is ${o.status}; only a DRAFT can be deleted. Cancel or close it instead.`);
     await tx.delete(S.purchaseOrder).where(eq(S.purchaseOrder.id, id));

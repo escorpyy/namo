@@ -1,5 +1,6 @@
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { db, type DB } from "../../db";
+import { setAuditContext } from "../../db/audit";
 import * as S from "../../db/schema";
 import { HttpError } from "../../routes/_util";
 
@@ -25,6 +26,14 @@ export const inTx = async <T>(tx: Tx | undefined, fn: (tx: Tx) => Promise<T>): P
 };
 
 export type Actor = { userId: number | null };
+
+// Same as inTx for a service that WRITES: first tells the database who is acting (and, optionally, why) so the audit trail
+// (ERP-024) records it. The setting lasts until the outer transaction ends; the next audited write sets its own.
+export const inActorTx = <T>(actor: Actor & { reason?: string | null }, tx: Tx | undefined, fn: (tx: Tx) => Promise<T>): Promise<T> =>
+  inTx(tx, async (t) => {
+    await setAuditContext(t, actor);
+    return fn(t);
+  });
 
 // ---- dates (stored as plain dates, handled as UTC midnight so no timezone can shift a day) ----
 export function parseDate(v: string | Date | null | undefined, field = "date"): Date {

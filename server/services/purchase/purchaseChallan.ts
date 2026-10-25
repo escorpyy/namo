@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import * as S from "../../db/schema";
 import { HttpError } from "../../routes/_util";
-import { type Actor, type Opts, type Tx, assertBranch, assertVendorLedger, inTx, nextNumber, optDate, parseDate, resolveFiscalYear } from "./common";
+import { type Actor, type Opts, type Tx, assertBranch, assertVendorLedger, inActorTx, inTx, nextNumber, optDate, parseDate, resolveFiscalYear } from "./common";
 import { resolveLines, type LineInput } from "./lines";
 import { ZERO, fmt, toMicro, type Micro } from "./money";
 import { billedByChallanLine, pending, receivedByOrderLine, withTolerance } from "./quantities";
@@ -48,7 +48,7 @@ async function lockChallan(tx: Tx, id: number) {
 }
 
 export function savePurchaseChallan(input: PurchaseChallanInput, actor: Actor, opts: Opts = {}) {
-  return inTx(opts.tx, async (tx) => {
+  return inActorTx(actor, opts.tx, async (tx) => {
     const challanDate = parseDate(input.challanDate, "challanDate");
     if (!input.lines?.length) throw new HttpError(400, "A challan needs at least one line.", "lines");
 
@@ -115,7 +115,7 @@ export function savePurchaseChallan(input: PurchaseChallanInput, actor: Actor, o
 //  - received qty (this + every other confirmed challan) does not exceed the order line's qty (+ tolerance)
 //  - batch / expiry are present when the product tracks them
 export function confirmPurchaseChallan(id: number, actor: Actor, opts: Opts & { tolerancePercent?: number } = {}) {
-  return inTx(opts.tx, async (tx) => {
+  return inActorTx(actor, opts.tx, async (tx) => {
     const c = await lockChallan(tx, id);
     if (c.isConfirmed) throw new HttpError(409, "Challan is already confirmed.");
     await resolveFiscalYear(tx, c.companyId, c.challanDate, c.fiscalYear);
@@ -155,8 +155,8 @@ export function confirmPurchaseChallan(id: number, actor: Actor, opts: Opts & { 
 }
 
 // Delete is for an unconfirmed challan only (a bill needs a confirmed one, so nothing can refer to it).
-export function deletePurchaseChallan(id: number, _actor: Actor, opts: Opts = {}) {
-  return inTx(opts.tx, async (tx) => {
+export function deletePurchaseChallan(id: number, actor: Actor, opts: Opts = {}) {
+  return inActorTx(actor, opts.tx, async (tx) => {
     const c = await lockChallan(tx, id);
     if (c.isConfirmed) throw new HttpError(409, "A confirmed challan cannot be deleted; it is a record of goods received.");
     await tx.delete(S.purchaseChallan).where(eq(S.purchaseChallan.id, id));
