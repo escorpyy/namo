@@ -296,6 +296,27 @@ describe.skipIf(!DB_READY)("audit trail (database level)", () => {
       });
     });
 
+    it("after a service call returns, the caller's own user and reason are back (nothing leaks into later writes of the same transaction)", async () => {
+      await run(async (tx, f) => {
+        const s = await svc.savePurchaseBill(billIn(f), { userId: f.user }, { tx });
+        await svc.postPurchaseBill(s.id, { userId: f.user }, { tx });
+        // 1) the caller set nothing: a later raw write is logged with no user and no reason
+        await svc.reversePurchaseBill(s.id, { userId: f.user2 }, { tx, date: "2025-10-20", reason: "wrong vendor" });
+        const v = await voucher(tx, f);
+        const [e] = await logOf(tx, "JournalVoucher", v);
+        expect(e.changedBy).toBeNull();
+        expect(e.reason).toBeNull();
+        // 2) ... and the reason of that call does not open a posted document for editing
+        const [{ id: postedVoucher }] = await rows(tx, sql`select "journalVoucherId" as id from "PurchaseBill" where id = ${s.id}`);
+        await refused(tx, () => tx.execute(sql`update "JournalVoucher" set remarks = 'sneaky' where id = ${postedVoucher}`));
+        // 3) the caller set something of its own: it is restored, not cleared
+        await acting(tx, f.user2, "outer reason");
+        await svc.savePurchaseBill(billIn(f), { userId: f.user }, { tx });
+        const [s3] = await rows(tx, sql`select current_setting('namo.actor_user_id', true) as u, current_setting('namo.change_reason', true) as r`);
+        expect(s3).toEqual({ u: String(f.user2), r: "outer reason" });
+      });
+    });
+
     it("a call made without a user is logged without one: the previous user does not linger", async () => {
       await run(async (tx, f) => {
         const s = await svc.savePurchaseBill(billIn(f), { userId: f.user }, { tx });
@@ -361,10 +382,14 @@ describe.skipIf(!DB_READY)("audit trail (database level)", () => {
       });
     });
 
-    it("an entry cannot be added without a company", async () => {
-      await run(async (tx) => {
-        const e = await refused(tx, () => tx.execute(sql`insert into "AuditLog" ("tableName", "recordId", "action") values ('JournalVoucher', '1', 'INSERT')`));
-        expect(e.code).toBe("23502");
+    it("an entry cannot be forged by inserting it directly, complete or not (only the audit trigger writes the log)", async () => {
+      await run(async (tx, f) => {
+        const complete = await refused(tx, () => tx.execute(sql`insert into "AuditLog" ("companyId", "tableName", "recordId", "action", "changedBy", "reason") values (${f.co}, 'JournalVoucher', '1', 'DELETE', ${f.user}, 'made up')`));
+        expect(complete.code).toBe("23514");
+        expect(complete.message).toMatch(/audit log/i);
+        const partial = await refused(tx, () => tx.execute(sql`insert into "AuditLog" ("tableName", "recordId", "action") values ('JournalVoucher', '1', 'INSERT')`));
+        expect(partial.code).toBe("23514");
+        expect((await rows(tx, sql`select id from "AuditLog" where "reason" = 'made up'`)).length).toBe(0);
       });
     });
 
@@ -414,6 +439,21 @@ describe.skipIf(!DB_READY)("audit trail (database level)", () => {
     const put = (debit: string, extra: Record<string, unknown> = {}) =>
       call("PUT", "/api/opening-balance", { companyId: co, branchId: br, fiscalYearId: fy, items: [{ generalLedgerId: gl, debit, credit: "0" }], ...extra });
     const log = () => rows(db, sql`select "action", "changedBy", "companyId", "newData" from "AuditLog" where "tableName" = 'OpeningBalance' and "companyId" = ${co} order by id`);
+
+    it("an unknown or inactive user is refused (400) and nothing is saved or logged", async () => {
+      const inactive = await ins(db, "User", { name: `Gone ${tag}`, email: `gone${tag}@test.local`, isActive: false });
+      const before = (await log()).length;
+      for (const bad of [inactive, 2_000_000_000]) {
+        const r = await put("77", { userId: bad });
+        expect(r.status, String(bad)).toBe(400);
+        expect(r.body.message).toMatch(/user/i);
+      }
+      expect((await rows(db, sql`select id from "OpeningBalance" where "companyId" = ${co}`)).length).toBe(0);
+      expect((await log()).length).toBe(before);
+      const lock = await call("POST", "/api/opening-balance/lock", { companyId: co, fiscalYearId: fy, userId: inactive });
+      expect(lock.status).toBe(400);
+      await db.execute(sql`delete from "User" where id = ${inactive}`);
+    });
 
     it("save, edit and clear are logged with the user sent by the screen, and without one when none is sent", async () => {
       expect((await put("10", { userId: actor })).status).toBe(200);

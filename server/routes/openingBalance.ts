@@ -28,6 +28,16 @@ async function assertBranch(companyId: number, branchId: number) {
   const [b] = await db.select({ id: S.branch.id }).from(S.branch).where(and(eq(S.branch.id, branchId), eq(S.branch.companyId, companyId)));
   if (!b) throw new HttpError(404, "Branch not found in this company.");
 }
+// There is no login yet (ERP-002): the acting user comes from the request. It must be a real, ACTIVE user (the purchase routes
+// check the same), because it is written to the audit trail and the lock record. None = recorded as nobody.
+async function actorOf(raw: unknown): Promise<number | null> {
+  if (raw === undefined || raw === null || raw === "") return null;
+  const id = Number(raw);
+  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, "Unknown or inactive user.", "userId");
+  const [u] = await db.select({ isActive: S.user.isActive }).from(S.user).where(eq(S.user.id, id));
+  if (!u || !u.isActive) throw new HttpError(400, "Unknown or inactive user.", "userId");
+  return id;
+}
 const sums = async (where: any) => {
   const [r] = await db.select({ d: sql<string>`coalesce(sum(${OB.debit}), 0)::text`, c: sql<string>`coalesce(sum(${OB.credit}), 0)::text` }).from(OB).where(where);
   return { debit: two(r.d), credit: two(r.c) };
@@ -98,7 +108,7 @@ openingBalanceRouter.get("/", wrap(async (req, res) => {
 openingBalanceRouter.put("/", wrap(async (req, res) => {
   const b = req.body ?? {};
   const companyId = int(b.companyId, "companyId"), branchId = int(b.branchId, "branchId"), fyId = int(b.fiscalYearId, "fiscalYearId");
-  const userId = Number(b.userId) > 0 ? Number(b.userId) : null;
+  const userId = await actorOf(b.userId);
   const fy = await loadFy(companyId, fyId);
   await assertBranch(companyId, branchId);
   if (fy.isClosed) throw new HttpError(409, "This fiscal year is closed. Opening balances cannot be changed.");
@@ -157,7 +167,7 @@ openingBalanceRouter.put("/", wrap(async (req, res) => {
 // Lock: poori company ka opening balance us FY me balanced hona chahiye (Dr = Cr)
 openingBalanceRouter.post("/lock", wrap(async (req, res) => {
   const companyId = int(req.body?.companyId, "companyId"), fyId = int(req.body?.fiscalYearId, "fiscalYearId");
-  const userId = Number(req.body?.userId) > 0 ? Number(req.body.userId) : null;
+  const userId = await actorOf(req.body?.userId);
   const fy = await loadFy(companyId, fyId);
   if (fy.isOpeningBalanceLocked) throw new HttpError(409, "Opening balance is already locked.");
   if (fy.isClosed) throw new HttpError(409, "This fiscal year is closed.");

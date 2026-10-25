@@ -1,6 +1,6 @@
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { db, type DB } from "../../db";
-import { setAuditContext } from "../../db/audit";
+import { readAuditContext, restoreAuditContext, setAuditContext } from "../../db/audit";
 import * as S from "../../db/schema";
 import { HttpError } from "../../routes/_util";
 
@@ -28,11 +28,18 @@ export const inTx = async <T>(tx: Tx | undefined, fn: (tx: Tx) => Promise<T>): P
 export type Actor = { userId: number | null };
 
 // Same as inTx for a service that WRITES: first tells the database who is acting (and, optionally, why) so the audit trail
-// (ERP-024) records it. The setting lasts until the outer transaction ends; the next audited write sets its own.
+// (ERP-024) records it. When the caller passed its own transaction, the caller's user and reason are put back when this call
+// returns, so nothing of this call leaks into later writes of that transaction. That matters twice over: a stale user would be
+// logged against someone else's change, and a stale reason would satisfy the "reason required" rule for a posted document
+// (migration 0009) without anyone having given one. After an error nothing needs restoring: the savepoint is rolled back and
+// takes its settings with it (and the transaction is aborted, so no statement could run here anyway).
 export const inActorTx = <T>(actor: Actor & { reason?: string | null }, tx: Tx | undefined, fn: (tx: Tx) => Promise<T>): Promise<T> =>
   inTx(tx, async (t) => {
+    const outer = tx ? await readAuditContext(t) : null;
     await setAuditContext(t, actor);
-    return fn(t);
+    const result = await fn(t);
+    if (outer) await restoreAuditContext(t, outer);
+    return result;
   });
 
 // ---- dates (stored as plain dates, handled as UTC midnight so no timezone can shift a day) ----

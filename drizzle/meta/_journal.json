@@ -64,6 +64,20 @@
       "when": 1792841620664,
       "tag": "0008_audit_trail",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792887883237,
+      "tag": "0009_audit_reason",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792888310328,
+      "tag": "0010_audit_insert_guard",
+      "breakpoints": true
     }
   ]
 }
