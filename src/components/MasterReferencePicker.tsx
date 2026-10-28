@@ -58,6 +58,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
   const triggerRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [findOpen, setFindOpen] = useState(false);
@@ -145,6 +146,11 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
   useEffect(() => {
     setActiveIndex((index) => filtered.length ? Math.min(index, filtered.length - 1) : 0);
   }, [filtered.length]);
+
+  useEffect(() => {
+    if (!open || !filtered[activeIndex]) return;
+    resultsRef.current?.querySelector<HTMLElement>("[data-active]")?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, filtered, open]);
 
   const selectActive = () => {
     const option = filtered[activeIndex];
@@ -297,7 +303,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
               <span className="hidden sm:inline"><kbd className="kbd">↑ ↓</kbd> move <kbd className="kbd">Enter</kbd> select <kbd className="kbd">Esc</kbd> close</span>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-auto border-y border-slate-200">
+            <div ref={resultsRef} className="min-h-0 flex-1 overflow-auto border-y border-slate-200">
               <div className="sticky top-0 z-10 grid grid-cols-[minmax(70px,0.7fr)_minmax(120px,1.5fr)_64px] gap-2 border-b border-slate-300 bg-slate-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600 sm:grid-cols-[minmax(90px,0.8fr)_minmax(150px,1.5fr)_minmax(100px,1fr)_76px]">
                 <span>Code</span><span>Name / description</span><span className="hidden sm:block">Details</span><span>Status</span>
               </div>
