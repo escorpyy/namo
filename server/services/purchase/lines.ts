@@ -7,7 +7,6 @@ import { type Micro, ZERO, mul, roundTo, toMicro } from "./money";
 // What a user types on one grid row of an order, challan or bill. Everything else is worked out here.
 export type LineInput = {
   productId: number;
-  particular?: string | null;
   altQty?: string | number | null; // quantity in the alternate unit (the first Uom column)
   altUnitId?: number | null;
   qty?: string | number | null; // quantity in the stock unit (the second Uom column); derived when altQty is given
@@ -19,7 +18,6 @@ export type ResolvedLine = {
   lineNumber: number;
   productId: number;
   productType: "STOCK" | "NON_STOCK" | "SERVICE" | "FIXED_ASSET" | "BUNDLE";
-  particular: string | null;
   altQty: Micro | null;
   altUnitId: number | null;
   qty: Micro;
@@ -91,7 +89,6 @@ export async function resolveLines(tx: Tx, companyId: number, rows: LineInput[],
 
     out.push({
       lineNumber: n, productId: p.id, productType: p.type as ResolvedLine["productType"],
-      particular: r.particular?.trim() || p.description,
       altQty, altUnitId, qty, unitId, rate, basicAmount: roundTo(mul(qty, rate), 2), tracksBatch, tracksExpiry,
     });
   }

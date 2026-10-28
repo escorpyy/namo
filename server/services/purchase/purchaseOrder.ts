@@ -75,7 +75,7 @@ export function savePurchaseOrder(input: PurchaseOrderInput, actor: Actor, opts:
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
       const [row] = await tx.insert(S.purchaseOrderLine).values({
-        purchaseOrderId: id, lineNumber: l.lineNumber, productId: l.productId, particular: l.particular,
+        purchaseOrderId: id, lineNumber: l.lineNumber, productId: l.productId,
         altQty: l.altQty === null ? null : fmt(l.altQty), altUnitId: l.altUnitId, qty: fmt(l.qty), unitId: l.unitId,
         rate: fmt(l.rate), basicAmount: fmt(l.basicAmount, 2), expectedDate: optDate(input.lines[i].expectedDate, "line expectedDate"),
       }).returning({ id: S.purchaseOrderLine.id });

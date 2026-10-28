@@ -124,7 +124,7 @@ export const purchaseChallan = pgTable(
   ],
 );
 
-// The grid: S.No, Particular, Alt Qty, Uom, Qty, Uom, Rate, Basic Amt, plus
+// The grid: S.No, Alt Qty, Uom, Qty, Uom, Rate, Basic Amt, plus
 // where the goods went in and which batch.
 export const purchaseChallanLine = pgTable(
   "PurchaseChallanLine",
@@ -138,7 +138,6 @@ export const purchaseChallanLine = pgTable(
     productId: integer()
       .notNull()
       .references(() => product.id, { onDelete: "restrict" }),
-    particular: varchar({ length: 256 }),
 
     // The order line this receipt fulfils. Must belong to the challan's own
     // order and be for the same product (enforced by the database).

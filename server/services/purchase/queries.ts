@@ -93,7 +93,7 @@ export function getPurchaseOrder(id: number, companyId: number) {
       lines: lines.map((l) => {
         const ordered = toMicro(l.qty), received = rec.get(l.id) ?? ZERO, billed = bil.get(l.id) ?? ZERO;
         return {
-          id: l.id, lineNumber: l.lineNumber, productId: l.productId, ...prod.get(l.productId), particular: l.particular,
+          id: l.id, lineNumber: l.lineNumber, productId: l.productId, ...prod.get(l.productId),
           altQty: l.altQty, altUnitId: l.altUnitId, altUnitCode: l.altUnitId ? units.get(l.altUnitId) ?? null : null,
           qty: l.qty, unitId: l.unitId, unitCode: units.get(l.unitId) ?? null, rate: l.rate, basicAmount: amt(l.basicAmount), expectedDate: iso(l.expectedDate),
           received: fmt(received), billed: fmt(billed), pendingToReceive: fmt(pending(ordered, received)), pendingToBill: fmt(pending(ordered, billed)),
@@ -165,7 +165,7 @@ export function getPurchaseChallan(id: number, companyId: number) {
       lines: lines.map((l) => {
         const received = toMicro(l.qty), b = billed.get(l.id) ?? ZERO;
         return {
-          id: l.id, lineNumber: l.lineNumber, productId: l.productId, ...prod.get(l.productId), particular: l.particular,
+          id: l.id, lineNumber: l.lineNumber, productId: l.productId, ...prod.get(l.productId),
           purchaseOrderLineId: l.purchaseOrderLineId, orderLineNumber: l.purchaseOrderLineId ? olNo.get(l.purchaseOrderLineId) ?? null : null,
           altQty: l.altQty, altUnitId: l.altUnitId, altUnitCode: l.altUnitId ? units.get(l.altUnitId) ?? null : null,
           qty: l.qty, unitId: l.unitId, unitCode: units.get(l.unitId) ?? null, rate: l.rate, basicAmount: amt(l.basicAmount),
@@ -259,7 +259,7 @@ export function getPurchaseBill(id: number, companyId: number) {
       journalVoucher: voucher[0] ? { ...voucher[0], voucherDate: iso(voucher[0].voucherDate) } : null,
       basicAmount: amt(b.basicAmount), termAmount: amt(b.termAmount), totalAmount: amt(b.totalAmount),
       lines: lines.map((l) => ({
-        id: l.id, lineNumber: l.lineNumber, productId: l.productId, ...prod.get(l.productId), particular: l.particular,
+        id: l.id, lineNumber: l.lineNumber, productId: l.productId, ...prod.get(l.productId),
         challanLineId: l.challanLineId, challanLineNumber: l.challanLineId ? clNo.get(l.challanLineId) ?? null : null,
         purchaseOrderLineId: l.purchaseOrderLineId, orderLineNumber: l.purchaseOrderLineId ? olNo.get(l.purchaseOrderLineId) ?? null : null,
         altQty: l.altQty, altUnitId: l.altUnitId, altUnitCode: l.altUnitId ? units.get(l.altUnitId) ?? null : null,

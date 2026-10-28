@@ -106,7 +106,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
         const prods = new Map(lk.products.map((x) => [String(x.id), x]));
         const base = cfg.emptyForm(lk);
         const lines: LineRow[] = (b.lines as any[]).map((l) => ({
-          ...blankLine({ productId: str(l.productId), particular: "", qty: trimDec(l.qty), rate: trimDec(l.rate), locationId: str(l.locationId), batchNo: str(l.batchNo), manufactureDate: iso10(l.manufactureDate), expiryDate: iso10(l.expiryDate), purchaseOrderLineId: str(l.purchaseOrderLineId), challanLineId: str(l.challanLineId), link: "From challan" }),
+          ...blankLine({ productId: str(l.productId), qty: trimDec(l.qty), rate: trimDec(l.rate), locationId: str(l.locationId), batchNo: str(l.batchNo), manufactureDate: iso10(l.manufactureDate), expiryDate: iso10(l.expiryDate), purchaseOrderLineId: str(l.purchaseOrderLineId), challanLineId: str(l.challanLineId), link: "From challan" }),
           unitId: prods.get(str(l.productId))?.baseUnitId ? "" : str(l.unitId),
         }));
         s.newDoc({ ...base, vendorGLId: str(b.vendorGLId), subLedgerId: str(b.subLedgerId), agentId: str(b.agentId), purchaseChallanId: str(b.purchaseChallanId), purchaseOrderId: str(b.purchaseOrderId), challanNo: str(c.challanNumber), orderNo: str(c.orderNumber), lines });

@@ -11,7 +11,6 @@ export type Term = PLookups["terms"][number];
 export interface LineRow {
   key: string;
   productId: string;
-  particular: string;
   altQty: string;
   altUnitId: string;
   qty: string;
@@ -47,7 +46,7 @@ export const str = (v: unknown) => (v == null ? "" : String(v));
 const num = (v: unknown) => (v == null ? "" : trimDec(v));
 
 export const blankLine = (over: Partial<LineRow> = {}): LineRow => ({
-  key: newKey(), productId: "", particular: "", altQty: "", altUnitId: "", qty: "", unitId: "", rate: "", locationId: "", batchNo: "",
+  key: newKey(), productId: "", altQty: "", altUnitId: "", qty: "", unitId: "", rate: "", locationId: "", batchNo: "",
   manufactureDate: "", expiryDate: "", expectedDate: "", purchaseOrderLineId: "", challanLineId: "", link: "", ...over,
 });
 export const blankTerm = (over: Partial<TermRow> = {}): TermRow => ({
@@ -59,7 +58,7 @@ export const isBlankTerm = (t: TermRow) => !t.termId;
 // A line as the server returns it (order / challan / bill documents).
 export function lineFromDoc(l: Record<string, any>, product: Product | undefined): LineRow {
   return blankLine({
-    productId: str(l.productId), particular: str(l.particular) === str(l.productDescription) ? "" : str(l.particular),
+    productId: str(l.productId),
     altQty: num(l.altQty), altUnitId: str(l.altUnitId), qty: num(l.qty), unitId: product && product.baseUnitId ? "" : str(l.unitId), rate: num(l.rate),
     locationId: str(l.locationId), batchNo: str(l.batchNo), manufactureDate: str(l.manufactureDate), expiryDate: str(l.expiryDate), expectedDate: str(l.expectedDate),
     purchaseOrderLineId: str(l.purchaseOrderLineId), challanLineId: str(l.challanLineId),
@@ -101,7 +100,7 @@ const nn = (s: string) => (s.trim() === "" ? null : s.trim());
 export type LineKind = "order" | "challan" | "bill";
 export function lineToPayload(l: LineRow, p: Product | undefined, kind: LineKind) {
   const useAlt = !!(l.altQty && l.altUnitId);
-  const out: Record<string, unknown> = { productId: Number(l.productId), particular: nn(l.particular) };
+  const out: Record<string, unknown> = { productId: Number(l.productId) };
   if (useAlt) { out.altQty = l.altQty; out.altUnitId = Number(l.altUnitId); } else out.qty = l.qty;
   if (p && !p.baseUnitId && l.unitId) out.unitId = Number(l.unitId);
   out.rate = nn(l.rate);

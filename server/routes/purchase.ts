@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import * as S from "../db/schema";
 import * as P from "../services/purchase";
+import type { LockOverride } from "../services/periodLock";
 import { HttpError, wrap } from "./_util";
 
 // Purchase documents over HTTP: Order -> Challan -> Bill. These routes only check what the HTTP layer must (ids are whole numbers,
@@ -17,6 +18,10 @@ import { HttpError, wrap } from "./_util";
 //   DELETE /api/purchase/{orders|challans|bills}/:id?companyId=  a draft only
 //   POST   /api/purchase/orders/:id/{approve|close|cancel}   POST /api/purchase/challans/:id/confirm
 //   POST   /api/purchase/bills/:id/{post|reverse}            GET  /api/purchase/bills/from-challan/:challanId?companyId=
+//
+// Bill writes (create, edit, delete, post, reverse) are refused with 409 and code PERIOD_LOCKED when the document is dated on or before the
+// company lock date (ERP-025, GET/PUT /api/period-lock). The body may carry `lockOverride: { password, reason }` to override that for this one
+// request: 403 LOCK_PASSWORD_WRONG for a wrong password, 400 for a missing reason. Orders and challans are not covered by the lock.
 //
 // Every write answers { result, document }: what the service returned, and the whole document as it now stands.
 // There is no login yet (ERP-002): the acting user comes from `userId` (body or query) and must be an active user; none = recorded as nobody.
@@ -35,6 +40,18 @@ const optWhole = (v: unknown, name: string): number | undefined => (v === undefi
 const q = (req: Request, name: string) => (typeof req.query[name] === "string" ? (req.query[name] as string) : undefined);
 const companyOf = (req: Request) => whole(q(req, "companyId"), "companyId");
 const idOf = (req: Request, name = "id") => whole(req.params[name], name);
+
+// The optional { password, reason } that overrides the company lock date for ONE request (ERP-025). Only the shape is checked here;
+// the service checks the password and the reason against the company's lock.
+function lockOverrideOf(req: Request): LockOverride | undefined {
+  const o = req.body?.lockOverride;
+  if (o === undefined || o === null) return undefined;
+  if (typeof o !== "object" || Array.isArray(o)) throw new HttpError(400, "lockOverride must be an object with password and reason.", "lockOverride");
+  const { password, reason } = o as Record<string, unknown>;
+  if (typeof password !== "string" || password === "" || password.length > 200) throw new HttpError(400, "lockOverride.password is required.", "lockOverride.password");
+  if (typeof reason !== "string" || reason.trim() === "" || reason.length > 500) throw new HttpError(400, "lockOverride.reason is required (500 characters at most).", "lockOverride.reason");
+  return { password, reason };
+}
 
 async function actorOf(req: Request): Promise<P.Actor> {
   const raw = req.body?.userId ?? q(req, "userId");
@@ -74,7 +91,7 @@ function rows(v: unknown, spec: Record<string, Kind>, name: string, max: number,
   return v.map((r, i) => pick(r, spec, `${label} ${i + 1}`));
 }
 
-const LINE = { productId: "int", particular: "str", altQty: "num", altUnitId: "int", qty: "num", unitId: "int", rate: "num" } as const satisfies Record<string, Kind>;
+const LINE = { productId: "int", altQty: "num", altUnitId: "int", qty: "num", unitId: "int", rate: "num" } as const satisfies Record<string, Kind>;
 const TRACK = { locationId: "int", batchNo: "str", manufactureDate: "date", expiryDate: "date" } as const satisfies Record<string, Kind>;
 const TERM = { termId: "int", lineNumber: "int", calcType: ["PERCENT", "AMOUNT"], rate: "num", inputAmount: "num", isOverridden: "bool", overrideAmount: "num" } as const satisfies Record<string, Kind>;
 const HEAD = { fiscalYear: "str", vendorGLId: "int", subLedgerId: "int", agentId: "int", remarks: "str" } as const satisfies Record<string, Kind>;
@@ -199,26 +216,26 @@ purchaseRouter.get("/bills/:id", wrap(async (req, res) => { res.json(await P.get
 
 purchaseRouter.post("/bills", wrap(async (req, res) => {
   const companyId = whole(req.body?.companyId ?? q(req, "companyId"), "companyId"), branchId = whole(req.body?.branchId, "branchId");
-  const result = await P.savePurchaseBill(billInput(req.body, { companyId, branchId }), await actorOf(req));
+  const result = await P.savePurchaseBill(billInput(req.body, { companyId, branchId }), await actorOf(req), { lockOverride: lockOverrideOf(req) });
   res.status(201).json({ result, document: await P.getPurchaseBill(result.id, companyId) });
 }));
 purchaseRouter.put("/bills/:id", wrap(async (req, res) => {
   const id = idOf(req), companyId = companyOf(req), b = await owned("bill", id, companyId);
-  const result = await P.savePurchaseBill(billInput(req.body, { companyId, branchId: b.branchId, id }), await actorOf(req));
+  const result = await P.savePurchaseBill(billInput(req.body, { companyId, branchId: b.branchId, id }), await actorOf(req), { lockOverride: lockOverrideOf(req) });
   res.json({ result, document: await P.getPurchaseBill(id, companyId) });
 }));
 purchaseRouter.delete("/bills/:id", wrap(async (req, res) => {
   const id = idOf(req); await owned("bill", id, companyOf(req));
-  res.json({ result: await P.deletePurchaseBill(id, await actorOf(req)) });
+  res.json({ result: await P.deletePurchaseBill(id, await actorOf(req), { lockOverride: lockOverrideOf(req) }) });
 }));
 purchaseRouter.post("/bills/:id/post", wrap(async (req, res) => {
   const id = idOf(req), companyId = companyOf(req); await owned("bill", id, companyId);
-  const result = await P.postPurchaseBill(id, await actorOf(req));
+  const result = await P.postPurchaseBill(id, await actorOf(req), { lockOverride: lockOverrideOf(req) });
   res.json({ result, document: await P.getPurchaseBill(id, companyId) });
 }));
 purchaseRouter.post("/bills/:id/reverse", wrap(async (req, res) => {
   const id = idOf(req), companyId = companyOf(req); await owned("bill", id, companyId);
   const o = pick(req.body ?? {}, { date: "date", reason: "str" }, "Reversal");
-  const result = await P.reversePurchaseBill(id, await actorOf(req), { date: o.date || undefined, reason: o.reason?.trim() || undefined });
+  const result = await P.reversePurchaseBill(id, await actorOf(req), { date: o.date || undefined, reason: o.reason?.trim() || undefined, lockOverride: lockOverrideOf(req) });
   res.json({ result, document: await P.getPurchaseBill(id, companyId) });
 }));

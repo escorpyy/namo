@@ -190,7 +190,7 @@ export const purchaseBill = pgTable(
   ],
 );
 
-// The grid: S.No, Particular, Alt Qty, Uom, Qty, Uom, Rate, Basic Amt.
+// The grid: S.No, Alt Qty, Uom, Qty, Uom, Rate, Basic Amt.
 export const purchaseBillLine = pgTable(
   "PurchaseBillLine",
   {
@@ -203,8 +203,6 @@ export const purchaseBillLine = pgTable(
     productId: integer()
       .notNull()
       .references(() => product.id, { onDelete: "restrict" }),
-    // "Particular": defaults to the product description, editable per line.
-    particular: varchar({ length: 256 }),
 
     // What this line bills. The challan line must belong to the bill's own
     // challan, the order line to the bill's own order, and the product must

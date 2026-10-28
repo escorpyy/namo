@@ -64,7 +64,7 @@ auditRouter.get("/", wrap(async (req, res) => {
 
   const found = (await db.execute(sql`
     select a.id::text as id, a."companyId", a."tableName", a."recordId", a."action"::text as action,
-           a."changedBy", u.name as "changedByName", a."reason", a."changedAt", a."oldData", a."newData"
+           a."changedBy", u.name as "changedByName", a."reason", a."lockOverride", a."changedAt", a."oldData", a."newData"
       from "AuditLog" a left join "User" u on u.id = a."changedBy"
      where ${sql.join(where, sql` and `)}
      order by a.id desc
@@ -74,7 +74,7 @@ auditRouter.get("/", wrap(async (req, res) => {
   res.json({
     rows: page.map((r) => ({
       id: r.id, companyId: r.companyId, tableName: r.tableName, recordId: r.recordId, action: r.action,
-      changedBy: r.changedBy, changedByName: r.changedByName, reason: r.reason, changedAt: r.changedAt,
+      changedBy: r.changedBy, changedByName: r.changedByName, reason: r.reason, lockOverride: r.lockOverride, changedAt: r.changedAt,
       changedFields: r.action === "UPDATE" ? changedFields(r.oldData, r.newData) : null,
       oldData: r.oldData, newData: r.newData,
     })),

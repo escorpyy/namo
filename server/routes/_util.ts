@@ -12,6 +12,9 @@ export class HttpError extends Error {
     public status: number,
     message: string,
     public field?: string,
+    // A stable word a screen can act on (ERP-025: "PERIOD_LOCKED" = ask for the lock password and a reason, "LOCK_PASSWORD_WRONG").
+    // Left out of the answer when not set, so every other answer keeps its shape.
+    public code?: string,
   ) {
     super(message);
   }

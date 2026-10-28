@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { withInitialPostedChildInsert } from "../../db/audit";
 import * as S from "../../db/schema";
 import { HttpError } from "../../routes/_util";
+import { guardPeriod, type LockOverride } from "../periodLock";
 import { type Actor, type Opts, type Tx, addDays, assertBranch, assertVendorLedger, idList, inActorTx, inTx, nextNumber, optDate, parseDate, resolveFiscalYear, today } from "./common";
 import { assertMandatoryTerms, recalcTerms, saveTerms, type TermInput } from "./docTerms";
 import { landed } from "./landed";
@@ -65,6 +66,9 @@ export type PurchaseBillInput = {
 };
 
 type QtyOpts = { tolerancePercent?: number };
+// ERP-025: a document dated on or before the company lock date cannot be created, changed or deleted (the database refuses it). With the
+// lock password and a reason the caller can override that for THIS call only; see server/services/periodLock.ts.
+export type LockOpts = { lockOverride?: LockOverride | null };
 
 async function lockBill(tx: Tx, id: number) {
   const [b] = await tx.select().from(S.purchaseBill).where(eq(S.purchaseBill.id, id)).for("update");
@@ -127,7 +131,7 @@ async function recalcBill(tx: Tx, billId: number, mainBillId: number | null) {
   return t;
 }
 
-export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: Opts & QtyOpts = {}) {
+export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: Opts & QtyOpts & LockOpts = {}) {
   return inActorTx(actor, opts.tx, async (tx) => {
     const invoiceDate = parseDate(input.invoiceDate, "invoiceDate");
     const invoiceType = input.invoiceType ?? "LOCAL";
@@ -142,6 +146,8 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
       if (existing.isPosted) throw new HttpError(409, "A posted bill cannot be edited. Reverse it and enter a correct one.");
       if ((existing.mainBillId ?? null) !== (input.mainBillId ?? null)) throw new HttpError(400, "A bill cannot change between main and additional.");
     }
+    // The new date and, for an edit, the old one: moving a bill into or out of a locked period is a change to it.
+    await guardPeriod(tx, input.companyId, [invoiceDate, existing?.invoiceDate], opts.lockOverride, "invoiceDate");
 
     await assertBranch(tx, input.companyId, input.branchId);
     await assertVendorLedger(tx, input.companyId, input.vendorGLId, input.subLedgerId);
@@ -203,7 +209,7 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i], src = input.lines[i];
       const [row] = await tx.insert(S.purchaseBillLine).values({
-        purchaseBillId: id, lineNumber: l.lineNumber, productId: l.productId, particular: l.particular,
+        purchaseBillId: id, lineNumber: l.lineNumber, productId: l.productId,
         challanLineId: src.challanLineId ?? null, purchaseOrderLineId: src.purchaseOrderLineId ?? null,
         altQty: l.altQty === null ? null : fmt(l.altQty), altUnitId: l.altUnitId, qty: fmt(l.qty), unitId: l.unitId, rate: fmt(l.rate), basicAmount: fmt(l.basicAmount, 2),
         locationId: src.locationId ?? null, batchNo: src.batchNo?.trim() || null,
@@ -252,10 +258,11 @@ async function purchaseLedgerOf(tx: Tx, l: { productId: number }, p: { code: str
 }
 
 // POST: checks everything that could not be checked while drafting, writes the journal voucher, and locks the bill.
-export function postPurchaseBill(id: number, actor: Actor, opts: Opts & QtyOpts = {}) {
+export function postPurchaseBill(id: number, actor: Actor, opts: Opts & QtyOpts & LockOpts = {}) {
   return inActorTx(actor, opts.tx, async (tx) => {
     const bill = await lockBill(tx, id);
     if (bill.isPosted) throw new HttpError(409, "Bill is already posted.");
+    await guardPeriod(tx, bill.companyId, [bill.invoiceDate], opts.lockOverride);
     await resolveFiscalYear(tx, bill.companyId, bill.invoiceDate, bill.fiscalYear);
     const isAdditional = !!bill.mainBillId;
 
@@ -325,10 +332,11 @@ export function postPurchaseBill(id: number, actor: Actor, opts: Opts & QtyOpts 
 }
 
 // Delete is for a draft only; a posted bill is undone by reversing it. Lines, import detail, terms and allocations go with it.
-export function deletePurchaseBill(id: number, actor: Actor, opts: Opts = {}) {
+export function deletePurchaseBill(id: number, actor: Actor, opts: Opts & LockOpts = {}) {
   return inActorTx(actor, opts.tx, async (tx) => {
     const b = await lockBill(tx, id);
     if (b.isPosted) throw new HttpError(409, "A posted bill cannot be deleted. Reverse it instead.");
+    await guardPeriod(tx, b.companyId, [b.invoiceDate], opts.lockOverride);
     await tx.delete(S.purchaseBill).where(eq(S.purchaseBill.id, id));
     return { id, deleted: true as const };
   });
@@ -352,7 +360,7 @@ async function writeVoucher(tx: Tx, h: { companyId: number; branchId: number; vo
 
 // REVERSE a posted bill: a reversal bill (copy, no links, so quantities free up) plus a voucher with Dr and Cr swapped.
 // The original is never edited. An additional bill's reversal also takes its charges back off the main bill's landed cost.
-export function reversePurchaseBill(id: number, actor: Actor, opts: Opts & { date?: string | Date; reason?: string } = {}) {
+export function reversePurchaseBill(id: number, actor: Actor, opts: Opts & LockOpts & { date?: string | Date; reason?: string } = {}) {
   return inActorTx({ ...actor, reason: opts.reason }, opts.tx, async (tx) => {
     const orig = await lockBill(tx, id);
     if (!orig.isPosted) throw new HttpError(409, "Only a posted bill can be reversed. Edit or delete a draft instead.");
@@ -369,6 +377,9 @@ export function reversePurchaseBill(id: number, actor: Actor, opts: Opts & { dat
 
     const date = opts.date ? parseDate(opts.date, "date") : today();
     if (date.getTime() < orig.invoiceDate.getTime()) throw new HttpError(400, "A reversal cannot be dated before the bill it reverses.", "date");
+    // The original bill is never edited; the reversal is a NEW bill and voucher, so it is the reversal's date that must be open.
+    // (A bill from a locked period is corrected by reversing it in an open period; no password needed.)
+    await guardPeriod(tx, orig.companyId, [date], opts.lockOverride, "date");
     const fy = await resolveFiscalYear(tx, orig.companyId, date, null);
 
     const [ojv] = await tx.select().from(S.journalVoucher).where(eq(S.journalVoucher.id, orig.journalVoucherId!));
@@ -427,7 +438,7 @@ export function billInputFromChallan(challanId: number, opts: Opts = {}): Promis
     for (const l of cls) {
       const left = pending(toMicro(l.qty), billed.get(l.id) ?? ZERO);
       if (left === ZERO) continue;
-      lines.push({ productId: l.productId, particular: l.particular, qty: fmt(left), unitId: l.unitId, rate: l.rate, challanLineId: l.id, purchaseOrderLineId: l.purchaseOrderLineId, locationId: l.locationId, batchNo: l.batchNo, manufactureDate: l.manufactureDate, expiryDate: l.expiryDate });
+      lines.push({ productId: l.productId, qty: fmt(left), unitId: l.unitId, rate: l.rate, challanLineId: l.id, purchaseOrderLineId: l.purchaseOrderLineId, locationId: l.locationId, batchNo: l.batchNo, manufactureDate: l.manufactureDate, expiryDate: l.expiryDate });
     }
     if (!lines.length) throw new HttpError(409, "Everything on this challan has already been billed.");
     return {

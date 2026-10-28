@@ -12,6 +12,7 @@ import { openingBalanceRouter } from "./routes/openingBalance";
 import { stockOpeningRouter } from "./routes/stockOpening";
 import { purchaseRouter } from "./routes/purchase";
 import { auditRouter } from "./routes/audit";
+import { periodLockRouter } from "./routes/periodLock";
 import { HttpError, pgError } from "./routes/_util";
 
 export const app = express();
@@ -31,6 +32,7 @@ app.use("/api/opening-balance", openingBalanceRouter);
 app.use("/api/stock-opening", stockOpeningRouter);
 app.use("/api/purchase", purchaseRouter);
 app.use("/api/audit", auditRouter);
+app.use("/api/period-lock", periodLockRouter);
 for (const { key, router } of masterRouters) app.use(`/api/masters/${key}`, router);
 
 // Production: build ki hui React app yahin se serve hoti hai (npm run build && npm start)
@@ -41,7 +43,7 @@ if (fs.existsSync(dist)) {
 }
 
 export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
-  if (err instanceof HttpError) return res.status(err.status).json({ message: err.message, field: err.field });
+  if (err instanceof HttpError) return res.status(err.status).json({ message: err.message, field: err.field, code: err.code });
   // A rule the DATABASE refused. Routes normally pre-check, so this is the safety net (races, new code paths). The answer is built from
   // the Postgres code, never from drizzle's wrapper message (that one is the SQL text and its parameters).
   const pg = pgError(err);

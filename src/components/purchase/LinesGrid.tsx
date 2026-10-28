@@ -12,12 +12,12 @@ const decOnly = (re: RegExp, set: (v: string) => void) => (e: React.ChangeEvent<
 const QTY = /^\d{0,12}(\.\d{0,6})?$/, RATE = /^\d{0,12}(\.\d{0,6})?$/, INT = /^\d{0,9}$/;
 
 const COLS: Record<LineKind, string> = {
-  order: "30px minmax(150px,1.4fr) minmax(90px,1fr) 70px 82px 84px 56px 84px 100px 120px 24px",
+  order: "30px minmax(150px,1.4fr) 70px 82px 84px 56px 84px 100px 120px 24px",
   challan: "34px minmax(190px,1.6fr) 78px 96px 92px 70px 92px 112px 120px 100px 126px 126px 110px 28px",
   bill: "34px minmax(190px,1.6fr) 78px 96px 92px 70px 92px 112px 120px 100px 126px 126px 110px 28px",
 };
 const HEAD: Record<LineKind, string[]> = {
-  order: ["#", "Product", "Particular", "Alt Qty", "Alt Unit", "Quantity", "Unit", "Rate", "Amount", "Expected", ""],
+  order: ["#", "Product", "Alt Qty", "Alt Unit", "Quantity", "Unit", "Rate", "Amount", "Expected", ""],
   challan: ["#", "Product", "Alt Qty", "Alt Unit", "Quantity", "Unit", "Rate", "Amount", "Location", "Batch", "Mfg Date", "Expiry", "Linked to", ""],
   bill: ["#", "Product", "Alt Qty", "Alt Unit", "Quantity", "Unit", "Rate", "Amount", "Location", "Batch", "Mfg Date", "Expiry", "Linked to", ""],
 };
@@ -99,7 +99,6 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                 <div style={{ gridTemplateColumns: COLS[kind] }} className="grid gap-x-1 px-2 py-1 items-center">
                   <span className="text-slate-500 tabular-nums">{i + 1}</span>
                   <Combobox fieldName={`L.${i}.p`} placeholder="Product…" value={l.productId} hasError={bad("p")} options={productOpts} disabled={off || (lockProducts && !!l.link)} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
-                  {kind === "order" && <input data-field={`L.${i}.pt`} disabled={off || !p} maxLength={200} placeholder={p ? "(product name)" : ""} value={l.particular} onChange={(e) => patch(i, { particular: e.target.value })} onFocus={(e) => e.currentTarget.select()} className={cls("pt")} aria-label="Particular" />}
                   <input data-field={`L.${i}.aq`} disabled={off || !p || altOpts.length === 0} inputMode="decimal" autoComplete="off" value={l.altQty} placeholder={altOpts.length ? "" : "—"} onChange={decOnly(QTY, (v) => patch(i, { altQty: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("aq", "text-right tabular-nums")} aria-label="Alternate quantity" />
                   <Combobox fieldName={`L.${i}.au`} placeholder={altOpts.length ? "Unit" : "—"} value={l.altUnitId} hasError={bad("au")} options={altOpts} disabled={off || !p || altOpts.length === 0} onChange={(v) => patch(i, { altUnitId: v })} onCommit={afterCombo} />
                   <input data-field={`L.${i}.q`} disabled={off || !p || useAlt} inputMode="decimal" autoComplete="off" value={useAlt ? trimDec(qtyShown) : l.qty} onChange={decOnly(QTY, (v) => patch(i, { qty: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("q", `text-right tabular-nums ${useAlt ? "bg-slate-100" : ""}`)} aria-label="Quantity" />

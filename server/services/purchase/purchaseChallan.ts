@@ -99,7 +99,7 @@ export function savePurchaseChallan(input: PurchaseChallanInput, actor: Actor, o
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i], src = input.lines[i];
       await tx.insert(S.purchaseChallanLine).values({
-        purchaseChallanId: id, lineNumber: l.lineNumber, productId: l.productId, particular: l.particular, purchaseOrderLineId: src.purchaseOrderLineId ?? null,
+        purchaseChallanId: id, lineNumber: l.lineNumber, productId: l.productId, purchaseOrderLineId: src.purchaseOrderLineId ?? null,
         altQty: l.altQty === null ? null : fmt(l.altQty), altUnitId: l.altUnitId, qty: fmt(l.qty), unitId: l.unitId,
         rate: fmt(l.rate), basicAmount: fmt(l.basicAmount, 2), locationId: src.locationId ?? null, batchNo: src.batchNo?.trim() || null,
         manufactureDate: optDate(src.manufactureDate, "manufactureDate"), expiryDate: optDate(src.expiryDate, "expiryDate"),

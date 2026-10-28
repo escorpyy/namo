@@ -235,6 +235,9 @@ export const auditLog = pgTable(
     changedBy: integer().references(() => user.id, { onDelete: "restrict" }),
     // From the per-transaction setting namo.change_reason. Null = none given.
     reason: text(),
+    // ERP-025: true when the change touched a document dated on or before the company lock date, which the database only
+    // lets through with the lock override (password checked, reason given). Set by the trigger, never by the application.
+    lockOverride: boolean().notNull().default(false),
     changedAt: timestamp({ precision: 3 }).notNull().defaultNow(),
   },
   (t) => [

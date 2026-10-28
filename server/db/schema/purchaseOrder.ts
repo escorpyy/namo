@@ -126,7 +126,7 @@ export const purchaseOrder = pgTable(
   ],
 );
 
-// The grid: S.No, Particular, Alt Qty, Uom, Qty, Uom, Rate, Basic Amt.
+// The grid: S.No, Alt Qty, Uom, Qty, Uom, Rate, Basic Amt.
 export const purchaseOrderLine = pgTable(
   "PurchaseOrderLine",
   {
@@ -139,8 +139,6 @@ export const purchaseOrderLine = pgTable(
     productId: integer()
       .notNull()
       .references(() => product.id, { onDelete: "restrict" }),
-    // "Particular": defaults to the product description, editable per line.
-    particular: varchar({ length: 256 }),
 
     // First Uom pair: the alternate unit the goods are ordered in.
     altQty: money(),

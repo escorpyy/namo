@@ -78,6 +78,20 @@
       "when": 1792888310328,
       "tag": "0010_audit_insert_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793069020110,
+      "tag": "0011_period_lock",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793151482294,
+      "tag": "0012_remove_purchase_particular",
+      "breakpoints": true
     }
   ]
 }
