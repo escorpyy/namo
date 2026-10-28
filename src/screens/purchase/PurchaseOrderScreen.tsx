@@ -89,14 +89,14 @@ export default function PurchaseOrderScreen(p: PurchaseScreenProps) {
       notice={doc && status !== "DRAFT" && <p className="mt-2 text-[12px] text-amber-800 bg-amber-50 border border-amber-300 px-2 py-1">{status === "APPROVED" ? "Approved orders cannot be edited." : `This order is ${status!.toLowerCase()}.`}</p>}
       listRow={(r) => (
         <>
-          <div className="flex items-center justify-between gap-2"><span className="font-mono font-semibold">{r.orderNumber}</span><Pill text={r.status} tone={STATUS_TONE[r.status]} /></div>
-          <div className="text-[12px] text-slate-600 truncate">{r.vendorName}</div>
-          <div className="flex justify-between text-[12px] text-slate-500"><span>{r.orderDate}</span><span className="tabular-nums">{money(r.totalAmount)}</span></div>
+          <div className="flex items-start justify-between gap-2"><span className="min-w-0 font-mono font-semibold break-words">{r.orderNumber}</span><Pill text={r.status} tone={STATUS_TONE[r.status]} /></div>
+          <div className="text-[12px] text-slate-600 break-words">{r.vendorName}</div>
+          <div className="flex flex-wrap justify-between gap-x-2 text-[12px] text-slate-500"><span>{r.orderDate}</span><span className="tabular-nums whitespace-nowrap">{money(r.totalAmount)}</span></div>
         </>
       )}>
       {f && lk && (
         <div className="space-y-3 pt-2">
-          <div className="grid grid-cols-5 gap-x-3 gap-y-2">
+          <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-x-3 gap-y-2">
             <Field label="Order No"><input disabled className="fld bg-slate-100 text-slate-600" value={doc?.orderNumber ?? ""} placeholder="(next number)" aria-label="Order number" /></Field>
             <DateField label="Order Date" name="orderDate" value={f.orderDate} onChange={(v) => { s.patch({ orderDate: v }); s.clearError("orderDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("orderDate")} required />
             <VendorFields lookups={lk} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors}
@@ -104,25 +104,27 @@ export default function PurchaseOrderScreen(p: PurchaseScreenProps) {
             <TextField label="Vendor Ref No" name="vendorRefNo" value={f.vendorRefNo} onChange={(v) => s.patch({ vendorRefNo: v })} readOnly={ro} error={s.err("vendorRefNo")} />
             <DateField label="Vendor Ref Date" name="vendorRefDate" value={f.vendorRefDate} onChange={(v) => { s.patch({ vendorRefDate: v }); s.clearError("vendorRefDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("vendorRefDate")} />
             <DateField label="Expected By" name="expectedDate" value={f.expectedDate} onChange={(v) => { s.patch({ expectedDate: v }); s.clearError("expectedDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("expectedDate")} />
-            <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} className="col-span-3" error={s.err("remarks")} />
+            <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} className="col-span-1 sm:col-span-2 2xl:col-span-3" error={s.err("remarks")} />
           </div>
           <h2 className="text-[13px] font-semibold">Lines</h2>
           <LinesGrid kind="order" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} />
           {ro && doc && doc.lines.length > 0 && (
-            <div className="border border-slate-300 bg-white/60">
-              <div className="grid grid-cols-[34px_1fr_110px_110px_110px_110px] gap-x-2 px-2 py-1 text-[11px] font-semibold text-slate-600 bg-slate-100 border-b border-slate-300"><span>#</span><span>Progress</span><span className="text-right">Ordered</span><span className="text-right">Received</span><span className="text-right">Billed</span><span className="text-right">Pending bill</span></div>
-              {doc.lines.map((l) => (
-                <div key={l.id} className="grid grid-cols-[34px_1fr_110px_110px_110px_110px] gap-x-2 px-2 py-0.5 text-[12px] border-b border-slate-200 last:border-0">
-                  <span className="text-slate-500">{l.lineNumber}</span><span className="truncate">{l.code} — {l.description}</span>
-                  <span className="text-right tabular-nums">{l.qty} {l.unitCode}</span><span className="text-right tabular-nums">{l.received}</span><span className="text-right tabular-nums">{l.billed}</span><span className="text-right tabular-nums">{l.pendingToBill}</span>
-                </div>
-              ))}
+            <div className="overflow-x-auto rounded-sm border border-slate-300 bg-white/60" tabIndex={0} aria-label="Order line progress; scroll horizontally if needed">
+              <div className="min-w-[760px]">
+                <div className="grid grid-cols-[34px_minmax(220px,1fr)_110px_110px_110px_110px] gap-x-2 px-2 py-1 text-[11px] font-semibold text-slate-600 bg-slate-100 border-b border-slate-300"><span>#</span><span>Progress</span><span className="text-right">Ordered</span><span className="text-right">Received</span><span className="text-right">Billed</span><span className="text-right">Pending bill</span></div>
+                {doc.lines.map((l) => (
+                  <div key={l.id} className="grid grid-cols-[34px_minmax(220px,1fr)_110px_110px_110px_110px] gap-x-2 px-2 py-1 text-[12px] border-b border-slate-200 last:border-0">
+                    <span className="text-slate-500">{l.lineNumber}</span><span className="break-words">{l.code} — {l.description}</span>
+                    <span className="text-right tabular-nums whitespace-nowrap">{l.qty} {l.unitCode}</span><span className="text-right tabular-nums">{l.received}</span><span className="text-right tabular-nums">{l.billed}</span><span className="text-right tabular-nums">{l.pendingToBill}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           <h2 className="text-[13px] font-semibold">Billing Terms</h2>
           <TermsGrid terms={f.terms} onChange={(terms) => s.patch({ terms })} lookups={lk} masters={masters} lineCount={f.lines.filter((l) => !isBlankLine(l)).length} readOnly={ro} errors={s.errors} clearError={s.clearError} category="GENERAL" />
           {doc && (
-            <div className="flex justify-end gap-6 text-[13px] border border-slate-400 bg-slate-50 px-3 py-1.5">
+            <div className="flex flex-wrap justify-end gap-x-4 gap-y-1 text-[13px] border border-slate-400 bg-slate-50 px-3 py-1.5">
               <span>Basic <b className="tabular-nums ml-1">{money(doc.basicAmount)}</b></span><span>Terms <b className="tabular-nums ml-1">{money(doc.termAmount)}</b></span><span>Total <b className="tabular-nums ml-1">{money(doc.totalAmount)}</b></span>
             </div>
           )}

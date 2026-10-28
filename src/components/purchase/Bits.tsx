@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Pencil, Plus, Save, Search, Trash2, X } from "lucide-react";
+import { Pencil, PanelRightClose, PanelRightOpen, Plus, Save, Search, Trash2, X } from "lucide-react";
 import type { PListRow } from "../../api";
 import { fmtPaise, toPaise } from "../../lib/money";
 import type { DocScreen } from "../../screens/purchase/useDocScreen";
@@ -19,8 +19,8 @@ export function Pill({ text, tone = "slate" }: { text: string; tone?: keyof type
 
 export function Field({ label, error, children, className = "", required }: { label: string; error?: string; children: ReactNode; className?: string; required?: boolean }) {
   return (
-    <label className={`block ${className}`}>
-      <span className="block text-[11px] font-semibold text-slate-600 mb-0.5">{label}{required && <span className="text-red-600"> *</span>}</span>
+    <label className={`block min-w-0 ${className}`}>
+      <span className="block text-[11px] font-semibold leading-snug text-slate-600 mb-0.5 break-words">{label}{required && <span className="text-red-600"> *</span>}</span>
       {children}
       {error && <span className="block text-[12px] text-red-700 mt-0.5">{error}</span>}
     </label>
@@ -29,9 +29,12 @@ export function Field({ label, error, children, className = "", required }: { la
 
 // Moves focus to the next / previous enabled field of the form (document order).
 export function focusStep(el: Element, dir: 1 | -1) {
-  const all = Array.from(document.querySelectorAll<HTMLElement>("[data-zone=form] [data-field]")).filter((x) => !(x as HTMLInputElement).disabled);
+  const all = Array.from(document.querySelectorAll<HTMLElement>("[data-zone=form] [data-field]"))
+    .filter((x) => !("disabled" in x && (x as HTMLInputElement).disabled) && x.getAttribute("aria-hidden") !== "true");
   const i = all.indexOf(el as HTMLElement);
-  all[i + dir]?.focus();
+  const next = all[i + dir];
+  next?.focus();
+  next?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 interface ShellProps<F extends object> {
@@ -56,7 +59,7 @@ export function DocShell<F extends object>({ s, title, singular, branchName, fyC
   const view = s.mode === "view";
   const onFormKey = (e: React.KeyboardEvent) => {
     const el = e.target as HTMLElement;
-    if (e.key !== "Enter" || el.tagName !== "INPUT" || el.getAttribute("role") === "combobox" || !el.hasAttribute("data-field")) return;
+    if (e.key !== "Enter" || el.getAttribute("role") === "combobox" || !el.hasAttribute("data-field") || !(el instanceof HTMLInputElement || el instanceof HTMLSelectElement)) return;
     e.preventDefault();
     focusStep(el, e.shiftKey ? -1 : 1);
   };
@@ -94,34 +97,53 @@ export function DocShell<F extends object>({ s, title, singular, branchName, fyC
           </div>
         </section>
 
-        <aside data-zone="list" className="w-[330px] shrink-0 border-l border-slate-400 bg-white/50 flex flex-col min-h-0">
-          <div className="p-2 border-b border-slate-300 space-y-1.5 shrink-0">
-            <div className="relative">
-              <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" />
-              <input ref={s.searchRef} value={s.search} onChange={(e) => s.setSearch(e.target.value)} placeholder={`Search ${singular.toLowerCase()}s…  (F4)`} aria-label="Search" className="fld pl-7"
-                onFocus={(e) => e.currentTarget.select()}
-                onKeyDown={(e) => { if (e.key === "ArrowDown" || e.key === "Enter") { e.preventDefault(); document.querySelector<HTMLElement>("[data-zone=list] [data-row]")?.focus(); } else if (e.key === "Escape") { e.stopPropagation(); (e.target as HTMLElement).blur(); } }} />
-            </div>
-            <select value={s.statusFilter} onChange={(e) => s.setStatusFilter(e.target.value)} aria-label="Status filter" className="fld">
-              <option value="">All statuses</option>
-              {statusOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </div>
-          <div className="flex-1 min-h-0 overflow-y-auto" onKeyDown={(e) => {
-            const rows = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("[data-row]")), i = rows.indexOf(e.target as HTMLElement);
-            if (e.key === "ArrowDown") { e.preventDefault(); rows[Math.min(i + 1, rows.length - 1)]?.focus(); }
-            else if (e.key === "ArrowUp") { e.preventDefault(); if (i <= 0) s.searchRef.current?.focus(); else rows[i - 1].focus(); }
-            else if (e.key === "Escape") { e.stopPropagation(); document.querySelector<HTMLElement>("[data-zone=form] [data-field]:not(:disabled)")?.focus(); }
-          }}>
-            {s.rows.length === 0 && <p className="p-3 text-slate-500 text-[12px]">No {singular.toLowerCase()}s found.</p>}
-            {s.rows.map((r) => (
-              <button key={r.id} data-row aria-selected={r.id === s.selectedId} onClick={() => s.select(r.id)}
-                className={`w-full text-left px-2.5 py-1.5 border-b border-slate-200 hover:bg-blue-50 focus:outline-none focus:bg-blue-100 ${r.id === s.selectedId ? "bg-blue-100" : ""}`}>
-                {listRow(r)}
+        <aside id="purchase-document-list" data-zone="list" aria-label={`${title} document list`} className={`${s.listCollapsed ? "w-11" : "w-[min(340px,32vw)] min-w-[250px]"} shrink-0 border-l border-slate-400 bg-white/50 flex flex-col min-h-0 overflow-hidden transition-[width] duration-150`}>
+          {s.listCollapsed ? (
+            <div className="flex flex-col items-center gap-2 pt-2">
+              <button data-list-toggle type="button" onClick={s.toggleList} aria-expanded={false} aria-controls="purchase-document-list" aria-label={`Expand ${singular.toLowerCase()} list (Alt+4)`} title={`Expand ${singular.toLowerCase()} list (Alt+4)`}
+                className="h-8 w-8 grid place-items-center rounded-sm hover:bg-slate-200 focus-visible:outline-2 focus-visible:outline-blue-700">
+                <PanelRightOpen size={17} />
               </button>
-            ))}
-          </div>
-          <div className="shrink-0 px-2.5 py-1 border-t border-slate-300 text-[11px] text-slate-600">{s.rows.length === s.total ? `${s.total} ${singular.toLowerCase()}(s)` : `Showing ${s.rows.length} of ${s.total}`}</div>
+              <span className="text-[10px] text-slate-600 tabular-nums [writing-mode:vertical-rl]" title={`${s.total} ${singular.toLowerCase()}s`}>{s.total}</span>
+            </div>
+          ) : (
+            <>
+              <div className="p-2 border-b border-slate-300 space-y-1.5 shrink-0">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-[12px] font-semibold text-slate-700">{title} list <span className="font-normal text-slate-500">({s.total})</span></h2>
+                  <button data-list-toggle type="button" onClick={s.toggleList} aria-expanded={true} aria-controls="purchase-document-list" aria-label={`Collapse ${singular.toLowerCase()} list (Alt+4)`} title={`Collapse ${singular.toLowerCase()} list (Alt+4)`}
+                    className="h-7 w-7 shrink-0 grid place-items-center rounded-sm hover:bg-slate-200 focus-visible:outline-2 focus-visible:outline-blue-700">
+                    <PanelRightClose size={16} />
+                  </button>
+                </div>
+                <div className="relative">
+                  <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" />
+                  <input ref={s.searchRef} value={s.search} onChange={(e) => s.setSearch(e.target.value)} placeholder={`Search ${singular.toLowerCase()}s…  (F4)`} aria-label={`Search ${singular.toLowerCase()}s`} className="fld min-w-0 pl-7"
+                    onFocus={(e) => e.currentTarget.select()}
+                    onKeyDown={(e) => { if (e.key === "ArrowDown" || e.key === "Enter") { e.preventDefault(); document.querySelector<HTMLElement>("[data-zone=list] [data-row]")?.focus(); } else if (e.key === "Escape") { e.stopPropagation(); (e.target as HTMLElement).blur(); } }} />
+                </div>
+                <select value={s.statusFilter} onChange={(e) => s.setStatusFilter(e.target.value)} aria-label="Status filter" className="fld min-w-0">
+                  <option value="">All statuses</option>
+                  {statusOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto" onKeyDown={(e) => {
+                const rows = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("[data-row]")), i = rows.indexOf(e.target as HTMLElement);
+                if (e.key === "ArrowDown") { e.preventDefault(); rows[Math.min(i + 1, rows.length - 1)]?.focus(); }
+                else if (e.key === "ArrowUp") { e.preventDefault(); if (i <= 0) s.searchRef.current?.focus(); else rows[i - 1].focus(); }
+                else if (e.key === "Escape") { e.stopPropagation(); document.querySelector<HTMLElement>("[data-zone=form] [data-field]:not(:disabled)")?.focus(); }
+              }}>
+                {s.rows.length === 0 && <p className="p-3 text-slate-600 text-[12px]">No {singular.toLowerCase()}s found.</p>}
+                {s.rows.map((r) => (
+                  <button key={r.id} data-row aria-selected={r.id === s.selectedId} onClick={() => s.select(r.id)}
+                    className={`w-full min-w-0 text-left px-2.5 py-2 border-b border-slate-200 hover:bg-blue-50 focus:outline-none focus:bg-blue-100 break-words ${r.id === s.selectedId ? "bg-blue-100" : ""}`}>
+                    {listRow(r)}
+                  </button>
+                ))}
+              </div>
+              <div className="shrink-0 px-2.5 py-1 border-t border-slate-300 text-[11px] text-slate-600 break-words">{s.rows.length === s.total ? `${s.total} ${singular.toLowerCase()}(s)` : `Showing ${s.rows.length} of ${s.total}`}</div>
+            </>
+          )}
         </aside>
       </main>
       {s.dialog && <ConfirmDialog spec={s.dialog} onClose={() => s.setDialog(null)} />}
@@ -141,6 +163,7 @@ export const COMMON_HELP: [string, string][] = [
   ["Ctrl+↑ / Ctrl+↓", "Previous / next document"],
   ["Shift+Delete", "Remove the current line or term row"],
   ["Alt+1 / Alt+2 / Alt+3", "Sidebar / Form / List"],
+  ["Alt+4", "Expand / collapse the purchase document list"],
   ["F1 / ?", "This help"],
 ];
-export const HINTS = ["Enter: Next", "Ctrl+S: Save", "F3: New", "F2: Edit", "F4: Search", "F1: Help"];
+export const HINTS = ["Enter: Next", "Ctrl+S: Save", "F3: New", "F2: Edit", "F4: Search", "Alt+4: Toggle list", "F1: Help"];

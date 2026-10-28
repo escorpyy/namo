@@ -182,20 +182,20 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
       pill={state && <Pill text={state} tone={STATE_TONE[state]} />} canEdit={!!doc && cfg.editable(doc)} canDelete={!!doc && cfg.deletable(doc)} actions={actions} help={HELP} notice={notice}
       listRow={(r) => (
         <>
-          <div className="flex items-center justify-between gap-2"><span className="font-mono font-semibold truncate">{r.invoiceNumber}</span><span className="flex gap-1">{r.isAdditional && <Pill text="ADDL" tone="blue" />}<Pill text={r.state} tone={STATE_TONE[r.state]} /></span></div>
-          <div className="text-[12px] text-slate-600 truncate">{r.vendorName}{r.vendorInvoiceNo ? ` · ${r.vendorInvoiceNo}` : ""}</div>
-          <div className="flex justify-between text-[12px] text-slate-500"><span>{r.invoiceDate}</span><span className="tabular-nums">{money(r.totalAmount)}</span></div>
+          <div className="flex items-start justify-between gap-2"><span className="min-w-0 font-mono font-semibold break-words">{r.invoiceNumber}</span><span className="flex shrink-0 gap-1">{r.isAdditional && <Pill text="ADDL" tone="blue" />}<Pill text={r.state} tone={STATE_TONE[r.state]} /></span></div>
+          <div className="text-[12px] text-slate-600 break-words">{r.vendorName}{r.vendorInvoiceNo ? ` · ${r.vendorInvoiceNo}` : ""}</div>
+          <div className="flex flex-wrap justify-between gap-x-2 text-[12px] text-slate-500"><span>{r.invoiceDate}</span><span className="tabular-nums whitespace-nowrap">{money(r.totalAmount)}</span></div>
         </>
       )}>
       {f && lk && (
         <div className="space-y-3 pt-2">
-          <div className="grid grid-cols-5 gap-x-3 gap-y-2">
+          <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-x-3 gap-y-2">
             <Field label="Invoice No"><input disabled className="fld bg-slate-100 text-slate-600" value={doc?.invoiceNumber ?? ""} placeholder="(next number)" aria-label="Invoice number" /></Field>
             <DateField label="Invoice Date" name="invoiceDate" value={f.invoiceDate} onChange={(v) => { s.patch({ invoiceDate: v }); s.clearError("invoiceDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("invoiceDate")} required />
             <Field label="Invoice Type">
               <select data-field="invoiceType" disabled={ro || isAdditional} value={f.invoiceType} onChange={(e) => s.patch({ invoiceType: e.target.value as BForm["invoiceType"] })} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}><option value="LOCAL">Local</option><option value="IMPORT">Import</option></select>
             </Field>
-            <Field label="Purchase Type" className="col-span-2">
+            <Field label="Purchase Type" className="col-span-1 sm:col-span-2 2xl:col-span-2">
               <select data-field="purchaseType" disabled={ro || isAdditional} value={f.purchaseType} onChange={(e) => s.patch({ purchaseType: e.target.value })} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}>{PURCHASE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select>
             </Field>
             <VendorFields lookups={lk} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors} lockVendor={!!f.purchaseChallanId || isAdditional}
@@ -205,16 +205,16 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
             <TextField label="Due Days" name="dueDays" value={f.dueDays} onChange={(v) => /^\d{0,4}$/.test(v) && s.patch({ dueDays: v })} readOnly={ro} error={s.err("dueDays")} max={4} />
             <DateField label="Due Date" name="dueDate" value={f.dueDate} onChange={(v) => { s.patch({ dueDate: v }); s.clearError("dueDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("dueDate")} />
             <Field label="Additional to Bill" error={s.err("mainBillId")}>
-              <Combobox fieldName="mainBillId" placeholder="— (a normal bill)" value={f.mainBillId} hasError={!!s.err("mainBillId")} options={mainOpts} disabled={ro || !!doc || !!f.purchaseChallanId} onChange={(v) => void pickMain(v)} onCommit={(el) => focusStep(el, 1)} />
+              <Combobox fieldName="mainBillId" placeholder="— (a normal bill)" value={f.mainBillId} hasError={!!s.err("mainBillId")} options={mainOpts} disabled={ro || !!doc || !!f.purchaseChallanId} onChange={(v) => void pickMain(v)} onCommit={(el, dir) => focusStep(el, dir)} />
             </Field>
             <Field label="Challan / Order"><input disabled className="fld bg-slate-100 text-slate-600" value={[f.challanNo && `Challan ${f.challanNo}`, f.orderNo && `Order ${f.orderNo}`].filter(Boolean).join(" · ")} placeholder="—" aria-label="Linked documents" /></Field>
-            <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} className="col-span-3" error={s.err("remarks")} />
+            <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} className="col-span-1 sm:col-span-2 2xl:col-span-3" error={s.err("remarks")} />
           </div>
 
           {f.invoiceType === "IMPORT" && (
             <fieldset className="border border-slate-400 bg-white/60 px-3 pt-1 pb-2">
               <legend className="px-1 text-[12px] font-semibold">Import details <span className="font-normal text-slate-600">(the customs declaration no is needed to post)</span></legend>
-              <div className="grid grid-cols-4 gap-x-3 gap-y-2">
+              <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-x-3 gap-y-2">
                 {IMPORT_FIELDS.map((k) => k.kind === "date"
                   ? <DateField key={k.key} label={k.label} name={`imp.${k.key}`} value={f.imp[k.key] ?? ""} onChange={(v) => { s.patch({ imp: { ...f.imp, [k.key]: v } }); s.clearError(`imp.${k.key}`); }} calendar={p.calendar} readOnly={ro} error={s.err(`imp.${k.key}`)} />
                   : k.kind === "mode"
@@ -234,7 +234,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
           <TermsGrid terms={f.terms} onChange={(terms) => s.patch({ terms })} lookups={lk} masters={masters} lineCount={f.lines.filter((l) => !isBlankLine(l)).length} readOnly={ro} errors={s.errors} clearError={s.clearError} category={isAdditional ? "ADDITIONAL" : undefined} />
           {s.err("terms") && <p className="text-[12px] text-red-700">{s.err("terms")}</p>}
           {doc && (
-            <div className="flex justify-end gap-6 text-[13px] border border-slate-400 bg-slate-50 px-3 py-1.5">
+            <div className="flex flex-wrap justify-end gap-x-4 gap-y-1 text-[13px] border border-slate-400 bg-slate-50 px-3 py-1.5">
               <span>Basic <b className="tabular-nums ml-1">{money(doc.basicAmount)}</b></span><span>Terms <b className="tabular-nums ml-1">{money(doc.termAmount)}</b></span><span>Total <b className="tabular-nums ml-1">{money(doc.totalAmount)}</b></span>
             </div>
           )}

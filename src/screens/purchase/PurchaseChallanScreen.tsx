@@ -104,20 +104,19 @@ export default function PurchaseChallanScreen(p: PurchaseScreenProps & { onCreat
       notice={confirmed && <p className="mt-2 text-[12px] text-amber-800 bg-amber-50 border border-amber-300 px-2 py-1">A confirmed challan is final. To correct it, raise a corrected bill instead.</p>}
       listRow={(r) => (
         <>
-          <div className="flex items-center justify-between gap-2"><span className="font-mono font-semibold">{r.challanNumber}</span><Pill text={r.isConfirmed ? "CONFIRMED" : "DRAFT"} tone={r.isConfirmed ? "green" : "slate"} /></div>
-          <div className="text-[12px] text-slate-600 truncate">{r.vendorName}{r.orderNumber ? ` · ${r.orderNumber}` : ""}</div>
-          <div className="flex justify-between text-[12px] text-slate-500"><span>{r.challanDate}</span><span className="tabular-nums">{money(r.totalAmount)}</span></div>
+          <div className="flex items-start justify-between gap-2"><span className="min-w-0 font-mono font-semibold break-words">{r.challanNumber}</span><Pill text={r.isConfirmed ? "CONFIRMED" : "DRAFT"} tone={r.isConfirmed ? "green" : "slate"} /></div>
+          <div className="text-[12px] text-slate-600 break-words">{r.vendorName}{r.orderNumber ? ` · ${r.orderNumber}` : ""}</div>
+          <div className="flex flex-wrap justify-between gap-x-2 text-[12px] text-slate-500"><span>{r.challanDate}</span><span className="tabular-nums whitespace-nowrap">{money(r.totalAmount)}</span></div>
         </>
       )}>
       {f && lk && (
         <div className="space-y-3 pt-2">
-          <div className="grid grid-cols-5 gap-x-3 gap-y-2">
+          <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-x-3 gap-y-2">
             <Field label="Challan No"><input disabled className="fld bg-slate-100 text-slate-600" value={doc?.challanNumber ?? ""} placeholder="(next number)" aria-label="Challan number" /></Field>
             <DateField label="Challan Date" name="challanDate" value={f.challanDate} onChange={(v) => { s.patch({ challanDate: v }); s.clearError("challanDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("challanDate")} required />
-            <Field label="Against Order" className="col-span-2" error={s.err("purchaseOrderId")}>
-              <Combobox fieldName="purchaseOrderId" placeholder="Approved order (optional)" value={f.purchaseOrderId} hasError={!!s.err("purchaseOrderId")} options={orderOpts} disabled={ro} onChange={(v) => void pickOrder(v)} onCommit={(el) => focusStep(el, 1)} />
+            <Field label="Against Order" className="col-span-1 sm:col-span-2" error={s.err("purchaseOrderId")}>
+              <Combobox fieldName="purchaseOrderId" placeholder="Approved order (optional)" value={f.purchaseOrderId} hasError={!!s.err("purchaseOrderId")} options={orderOpts} disabled={ro} onChange={(v) => void pickOrder(v)} onCommit={(el, dir) => focusStep(el, dir)} />
             </Field>
-            <div />
             <VendorFields lookups={lk} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors} lockVendor={!!f.purchaseOrderId}
               onChange={(c) => { s.patch(c); s.clearError("vendorGLId", "subLedgerId"); }} />
             <TextField label="Vendor Challan No" name="vendorChallanNo" value={f.vendorChallanNo} onChange={(v) => s.patch({ vendorChallanNo: v })} readOnly={ro} error={s.err("vendorChallanNo")} />
@@ -126,7 +125,7 @@ export default function PurchaseChallanScreen(p: PurchaseScreenProps & { onCreat
             <TextField label="Vehicle No" name="vehicleNo" value={f.vehicleNo} onChange={(v) => s.patch({ vehicleNo: v })} readOnly={ro} error={s.err("vehicleNo")} />
             <TextField label="LR No" name="lrNo" value={f.lrNo} onChange={(v) => s.patch({ lrNo: v })} readOnly={ro} error={s.err("lrNo")} />
             <DateField label="LR Date" name="lrDate" value={f.lrDate} onChange={(v) => { s.patch({ lrDate: v }); s.clearError("lrDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("lrDate")} />
-            <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} className="col-span-2" error={s.err("remarks")} />
+            <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} className="col-span-1 sm:col-span-2" error={s.err("remarks")} />
           </div>
           <h2 className="text-[13px] font-semibold">Lines received</h2>
           <LinesGrid kind="challan" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} lockProducts />

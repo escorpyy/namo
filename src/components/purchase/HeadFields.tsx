@@ -17,16 +17,16 @@ export function VendorFields({ lookups, vendorGLId, subLedgerId, agentId, onChan
   const agents = useMemo<ComboOption[]>(() => lookups.agents.filter((a) => a.isActive || String(a.id) === agentId).map((a) => ({ value: String(a.id), label: `${a.code} — ${a.name}` })), [lookups.agents, agentId]);
   return (
     <>
-      <Field label="Vendor" required error={errors.vendorGLId} className="col-span-2">
+      <Field label="Vendor" required error={errors.vendorGLId} className="col-span-1 sm:col-span-2">
         <Combobox fieldName="vendorGLId" placeholder="Vendor ledger…" value={vendorGLId} hasError={!!errors.vendorGLId} options={vendors} disabled={readOnly || lockVendor}
-          onChange={(v) => onChange({ vendorGLId: v, subLedgerId: "" })} onCommit={(el) => focusStep(el, 1)} />
+          onChange={(v) => onChange({ vendorGLId: v, subLedgerId: "" })} onCommit={(el, dir) => focusStep(el, dir)} />
       </Field>
       <Field label={vendor?.requiresSubLedger ? "Sub Ledger" : "Sub Ledger (not needed)"} required={!!vendor?.requiresSubLedger} error={errors.subLedgerId}>
         <Combobox fieldName="subLedgerId" placeholder={subs.length ? "Sub ledger…" : "—"} value={subLedgerId} hasError={!!errors.subLedgerId} options={subs} disabled={readOnly || subs.length === 0}
-          onChange={(v) => onChange({ subLedgerId: v })} onCommit={(el) => focusStep(el, 1)} />
+          onChange={(v) => onChange({ subLedgerId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
       </Field>
       <Field label="Agent" error={errors.agentId}>
-        <Combobox fieldName="agentId" placeholder="Agent (optional)" value={agentId} hasError={!!errors.agentId} options={agents} disabled={readOnly} onChange={(v) => onChange({ agentId: v })} onCommit={(el) => focusStep(el, 1)} />
+        <Combobox fieldName="agentId" placeholder="Agent (optional)" value={agentId} hasError={!!errors.agentId} options={agents} disabled={readOnly} onChange={(v) => onChange({ agentId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
       </Field>
     </>
   );
@@ -48,7 +48,7 @@ export function TextField({ label, name, value, onChange, readOnly, error, max =
   return (
     <Field label={label} error={error} required={required} className={className}>
       <input data-field={name} value={value} maxLength={max} autoComplete="off" disabled={readOnly} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} onFocus={(e) => e.currentTarget.select()}
-        className={`fld ${error ? "fld-err" : ""} ${readOnly ? "bg-slate-100 text-slate-600" : ""}`} />
+        className={`fld min-w-0 ${error ? "fld-err" : ""} ${readOnly ? "bg-slate-100 text-slate-600" : ""}`} />
     </Field>
   );
 }

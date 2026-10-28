@@ -12,7 +12,7 @@ interface Props {
   value: string;
   options: ComboOption[];
   onChange: (v: string) => void;
-  onCommit?: (el: HTMLInputElement) => void; // Enter se option chuna -> next field pe jao
+  onCommit?: (el: HTMLInputElement, direction: 1 | -1) => void; // Enter se option chuna -> next/previous field pe jao
   onBlurField?: () => void;
   fieldName: string;
   placeholder?: string;
@@ -56,14 +56,15 @@ export function Combobox({ value, options, onChange, onCommit, onBlurField, fiel
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setActive((a) => Math.max(a - 1, 0));
-    } else if (e.key === "Enter" && open) {
+    } else if (e.key === "Enter") {
       e.preventDefault();
       e.stopPropagation(); // form ka Enter-next handler dobara na chale
-      const o = filtered[Math.min(active, filtered.length - 1)];
-      if (o) {
+      if (open) {
+        const o = filtered[Math.min(active, filtered.length - 1)];
+        if (!o) return;
         pick(o);
-        onCommit?.(e.currentTarget);
       }
+      onCommit?.(e.currentTarget, e.shiftKey ? -1 : 1);
     } else if (e.key === "Escape" && open) {
       e.preventDefault();
       e.stopPropagation(); // sirf dropdown band ho, form cancel na ho
@@ -78,10 +79,11 @@ export function Combobox({ value, options, onChange, onCommit, onBlurField, fiel
         ref={inputRef}
         data-nav
         data-field={fieldName}
-        className={`fld pr-7 ${hasError ? "fld-err" : ""} ${disabled ? "bg-slate-100 text-slate-600" : ""}`}
+        className={`fld min-w-0 pr-7 ${hasError ? "fld-err" : ""} ${disabled ? "bg-slate-100 text-slate-600" : ""}`}
         autoComplete="off"
         disabled={disabled}
         role="combobox"
+        title={selected?.label ?? placeholder}
         aria-expanded={open}
         placeholder={placeholder}
         value={typed ? query : (selected?.label ?? "")}
@@ -119,16 +121,17 @@ export function Combobox({ value, options, onChange, onCommit, onBlurField, fiel
               onMouseEnter={() => setActive(i)}
               onClick={() => {
                 pick(o);
-                if (inputRef.current) onCommit?.(inputRef.current);
+                if (inputRef.current) onCommit?.(inputRef.current, 1);
               }}
-              className={`flex items-center gap-2 px-2 py-1 cursor-pointer ${i === active ? "bg-blue-100" : ""}`}
+              title={o.label}
+              className={`flex min-w-0 items-start gap-2 px-2 py-1.5 cursor-pointer whitespace-normal break-words leading-snug ${i === active ? "bg-blue-100" : ""}`}
             >
               {o.hotkey && (
                 <span className={`w-5 h-5 grid place-items-center text-[10px] font-bold border rounded-sm ${o.badge ?? ""}`}>
                   {o.hotkey}
                 </span>
               )}
-              <span>{o.label}</span>
+              <span className="min-w-0 break-words">{o.label}</span>
             </li>
           ))}
         </ul>

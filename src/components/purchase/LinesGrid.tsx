@@ -5,16 +5,16 @@ import { blankLine, blankTerm, derivedQty, isBlankLine, isBlankTerm, lineAmount,
 import { fmtPaise, toPaise } from "../../lib/money";
 import { Combobox, type ComboOption } from "../Combobox";
 import { DateInput } from "../DateInput";
-import { money } from "./Bits";
+import { focusStep, money } from "./Bits";
 
 type Errs = Record<string, string | undefined>;
 const decOnly = (re: RegExp, set: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => { if (re.test(e.target.value)) set(e.target.value); };
 const QTY = /^\d{0,12}(\.\d{0,6})?$/, RATE = /^\d{0,12}(\.\d{0,6})?$/, INT = /^\d{0,9}$/;
 
 const COLS: Record<LineKind, string> = {
-  order: "30px minmax(150px,1.4fr) 70px 82px 84px 56px 84px 100px 120px 24px",
-  challan: "34px minmax(190px,1.6fr) 78px 96px 92px 70px 92px 112px 120px 100px 126px 126px 110px 28px",
-  bill: "34px minmax(190px,1.6fr) 78px 96px 92px 70px 92px 112px 120px 100px 126px 126px 110px 28px",
+  order: "36px minmax(220px,1.6fr) 88px 92px 92px 72px 100px 120px 140px 32px",
+  challan: "36px minmax(230px,1.6fr) 84px 100px 96px 72px 100px 124px 130px 130px 150px 150px minmax(140px,1fr) 32px",
+  bill: "36px minmax(230px,1.6fr) 84px 100px 96px 72px 100px 124px 130px 130px 150px 150px minmax(140px,1fr) 32px",
 };
 const HEAD: Record<LineKind, string[]> = {
   order: ["#", "Product", "Alt Qty", "Alt Unit", "Quantity", "Unit", "Rate", "Amount", "Expected", ""],
@@ -64,21 +64,26 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
     if (e.key === "Enter" && el.getAttribute("role") !== "combobox") {
       const all = cells(e.currentTarget), at = all.indexOf(el);
       if (!e.shiftKey && at === all.length - 1 && !readOnly && !isBlankLine(lines[lines.length - 1])) { e.preventDefault(); e.stopPropagation(); addRow(); return; }
-      if (e.shiftKey || at < all.length - 1) { e.preventDefault(); e.stopPropagation(); all[at + (e.shiftKey ? -1 : 1)]?.focus(); }
+      if (e.shiftKey) { e.preventDefault(); e.stopPropagation(); if (at > 0) all[at - 1].focus(); else focusStep(el, -1); }
+      else if (at < all.length - 1) { e.preventDefault(); e.stopPropagation(); all[at + 1].focus(); }
     } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && el.getAttribute("role") !== "combobox") {
       e.preventDefault();
       const dir = e.key === "ArrowDown" ? 1 : -1;
       for (let k = i + dir; k >= 0 && k < lines.length; k += dir) { const t = e.currentTarget.querySelector<HTMLInputElement>(`[data-field="L.${k}.${col}"]`); if (t && !t.disabled) { t.focus(); break; } }
     } else if (e.key === "Delete" && e.shiftKey && !readOnly) { e.preventDefault(); e.stopPropagation(); remove(i); }
   };
-  const afterCombo = (el: HTMLInputElement) => { const all = cells(el.closest("[data-grid=lines]")), at = all.indexOf(el); all[at + 1]?.focus(); };
+  const afterCombo = (el: HTMLInputElement, dir: 1 | -1 = 1) => {
+    const all = cells(el.closest("[data-grid=lines]")), at = all.indexOf(el), next = all[at + dir];
+    if (next) { next.focus(); next.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+    else focusStep(el, dir);
+  };
 
   const total = lines.reduce((a, l) => a + toPaise(lineAmount(l, products.get(l.productId)) || "0"), 0);
   const live = lines.filter((l) => !isBlankLine(l)).length;
 
   return (
     <div className="border border-slate-400 bg-white/60">
-      <div className="overflow-x-auto" data-grid="lines" onKeyDown={onKey}>
+      <div className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-blue-700" data-grid="lines" onKeyDown={onKey} tabIndex={0} aria-label={`${kind} line items; scroll horizontally to see all columns`}>
         <div className="min-w-max">
           <div style={{ gridTemplateColumns: COLS[kind] }} className="grid gap-x-1 px-2 py-1 text-[11px] font-semibold text-slate-600 border-b border-slate-300 bg-slate-100">
             {HEAD[kind].map((h, i) => <span key={i} className={["Alt Qty", "Quantity", "Rate", "Amount"].includes(h) ? "text-right pr-2" : ""}>{h}</span>)}
@@ -116,7 +121,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                       <input data-field={`L.${i}.b`} disabled={off || !p?.tracksBatch} maxLength={50} placeholder={p?.tracksBatch ? "Batch" : "—"} value={l.batchNo} onChange={(e) => patch(i, { batchNo: e.target.value })} onFocus={(e) => e.currentTarget.select()} className={cls("b", !p?.tracksBatch ? "bg-slate-100" : "")} aria-label="Batch no" />
                       <DateInput fieldName={`L.${i}.mf`} value={l.manufactureDate} onChange={(v) => patch(i, { manufactureDate: v })} calendar={calendar} hasError={bad("mf")} onBlurField={() => {}} compact disabled={off || !p?.tracksExpiry} />
                       <DateInput fieldName={`L.${i}.ex`} value={l.expiryDate} onChange={(v) => patch(i, { expiryDate: v })} calendar={calendar} hasError={bad("ex")} onBlurField={() => {}} compact disabled={off || !p?.tracksExpiry} />
-                      <span className="text-[11px] text-slate-500 truncate" title={l.link}>{l.link || "—"}</span>
+                      <span className="text-[11px] text-slate-600 break-words leading-tight" title={l.link}>{l.link || "—"}</span>
                     </>
                   )}
                   <button type="button" tabIndex={-1} disabled={off} onClick={() => remove(i)} title="Remove line (Shift+Delete)" aria-label="Remove line" className="h-8 grid place-items-center text-slate-500 hover:text-red-700 disabled:opacity-30"><X size={14} /></button>
@@ -128,7 +133,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
         </div>
       </div>
       {errors.lines && <p className="px-3 py-1 text-[12px] text-red-700">{errors.lines}</p>}
-      <div className="flex items-center gap-4 px-2 py-1.5 bg-slate-50 border-t border-slate-300">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 py-1.5 bg-slate-50 border-t border-slate-300">
         {!readOnly && <button type="button" className="btn h-7" onClick={() => addRow()}><Plus size={13} /> Add line</button>}
         <span className="flex-1" />
         <span className="text-[12px]">Lines <b className="tabular-nums">{live}</b></span>
@@ -139,7 +144,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
-const TCOLS = "34px minmax(200px,1.5fr) 80px 110px 100px 70px 100px 110px 28px";
+const TCOLS = "36px minmax(220px,1.5fr) 84px 120px 120px 92px 120px 120px 32px";
 
 interface TProps {
   terms: TermRow[];
@@ -169,19 +174,24 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
     const el = e.target as HTMLElement, m = /^T\.(\d+)\./.exec(el.getAttribute("data-field") ?? "");
     if (!m) return;
     if (e.key === "Delete" && e.shiftKey && !readOnly) { e.preventDefault(); e.stopPropagation(); remove(Number(m[1])); }
-    else if (e.key === "Enter" && el.getAttribute("role") !== "combobox" && el.tagName === "INPUT") {
+    else if (e.key === "Enter" && el.getAttribute("role") !== "combobox" && (el.tagName === "INPUT" || el.tagName === "SELECT")) {
       const all = cellsOf(e.currentTarget), at = all.indexOf(el);
       e.preventDefault(); e.stopPropagation();
-      if (e.shiftKey) all[at - 1]?.focus();
+      if (e.shiftKey) { if (at > 0) all[at - 1].focus(); else focusStep(el, -1); }
       else if (at === all.length - 1 && !readOnly && !isBlankTerm(terms[terms.length - 1])) add();
-      else all[at + 1]?.focus();
+      else if (at < all.length - 1) all[at + 1].focus();
+      else focusStep(el, 1);
     }
   };
-  const afterCombo = (el: HTMLInputElement) => { const all = cellsOf(el.closest("[data-grid=terms]")), at = all.indexOf(el); all[at + 1]?.focus(); };
+  const afterCombo = (el: HTMLInputElement, dir: 1 | -1 = 1) => {
+    const all = cellsOf(el.closest("[data-grid=terms]")), at = all.indexOf(el), next = all[at + dir];
+    if (next) { next.focus(); next.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+    else focusStep(el, dir);
+  };
 
   return (
     <div className="border border-slate-400 bg-white/60">
-      <div className="overflow-x-auto" data-grid="terms" onKeyDown={onKey}>
+      <div className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-blue-700" data-grid="terms" onKeyDown={onKey} tabIndex={0} aria-label="Billing terms; scroll horizontally to see all columns">
         <div className="min-w-max">
           <div style={{ gridTemplateColumns: TCOLS }} className="grid gap-x-1 px-2 py-1 text-[11px] font-semibold text-slate-600 border-b border-slate-300 bg-slate-100">
             <span>#</span><span>Term</span><span>Line</span><span>Calculated as</span><span className="text-right pr-2">Rate % / Amount</span><span>Override</span><span className="text-right pr-2">Use amount</span><span className="text-right pr-2">Computed</span><span />

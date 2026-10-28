@@ -9,6 +9,7 @@ const rows: [string, string][] = [
   ["Ctrl+↑ / Ctrl+↓", "Previous / next record"],
   ["Alt+1 / Alt+2 / Alt+3", "Focus Sidebar / Form / List"],
   ["Ctrl+B", "Toggle sidebar"],
+  ["Alt+4 (purchase)", "Expand / collapse the document list"],
   ["Ctrl+← / Ctrl+→", "Tabs badlo (Product jaise forms me)"],
   ["Shift+Delete", "Lines me row hatao (Alternate Units, Components)"],
   ["A L E R X", "Quick-pick Type in the combobox"],

@@ -37,14 +37,14 @@ export function DateInput({ fieldName, value, onChange, calendar, hasError, onBl
   const other = ok && !compact ? (calendar === "BS" ? `AD ${value}` : (adToBs(value) ? `BS ${adToBs(value)}` : "")) : "";
 
   return (
-    <div className="relative">
+    <div className="min-w-0">
       <input
         data-nav data-field={fieldName} autoComplete="off" inputMode="numeric" maxLength={10}
-        placeholder={`YYYY-MM-DD (${calendar})`} value={text} disabled={disabled} aria-invalid={hasError}
-        className={`fld tabular-nums ${other ? "pr-28" : ""} ${hasError ? "fld-err" : ""} ${disabled ? "bg-slate-100 text-slate-600" : ""}`}
+        placeholder="YYYY-MM-DD" value={text} disabled={disabled} aria-invalid={hasError} aria-label={`${fieldName} date (${calendar})`} title={text || `Date in ${calendar} calendar`}
+        className={`fld min-w-0 tabular-nums ${hasError ? "fld-err" : ""} ${disabled ? "bg-slate-100 text-slate-600" : ""}`}
         onChange={(e) => onInput(e.target.value)} onFocus={(e) => e.currentTarget.select()} onBlur={onBlurField}
       />
-      {other && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500 tabular-nums pointer-events-none">{other}</span>}
+      {!compact && <span className="block min-h-[14px] text-[10px] leading-[14px] text-slate-500 tabular-nums">{other || "\u00a0"}</span>}
     </div>
   );
 }

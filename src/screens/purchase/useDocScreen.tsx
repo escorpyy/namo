@@ -56,6 +56,17 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
   const [msg, setMsg] = useState<{ text: string; kind: MsgKind }>({ text: "Loading…", kind: "info" });
   const busy = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const listStorageKey = `purchase-list-collapsed:${kind}`;
+  const [listCollapsed, setListCollapsed] = useState(() => {
+    const saved = localStorage.getItem(listStorageKey);
+    return saved === "1" || (saved === null && window.innerWidth < 960);
+  });
+  const toggleList = useCallback(() => {
+    const next = !listCollapsed;
+    localStorage.setItem(listStorageKey, next ? "1" : "0");
+    setListCollapsed(next);
+    window.setTimeout(() => q("[data-list-toggle]")?.focus(), 0);
+  }, [listCollapsed, listStorageKey]);
   const flash = useCallback((text: string, kind: MsgKind = "info") => setMsg({ text, kind }), []);
 
   const dirty = mode !== "view" && form !== null && sig(form) !== baseSig;
@@ -224,8 +235,8 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
   };
 
   // ---- shortcuts (one listener; the latest handlers come from a ref) ----
-  const H = useRef({ save, newDoc, edit, askDelete, cancel, moveSel, mode, dirty, dialogOpen: false, help: false });
-  H.current = { save, newDoc, edit, askDelete, cancel, moveSel, mode, dirty, dialogOpen: !!dialog, help };
+  const H = useRef({ save, newDoc, edit, askDelete, cancel, moveSel, mode, dirty, dialogOpen: false, help: false, listCollapsed, setListCollapsed, listStorageKey, toggleList });
+  H.current = { save, newDoc, edit, askDelete, cancel, moveSel, mode, dirty, dialogOpen: !!dialog, help, listCollapsed, setListCollapsed, listStorageKey, toggleList };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const h = H.current;
@@ -242,7 +253,15 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
       else if (k === "F1" || (k === "?" && !typing)) { e.preventDefault(); setHelp(true); }
       else if (e.altKey && k === "1") { e.preventDefault(); q("[data-zone=sidebar] button[data-sb]")?.focus(); }
       else if (e.altKey && k === "2") { e.preventDefault(); q("[data-zone=form] [data-field]:not(:disabled)")?.focus(); }
-      else if (e.altKey && k === "3") { e.preventDefault(); (q("[data-zone=list] [data-row][aria-selected=true]") ?? q("[data-zone=list] [data-row]") ?? searchRef.current)?.focus(); }
+      else if (e.altKey && k === "3") {
+        e.preventDefault();
+        if (h.listCollapsed) {
+          h.setListCollapsed(false);
+          localStorage.setItem(h.listStorageKey, "0");
+          window.setTimeout(() => (q("[data-zone=list] [data-row][aria-selected=true]") ?? q("[data-zone=list] [data-row]") ?? q("[data-list-toggle]"))?.focus(), 40);
+        } else (q("[data-zone=list] [data-row][aria-selected=true]") ?? q("[data-zone=list] [data-row]") ?? searchRef.current)?.focus();
+      }
+      else if (e.altKey && k === "4") { e.preventDefault(); h.toggleList(); }
       else if (k === "Escape" && h.mode === "edit") h.cancel();
     };
     window.addEventListener("keydown", onKey);
@@ -253,6 +272,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
 
   return {
     lookups, rows, total, search, setSearch, statusFilter, setStatusFilter, selectedId, doc, mode, form, setForm, patch, errors, err, clearError, saving, dirty,
+    listCollapsed, toggleList,
     dialog, setDialog, help, setHelp, searchRef, flash, newDoc, select, edit, cancel, save, askDelete, run, open, guard, reload: loadList,
     readOnly: mode === "view",
   };
