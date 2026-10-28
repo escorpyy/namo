@@ -13,8 +13,9 @@ describe.skipIf(!DB_READY)("audit trail (database level)", () => {
   class Rollback extends Error {}
   const NOW = sql`now()`;
 
+  // CompanyLock (ERP-025) carries a trigger of the same name, but its own function (namo.audit_company_lock): the log must not hold the hash.
   const AUDITED = [
-    "CashBankVoucher", "CashBankVoucherLine", "JournalVoucher", "JournalVoucherLine", "OpeningBalance",
+    "CashBankVoucher", "CashBankVoucherLine", "CompanyLock", "JournalVoucher", "JournalVoucherLine", "OpeningBalance",
     "PurchaseBill", "PurchaseBillImportDetail", "PurchaseBillLine", "PurchaseDocumentTerm", "PurchaseDocumentTermAllocation",
   ];
 
