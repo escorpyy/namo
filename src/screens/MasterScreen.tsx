@@ -80,7 +80,12 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
       out[key] = rows.map((r) => {
         const par = pf ? parents.find((p) => p.id === r[pf.name]) : null;
         const prefix = par && pTarget ? `${par[pTarget.labelFields[0]]} / ` : "";
-        return { value: String(r.id), label: `${prefix}${recordTitle(target, r)}`, short: String(r[target.labelFields[0]]) };
+        const code = String(r[target.labelFields[0]] ?? "");
+        const name = String(r[target.labelFields[1]] ?? "");
+        const parentDetail = par && pTarget ? `${pTarget.title}: ${recordTitle(pTarget, par)}` : "";
+        const attributes = [r.type, r.category, r.glType, r.role].filter((v) => typeof v === "string" && v).join(" · ");
+        const searchText = Object.entries(r).filter(([k, v]) => !["id", "createdAt", "updatedAt"].includes(k) && ["string", "number", "boolean"].includes(typeof v)).map(([, v]) => String(v)).join(" ");
+        return { value: String(r.id), label: `${prefix}${recordTitle(target, r)}`, short: code, code, name, detail: [parentDetail, attributes].filter(Boolean).join(" · "), searchText, isActive: typeof r.isActive === "boolean" ? r.isActive : true };
       });
     };
     for (const f of def.fields) {
@@ -343,7 +348,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
           <div className="double-rule mt-1" />
         </div>
         <MasterForm
-          def={def} mode={mode} form={form} setForm={onChangeForm} errors={errors} onBlurField={onBlurField}
+          def={def} companyId={companyId} mode={mode} form={form} setForm={onChangeForm} errors={errors} onBlurField={onBlurField}
           selected={selected} dirty={dirty} saving={saving} lookups={lookups} calendar={calendar} tab={tab} onTab={setTab}
           actions={{ save: () => void save(), clear, edit, del: askDelete, newRec, cancel: cancelEdit }}
         />

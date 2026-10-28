@@ -3,7 +3,7 @@ import { Plus, X } from "lucide-react";
 import type { PLookups } from "../../api";
 import { blankLine, blankTerm, derivedQty, isBlankLine, isBlankTerm, lineAmount, trimDec, type LineKind, type LineRow, type Product, type Term, type TermRow } from "../../lib/purchaseForm";
 import { fmtPaise, toPaise } from "../../lib/money";
-import { Combobox, type ComboOption } from "../Combobox";
+import { MasterReferencePicker, type ReferenceOption } from "../MasterReferencePicker";
 import { DateInput } from "../DateInput";
 import { focusStep, money } from "./Bits";
 
@@ -32,14 +32,15 @@ interface Props {
   errors: Errs;
   calendar: "BS" | "AD";
   clearError: (...k: string[]) => void;
+  contextKey: string;
   lockProducts?: boolean; // lines that came from a challan / order keep their product
   rateLabel?: string;
 }
 
-export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, errors, calendar, clearError, lockProducts }: Props) {
+export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, errors, calendar, clearError, contextKey, lockProducts }: Props) {
   const unitCode = useMemo(() => new Map(lookups.units.map((u) => [u.id, u.code])), [lookups.units]);
-  const productOpts = useMemo<ComboOption[]>(() => lookups.products.filter((p) => p.isActive || lines.some((l) => l.productId === String(p.id))).map((p) => ({ value: String(p.id), label: `${p.code} — ${p.description}`, badge: p.type === "STOCK" ? undefined : p.type.replace("_", " ").toLowerCase() })), [lookups.products, lines]);
-  const locOpts = useMemo<ComboOption[]>(() => lookups.locations.filter((l) => l.isActive).map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}` })), [lookups.locations]);
+  const productOpts = useMemo<ReferenceOption[]>(() => lookups.products.map((p) => ({ value: String(p.id), label: `${p.code} — ${p.description}`, code: p.code, name: p.description, detail: p.type.replaceAll("_", " "), searchText: `${p.type} ${p.tracksBatch ? "batch" : ""} ${p.tracksExpiry ? "expiry" : ""}`, isActive: p.isActive, badge: p.type === "STOCK" ? undefined : p.type.replace("_", " ").toLowerCase() })), [lookups.products]);
+  const locOpts = useMemo<ReferenceOption[]>(() => lookups.locations.map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, isActive: l.isActive })), [lookups.locations]);
 
   const patch = (i: number, p: Partial<LineRow>) => { onChange(lines.map((l, k) => (k === i ? { ...l, ...p } : l))); clearError(...Object.keys(errors).filter((k) => k.startsWith(`L.${i}.`)), "lines"); };
   const pick = (i: number, id: string) => {
@@ -94,8 +95,8 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
             const off = readOnly;
             const bad = (c: string) => !!errors[`L.${i}.${c}`];
             const cls = (c: string, extra = "") => `fld h-8 ${extra} ${bad(c) ? "fld-err" : ""} ${off ? "bg-slate-100 text-slate-600" : ""}`;
-            const altOpts: ComboOption[] = p ? p.alternateUnits.map((a) => ({ value: String(a.unitId), label: unitCode.get(a.unitId) ?? String(a.unitId) })) : [];
-            const unitOpts: ComboOption[] = lookups.units.map((u) => ({ value: String(u.id), label: u.code }));
+            const altOpts: ReferenceOption[] = p ? p.alternateUnits.map((a) => ({ value: String(a.unitId), label: unitCode.get(a.unitId) ?? String(a.unitId), code: unitCode.get(a.unitId) ?? String(a.unitId), detail: `Alternate unit · factor ${a.conversionFactor}`, isActive: true })) : [];
+            const unitOpts: ReferenceOption[] = lookups.units.map((u) => ({ value: String(u.id), label: `${u.code} — ${u.name}`, code: u.code, name: u.name, detail: `${u.decimalPlaces} decimal place${u.decimalPlaces === 1 ? "" : "s"}`, isActive: true }));
             const errMsgs = Object.entries(errors).filter(([k, v]) => k.startsWith(`L.${i}.`) && v).map(([, v]) => v!);
             const qtyShown = useAlt ? derivedQty(l, p) : l.qty;
             const tracked = kind !== "order";
@@ -103,12 +104,12 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
               <div key={l.key} className={`border-b border-slate-200 ${errMsgs.length ? "bg-red-50" : ""}`}>
                 <div style={{ gridTemplateColumns: COLS[kind] }} className="grid gap-x-1 px-2 py-1 items-center">
                   <span className="text-slate-500 tabular-nums">{i + 1}</span>
-                  <Combobox fieldName={`L.${i}.p`} placeholder="Product…" value={l.productId} hasError={bad("p")} options={productOpts} disabled={off || (lockProducts && !!l.link)} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
+                  <MasterReferencePicker fieldName={`L.${i}.p`} label="Product" scopeKey="products" contextKey={contextKey} placeholder="Choose product…" value={l.productId} hasError={bad("p")} options={productOpts} disabled={off || (lockProducts && !!l.link)} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
                   <input data-field={`L.${i}.aq`} disabled={off || !p || altOpts.length === 0} inputMode="decimal" autoComplete="off" value={l.altQty} placeholder={altOpts.length ? "" : "—"} onChange={decOnly(QTY, (v) => patch(i, { altQty: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("aq", "text-right tabular-nums")} aria-label="Alternate quantity" />
-                  <Combobox fieldName={`L.${i}.au`} placeholder={altOpts.length ? "Unit" : "—"} value={l.altUnitId} hasError={bad("au")} options={altOpts} disabled={off || !p || altOpts.length === 0} onChange={(v) => patch(i, { altUnitId: v })} onCommit={afterCombo} />
+                  <MasterReferencePicker fieldName={`L.${i}.au`} label="Alternate unit" scopeKey="product-units" contextKey={contextKey} placeholder={altOpts.length ? "Choose unit" : "—"} value={l.altUnitId} hasError={bad("au")} options={altOpts} disabled={off || !p || altOpts.length === 0} onChange={(v) => patch(i, { altUnitId: v })} onCommit={afterCombo} />
                   <input data-field={`L.${i}.q`} disabled={off || !p || useAlt} inputMode="decimal" autoComplete="off" value={useAlt ? trimDec(qtyShown) : l.qty} onChange={decOnly(QTY, (v) => patch(i, { qty: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("q", `text-right tabular-nums ${useAlt ? "bg-slate-100" : ""}`)} aria-label="Quantity" />
                   {p && !p.baseUnitId
-                    ? <Combobox fieldName={`L.${i}.u`} placeholder="Unit" value={l.unitId} hasError={bad("u")} options={unitOpts} disabled={off} onChange={(v) => patch(i, { unitId: v })} onCommit={afterCombo} />
+                    ? <MasterReferencePicker fieldName={`L.${i}.u`} label="Unit" scopeKey="product-units" contextKey={contextKey} placeholder="Choose unit" value={l.unitId} hasError={bad("u")} options={unitOpts} disabled={off} onChange={(v) => patch(i, { unitId: v })} onCommit={afterCombo} />
                     : <span className="text-[12px] text-slate-600 pl-1">{p?.baseUnitId ? unitCode.get(p.baseUnitId) : ""}</span>}
                   <input data-field={`L.${i}.r`} disabled={off || !p} inputMode="decimal" autoComplete="off" value={l.rate} placeholder="0.00" onChange={decOnly(RATE, (v) => patch(i, { rate: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("r", "text-right tabular-nums")} aria-label="Rate" />
                   <span className="text-right pr-2 tabular-nums font-medium">{money(lineAmount(l, p))}</span>
@@ -117,7 +118,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                     : <DateInput fieldName={`L.${i}.xd`} value={l.expectedDate} onChange={(v) => patch(i, { expectedDate: v })} calendar={calendar} hasError={bad("xd")} onBlurField={() => {}} compact />)}
                   {tracked && (
                     <>
-                      <Combobox fieldName={`L.${i}.lc`} placeholder={p?.type === "STOCK" ? "Location" : "—"} value={l.locationId} hasError={bad("lc")} options={locOpts} disabled={off || p?.type !== "STOCK"} onChange={(v) => patch(i, { locationId: v })} onCommit={afterCombo} />
+                      <MasterReferencePicker fieldName={`L.${i}.lc`} label="Location" scopeKey="locations" contextKey={contextKey} placeholder={p?.type === "STOCK" ? "Choose location" : "—"} value={l.locationId} hasError={bad("lc")} options={locOpts} disabled={off || p?.type !== "STOCK"} onChange={(v) => patch(i, { locationId: v })} onCommit={afterCombo} />
                       <input data-field={`L.${i}.b`} disabled={off || !p?.tracksBatch} maxLength={50} placeholder={p?.tracksBatch ? "Batch" : "—"} value={l.batchNo} onChange={(e) => patch(i, { batchNo: e.target.value })} onFocus={(e) => e.currentTarget.select()} className={cls("b", !p?.tracksBatch ? "bg-slate-100" : "")} aria-label="Batch no" />
                       <DateInput fieldName={`L.${i}.mf`} value={l.manufactureDate} onChange={(v) => patch(i, { manufactureDate: v })} calendar={calendar} hasError={bad("mf")} onBlurField={() => {}} compact disabled={off || !p?.tracksExpiry} />
                       <DateInput fieldName={`L.${i}.ex`} value={l.expiryDate} onChange={(v) => patch(i, { expiryDate: v })} calendar={calendar} hasError={bad("ex")} onBlurField={() => {}} compact disabled={off || !p?.tracksExpiry} />
@@ -155,13 +156,14 @@ interface TProps {
   readOnly: boolean;
   errors: Errs;
   clearError: (...k: string[]) => void;
+  contextKey: string;
   category?: "GENERAL" | "ADDITIONAL";
 }
 
 // Billing terms: discount, VAT, freight ... Percent of the basic amount (or of earlier terms) or a fixed amount. The server does the arithmetic;
 // "Computed" shows what it worked out the last time the document was saved.
-export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOnly, errors, clearError, category }: TProps) {
-  const opts = useMemo<ComboOption[]>(() => lookups.terms.filter((t) => (!category || t.category === category) && (t.isActive || terms.some((r) => r.termId === String(t.id)))).map((t) => ({ value: String(t.id), label: `${t.code} — ${t.name}`, badge: t.nature === "DEDUCTIVE" ? "less" : undefined })), [lookups.terms, terms, category]);
+export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOnly, errors, clearError, contextKey, category }: TProps) {
+  const opts = useMemo<ReferenceOption[]>(() => lookups.terms.filter((t) => !category || t.category === category).map((t) => ({ value: String(t.id), label: `${t.code} — ${t.name}`, code: t.code, name: t.name, detail: `${t.category} · ${t.nature}`, searchText: `${t.sequence} ${t.isProductwise ? "productwise" : "document"}`, isActive: t.isActive, badge: t.nature === "DEDUCTIVE" ? "less" : undefined })), [lookups.terms, category]);
   const patch = (i: number, p: Partial<TermRow>) => { onChange(terms.map((t, k) => (k === i ? { ...t, ...p } : t))); clearError(...Object.keys(errors).filter((k) => k.startsWith(`T.${i}.`))); };
   const pick = (i: number, id: string) => {
     const m = masters.get(id);
@@ -207,7 +209,7 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
               <div key={t.key} className={`border-b border-slate-200 ${msg ? "bg-red-50" : ""}`}>
                 <div style={{ gridTemplateColumns: TCOLS }} className="grid gap-x-1 px-2 py-1 items-center">
                   <span className="text-slate-500 tabular-nums">{i + 1}</span>
-                  <Combobox fieldName={`T.${i}.t`} placeholder="Term…" value={t.termId} hasError={bad("t")} options={opts} disabled={off} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
+                  <MasterReferencePicker fieldName={`T.${i}.t`} label="Billing term" scopeKey="purchase-terms" contextKey={contextKey} placeholder="Choose term…" value={t.termId} hasError={bad("t")} options={opts} disabled={off} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
                   <input data-field={`T.${i}.l`} disabled={off || !m?.isProductwise} inputMode="numeric" value={t.lineNumber} placeholder={m?.isProductwise ? "Line" : "—"} onChange={decOnly(INT, (v) => patch(i, { lineNumber: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("l", "text-right tabular-nums")} aria-label={`Line number (1-${lineCount})`} />
                   <select data-field={`T.${i}.c`} disabled={off || !m} value={t.calcType} onChange={(e) => patch(i, { calcType: e.target.value as TermRow["calcType"] })} className={cls("c")} aria-label="Calculated as">
                     <option value="PERCENT">Percent (%)</option><option value="AMOUNT">Fixed amount</option>

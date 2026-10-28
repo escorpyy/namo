@@ -99,7 +99,7 @@ export default function PurchaseOrderScreen(p: PurchaseScreenProps) {
           <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-x-3 gap-y-2">
             <Field label="Order No"><input disabled className="fld bg-slate-100 text-slate-600" value={doc?.orderNumber ?? ""} placeholder="(next number)" aria-label="Order number" /></Field>
             <DateField label="Order Date" name="orderDate" value={f.orderDate} onChange={(v) => { s.patch({ orderDate: v }); s.clearError("orderDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("orderDate")} required />
-            <VendorFields lookups={lk} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors}
+            <VendorFields lookups={lk} contextKey={String(p.companyId)} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors}
               onChange={(c) => { s.patch(c); s.clearError("vendorGLId", "subLedgerId"); }} />
             <TextField label="Vendor Ref No" name="vendorRefNo" value={f.vendorRefNo} onChange={(v) => s.patch({ vendorRefNo: v })} readOnly={ro} error={s.err("vendorRefNo")} />
             <DateField label="Vendor Ref Date" name="vendorRefDate" value={f.vendorRefDate} onChange={(v) => { s.patch({ vendorRefDate: v }); s.clearError("vendorRefDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("vendorRefDate")} />
@@ -107,7 +107,7 @@ export default function PurchaseOrderScreen(p: PurchaseScreenProps) {
             <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} className="col-span-1 sm:col-span-2 2xl:col-span-3" error={s.err("remarks")} />
           </div>
           <h2 className="text-[13px] font-semibold">Lines</h2>
-          <LinesGrid kind="order" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} />
+          <LinesGrid kind="order" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} />
           {ro && doc && doc.lines.length > 0 && (
             <div className="overflow-x-auto rounded-sm border border-slate-300 bg-white/60" tabIndex={0} aria-label="Order line progress; scroll horizontally if needed">
               <div className="min-w-[760px]">
@@ -122,7 +122,7 @@ export default function PurchaseOrderScreen(p: PurchaseScreenProps) {
             </div>
           )}
           <h2 className="text-[13px] font-semibold">Billing Terms</h2>
-          <TermsGrid terms={f.terms} onChange={(terms) => s.patch({ terms })} lookups={lk} masters={masters} lineCount={f.lines.filter((l) => !isBlankLine(l)).length} readOnly={ro} errors={s.errors} clearError={s.clearError} category="GENERAL" />
+          <TermsGrid terms={f.terms} onChange={(terms) => s.patch({ terms })} lookups={lk} masters={masters} lineCount={f.lines.filter((l) => !isBlankLine(l)).length} readOnly={ro} errors={s.errors} clearError={s.clearError} contextKey={String(p.companyId)} category="GENERAL" />
           {doc && (
             <div className="flex flex-wrap justify-end gap-x-4 gap-y-1 text-[13px] border border-slate-400 bg-slate-50 px-3 py-1.5">
               <span>Basic <b className="tabular-nums ml-1">{money(doc.basicAmount)}</b></span><span>Terms <b className="tabular-nums ml-1">{money(doc.termAmount)}</b></span><span>Total <b className="tabular-nums ml-1">{money(doc.totalAmount)}</b></span>

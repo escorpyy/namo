@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { AlertTriangle, Lock, Plus, RotateCcw, Save, Search, X } from "lucide-react";
 import { mulRound2 } from "../../shared/decimal";
-import type { Opt } from "../../shared/masters";
 import { soApi, type SoData, type SoLine } from "../api";
 import { fmtPaise, toPaise } from "../lib/money";
 import type { MsgKind, StatusInfo } from "../types";
-import { Combobox } from "../components/Combobox";
+import { MasterReferencePicker, type ReferenceOption } from "../components/MasterReferencePicker";
 import { ConfirmDialog, type DialogSpec } from "../components/ConfirmDialog";
 import { DateInput } from "../components/DateInput";
 import { ShortcutsOverlay } from "../components/ShortcutsOverlay";
@@ -102,8 +101,8 @@ export default function StockOpeningScreen({ companyId, branchId, fyId, branchNa
   useEffect(() => setStatus({ mode: dirty ? "edit" : "view", count: live.length, shown: live.length, message: msg.text, kind: msg.kind, hints: HINTS }), [dirty, live.length, msg, setStatus]);
 
   // ---- options ----
-  const productOpts = useMemo<Opt[]>(() => (data?.products ?? []).filter((p) => p.isActive || rows.some((r) => r.sd === String(p.stockDetailId))).map((p) => ({ value: String(p.stockDetailId), label: `${p.code} — ${p.description} (${p.unitCode})`, short: p.code })), [data, rows]);
-  const locOpts = useMemo<Opt[]>(() => (data?.locations ?? []).filter((l) => l.isActive || rows.some((r) => r.loc === String(l.id))).map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, short: l.code })), [data, rows]);
+  const productOpts = useMemo<ReferenceOption[]>(() => (data?.products ?? []).map((p) => ({ value: String(p.stockDetailId), label: `${p.code} — ${p.description}`, code: p.code, name: p.description, detail: `Unit: ${p.unitCode}${p.tracksBatch ? " · Batch tracked" : ""}${p.tracksExpiry ? " · Expiry tracked" : ""}`, searchText: `${p.unitCode} ${p.tracksBatch ? "batch" : ""} ${p.tracksExpiry ? "expiry" : ""}`, isActive: p.isActive })), [data]);
+  const locOpts = useMemo<ReferenceOption[]>(() => (data?.locations ?? []).map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, isActive: l.isActive })), [data]);
 
   // ---- edit helpers ----
   const patch = (key: string, p: Partial<Row>) => { setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r))); setErrs((e) => { const n = { ...e }; delete n[key]; return n; }); };
@@ -266,8 +265,8 @@ export default function StockOpeningScreen({ companyId, branchId, fyId, branchNa
               return (
                 <div key={r.key} className={`border-b border-slate-200 ${er ? "bg-red-50" : upserts.includes(r) ? "bg-yellow-50" : ""}`}>
                   <div style={{ gridTemplateColumns: COLS }} className="grid gap-x-1 px-2 py-1 items-center">
-                    <Combobox fieldName={`L.${i}.p`} placeholder="Product…" value={r.sd} hasError={er?.col === "p"} options={productOpts} onChange={(v) => pickProduct(r, v)} onCommit={(el) => step(el, 1)} />
-                    <Combobox fieldName={`L.${i}.l`} placeholder="Location (optional)" value={r.loc} hasError={false} options={locOpts} onChange={(v) => patch(r.key, { loc: v })} onCommit={(el) => step(el, 1)} />
+                    <MasterReferencePicker fieldName={`L.${i}.p`} label="Stock product" scopeKey="stock-detail-products" contextKey={String(companyId)} placeholder="Choose product…" value={r.sd} hasError={er?.col === "p"} options={productOpts} disabled={off} onChange={(v) => pickProduct(r, v)} onCommit={(el) => step(el, 1)} />
+                    <MasterReferencePicker fieldName={`L.${i}.l`} label="Location" scopeKey="locations" contextKey={String(companyId)} placeholder="Location (optional)" value={r.loc} hasError={false} options={locOpts} disabled={off} onChange={(v) => patch(r.key, { loc: v })} onCommit={(el) => step(el, 1)} />
                     <input data-field={`L.${i}.b`} disabled={off || !p?.tracksBatch} placeholder={p && !p.tracksBatch ? "—" : "Batch"} value={r.batch} maxLength={50} autoComplete="off"
                       onChange={(e) => patch(r.key, { batch: e.target.value })} onFocus={(e) => e.currentTarget.select()} className={cls("b", !p?.tracksBatch ? "bg-slate-100" : "")} />
                     {p?.tracksExpiry && !off

@@ -5,7 +5,7 @@ const rows: [string, string][] = [
   ["F2", "Edit selected"],
   ["Ctrl+Delete / Alt+D", "Delete (confirmation)"],
   ["Esc", "Cancel / close / step back"],
-  ["F4 / Ctrl+F / /", "Search list"],
+  ["F4 / Ctrl+F / /", "Search list (or picker search while open)"],
   ["Ctrl+↑ / Ctrl+↓", "Previous / next record"],
   ["Alt+1 / Alt+2 / Alt+3", "Focus Sidebar / Form / List"],
   ["Ctrl+B", "Toggle sidebar"],
@@ -13,6 +13,8 @@ const rows: [string, string][] = [
   ["Ctrl+← / Ctrl+→", "Tabs badlo (Product jaise forms me)"],
   ["Shift+Delete", "Lines me row hatao (Alternate Units, Components)"],
   ["A L E R X", "Quick-pick Type in the combobox"],
+  ["Alt+↓ / Enter", "Open a master reference picker"],
+  ["Picker: ↑ / ↓, Enter, Esc", "Move / select / close"],
   ["F1 / ?", "This help"],
 ];
 

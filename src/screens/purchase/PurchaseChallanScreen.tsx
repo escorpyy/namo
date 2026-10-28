@@ -117,7 +117,7 @@ export default function PurchaseChallanScreen(p: PurchaseScreenProps & { onCreat
             <Field label="Against Order" className="col-span-1 sm:col-span-2" error={s.err("purchaseOrderId")}>
               <Combobox fieldName="purchaseOrderId" placeholder="Approved order (optional)" value={f.purchaseOrderId} hasError={!!s.err("purchaseOrderId")} options={orderOpts} disabled={ro} onChange={(v) => void pickOrder(v)} onCommit={(el, dir) => focusStep(el, dir)} />
             </Field>
-            <VendorFields lookups={lk} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors} lockVendor={!!f.purchaseOrderId}
+            <VendorFields lookups={lk} contextKey={String(p.companyId)} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors} lockVendor={!!f.purchaseOrderId}
               onChange={(c) => { s.patch(c); s.clearError("vendorGLId", "subLedgerId"); }} />
             <TextField label="Vendor Challan No" name="vendorChallanNo" value={f.vendorChallanNo} onChange={(v) => s.patch({ vendorChallanNo: v })} readOnly={ro} error={s.err("vendorChallanNo")} />
             <DateField label="Vendor Challan Date" name="vendorChallanDate" value={f.vendorChallanDate} onChange={(v) => { s.patch({ vendorChallanDate: v }); s.clearError("vendorChallanDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("vendorChallanDate")} />
@@ -128,7 +128,7 @@ export default function PurchaseChallanScreen(p: PurchaseScreenProps & { onCreat
             <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} className="col-span-1 sm:col-span-2" error={s.err("remarks")} />
           </div>
           <h2 className="text-[13px] font-semibold">Lines received</h2>
-          <LinesGrid kind="challan" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} lockProducts />
+          <LinesGrid kind="challan" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts />
           {ro && doc && doc.lines.length > 0 && (
             <p className="text-[12px] text-slate-600">Billed so far: {doc.lines.map((l) => `line ${l.lineNumber}: ${l.billed} of ${l.qty}`).join(" · ")}</p>
           )}

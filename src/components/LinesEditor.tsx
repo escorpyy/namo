@@ -1,13 +1,14 @@
 import { Plus, X } from "lucide-react";
 import type { FieldDef, Opt } from "../../shared/masters";
 import { cleanLines, parseLines, type Line } from "../lib/form";
-import { Combobox } from "./Combobox";
+import { MasterReferencePicker } from "./MasterReferencePicker";
 
 interface Props {
   field: FieldDef;
   value: string; // JSON string of Line[]
   onChange: (v: string) => void;
   lookups: Record<string, Opt[]>; // key: `${field}.${column}`
+  contextKey: string;
   hasError: boolean;
   onBlurField: () => void;
   onCommit: (el: HTMLInputElement) => void; // Combobox Enter -> next field
@@ -15,7 +16,7 @@ interface Props {
 
 // Repeating rows (Alternate Units, Bundle Components...). Aage vouchers ki lines me bhi yahi pattern chalega.
 // Keyboard: Enter agla cell; aakhri row ke aakhri cell par Enter = nayi row; Shift+Delete = row hatao.
-export function LinesEditor({ field, value, onChange, lookups, hasError, onBlurField, onCommit }: Props) {
+export function LinesEditor({ field, value, onChange, lookups, contextKey, hasError, onBlurField, onCommit }: Props) {
   const cols = field.lines!.columns;
   const lines = parseLines(value);
   const grid = { gridTemplateColumns: `${cols.map((c) => c.width ?? "1fr").join(" ")} 28px` };
@@ -46,10 +47,10 @@ export function LinesEditor({ field, value, onChange, lookups, hasError, onBlurF
         <div key={i} style={grid} className="grid gap-x-2 px-2 py-1 items-start">
           {cols.map((c) =>
             c.type === "lookup" ? (
-              <Combobox
-                key={c.name} fieldName={`${field.name}.${i}.${c.name}`} placeholder={c.placeholder ?? "Pick…"}
-                value={l[c.name] ?? ""} hasError={false} options={lookups[`${field.name}.${c.name}`] ?? []}
-                onChange={(v) => update(i, c.name, v)} onCommit={onCommit} onBlurField={onBlurField}
+              <MasterReferencePicker
+                key={c.name} fieldName={`${field.name}.${i}.${c.name}`} label={c.label} scopeKey={c.lookup!} contextKey={contextKey}
+                placeholder={c.placeholder ?? "Choose…"} value={l[c.name] ?? ""} hasError={false} options={lookups[`${field.name}.${c.name}`] ?? []}
+                onChange={(v) => update(i, c.name, v)} onCommit={(el) => onCommit(el)} onBlurField={onBlurField}
               />
             ) : (
               <input

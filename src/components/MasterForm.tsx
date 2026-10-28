@@ -4,6 +4,8 @@ import type { FieldDef, MasterDef, Opt } from "../../shared/masters";
 import { parseLines, tabsOf, visible, isRequired, cleanLines, type Errors, type FormState, type Row } from "../lib/form";
 import type { Mode } from "../types";
 import { Combobox } from "./Combobox";
+import { MasterReferencePicker } from "./MasterReferencePicker";
+import { MasterList } from "./MasterList";
 import { DateInput } from "./DateInput";
 import { LinesEditor } from "./LinesEditor";
 import { OptBadge } from "./OptBadge";
@@ -11,6 +13,7 @@ import { adToBs } from "../lib/nepaliDate";
 
 interface Props {
   def: MasterDef;
+  companyId: number;
   mode: Mode;
   form: FormState;
   setForm: (f: FormState) => void;
@@ -30,7 +33,7 @@ const fmt = (iso: string | undefined) => (iso ? new Date(iso).toLocaleString("en
 const Err = ({ msg }: { msg?: string }) => (msg ? <p role="alert" className="mt-0.5 text-[12px] text-red-700">{msg}</p> : null);
 const Kbd = ({ k }: { k: string }) => <span className="kbd">{k}</span>;
 
-export function MasterForm({ def, mode, form, setForm, errors, onBlurField, selected, dirty, saving, lookups, calendar, tab, onTab, actions }: Props) {
+export function MasterForm({ def, companyId, mode, form, setForm, errors, onBlurField, selected, dirty, saving, lookups, calendar, tab, onTab, actions }: Props) {
   const formRef = useRef<HTMLDivElement>(null);
   const editable = mode !== "view";
   const two = def.cols === 2;
@@ -70,12 +73,22 @@ export function MasterForm({ def, mode, form, setForm, errors, onBlurField, sele
   const editor = (f: FieldDef) => {
     const err = errors[f.name];
     if (f.type === "lines")
-      return <LinesEditor field={f} value={String(form[f.name])} onChange={(v) => set(f.name, v)} lookups={lookups} hasError={!!err} onBlurField={() => onBlurField(f.name)} onCommit={(el) => moveFocus(el, 1)} />;
+      return <LinesEditor field={f} value={String(form[f.name])} onChange={(v) => set(f.name, v)} lookups={lookups} contextKey={String(companyId)} hasError={!!err} onBlurField={() => onBlurField(f.name)} onCommit={(el) => moveFocus(el, 1)} />;
     if (f.type === "checkbox")
       return <input data-nav data-field={f.name} type="checkbox" aria-label={f.label} className="h-4 w-4 mt-2 accent-blue-800" checked={!!form[f.name]} onChange={(e) => set(f.name, e.target.checked)} />;
     if (f.type === "date")
       return <DateInput fieldName={f.name} value={String(form[f.name])} onChange={(v) => set(f.name, v)} calendar={calendar} hasError={!!err} onBlurField={() => onBlurField(f.name)} />;
-    if (f.type === "select" || f.type === "lookup")
+    if (f.type === "lookup")
+      return (
+        <MasterReferencePicker
+          fieldName={f.name} label={f.label} scopeKey={f.lookup!}
+          contextKey={`${companyId}${f.lookupScope === "record" ? `:${selected?.id ?? "new"}` : ""}`}
+          placeholder={f.placeholder ?? (isRequired(f, form) ? "Choose…" : "Optional")}
+          value={String(form[f.name])} hasError={!!err} options={lookups[f.name] ?? []}
+          onChange={(v) => set(f.name, v)} onCommit={(el) => moveFocus(el, 1)} onBlurField={() => onBlurField(f.name)} disabled={!editable || (f.lockOnEdit && mode === "edit")}
+        />
+      );
+    if (f.type === "select")
       return (
         <Combobox
           fieldName={f.name} placeholder={f.placeholder ?? (isRequired(f, form) ? "Type or pick…" : "Optional")}

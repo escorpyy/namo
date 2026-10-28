@@ -1,32 +1,32 @@
 import { useMemo } from "react";
 import type { PLookups } from "../../api";
-import { Combobox, type ComboOption } from "../Combobox";
+import { MasterReferencePicker, type ReferenceOption } from "../MasterReferencePicker";
 import { DateInput } from "../DateInput";
 import { Field, focusStep } from "./Bits";
 
 type Errs = Record<string, string | undefined>;
 
 // Vendor ledger, its sub-ledger (when the ledger needs one) and the agent: the same three fields on every purchase document.
-export function VendorFields({ lookups, vendorGLId, subLedgerId, agentId, onChange, readOnly, errors, lockVendor }: {
-  lookups: PLookups; vendorGLId: string; subLedgerId: string; agentId: string; readOnly: boolean; errors: Errs; lockVendor?: boolean;
+export function VendorFields({ lookups, vendorGLId, subLedgerId, agentId, onChange, readOnly, errors, lockVendor, contextKey }: {
+  lookups: PLookups; vendorGLId: string; subLedgerId: string; agentId: string; readOnly: boolean; errors: Errs; lockVendor?: boolean; contextKey: string;
   onChange: (p: { vendorGLId?: string; subLedgerId?: string; agentId?: string }) => void;
 }) {
   const vendor = lookups.vendors.find((v) => String(v.id) === vendorGLId);
-  const vendors = useMemo<ComboOption[]>(() => lookups.vendors.filter((v) => v.isActive || String(v.id) === vendorGLId).map((v) => ({ value: String(v.id), label: `${v.code} — ${v.name}` })), [lookups.vendors, vendorGLId]);
-  const subs = useMemo<ComboOption[]>(() => lookups.subLedgers.filter((s) => String(s.generalLedgerId) === vendorGLId && (s.isActive || String(s.id) === subLedgerId)).map((s) => ({ value: String(s.id), label: `${s.code} — ${s.name}` })), [lookups.subLedgers, vendorGLId, subLedgerId]);
-  const agents = useMemo<ComboOption[]>(() => lookups.agents.filter((a) => a.isActive || String(a.id) === agentId).map((a) => ({ value: String(a.id), label: `${a.code} — ${a.name}` })), [lookups.agents, agentId]);
+  const vendors = useMemo<ReferenceOption[]>(() => lookups.vendors.map((v) => ({ value: String(v.id), label: `${v.code} — ${v.name}`, code: v.code, name: v.name, detail: v.requiresSubLedger ? "Requires sub ledger" : "Vendor ledger", isActive: v.isActive })), [lookups.vendors]);
+  const subs = useMemo<ReferenceOption[]>(() => lookups.subLedgers.filter((s) => String(s.generalLedgerId) === vendorGLId).map((s) => ({ value: String(s.id), label: `${s.code} — ${s.name}`, code: s.code, name: s.name, detail: vendor?.name ? `For ${vendor.name}` : "Sub ledger", isActive: s.isActive })), [lookups.subLedgers, vendorGLId, vendor?.name]);
+  const agents = useMemo<ReferenceOption[]>(() => lookups.agents.map((a) => ({ value: String(a.id), label: `${a.code} — ${a.name}`, code: a.code, name: a.name, isActive: a.isActive })), [lookups.agents]);
   return (
     <>
       <Field label="Vendor" required error={errors.vendorGLId} className="col-span-1 sm:col-span-2">
-        <Combobox fieldName="vendorGLId" placeholder="Vendor ledger…" value={vendorGLId} hasError={!!errors.vendorGLId} options={vendors} disabled={readOnly || lockVendor}
+        <MasterReferencePicker fieldName="vendorGLId" label="Vendor ledger" scopeKey="vendor-ledgers" contextKey={contextKey} placeholder="Choose vendor ledger…" value={vendorGLId} hasError={!!errors.vendorGLId} options={vendors} disabled={readOnly || lockVendor}
           onChange={(v) => onChange({ vendorGLId: v, subLedgerId: "" })} onCommit={(el, dir) => focusStep(el, dir)} />
       </Field>
       <Field label={vendor?.requiresSubLedger ? "Sub Ledger" : "Sub Ledger (not needed)"} required={!!vendor?.requiresSubLedger} error={errors.subLedgerId}>
-        <Combobox fieldName="subLedgerId" placeholder={subs.length ? "Sub ledger…" : "—"} value={subLedgerId} hasError={!!errors.subLedgerId} options={subs} disabled={readOnly || subs.length === 0}
+        <MasterReferencePicker fieldName="subLedgerId" label="Sub Ledger" scopeKey="sub-ledger" contextKey={`${contextKey}:${vendorGLId || "none"}`} placeholder={subs.length ? "Choose sub ledger…" : "—"} value={subLedgerId} hasError={!!errors.subLedgerId} options={subs} disabled={readOnly || subs.length === 0}
           onChange={(v) => onChange({ subLedgerId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
       </Field>
       <Field label="Agent" error={errors.agentId}>
-        <Combobox fieldName="agentId" placeholder="Agent (optional)" value={agentId} hasError={!!errors.agentId} options={agents} disabled={readOnly} onChange={(v) => onChange({ agentId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
+        <MasterReferencePicker fieldName="agentId" label="Agent" scopeKey="agents" contextKey={contextKey} placeholder="Agent (optional)" value={agentId} hasError={!!errors.agentId} options={agents} disabled={readOnly} onChange={(v) => onChange({ agentId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
       </Field>
     </>
   );

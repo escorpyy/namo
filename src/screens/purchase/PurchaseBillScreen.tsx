@@ -198,7 +198,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
             <Field label="Purchase Type" className="col-span-1 sm:col-span-2 2xl:col-span-2">
               <select data-field="purchaseType" disabled={ro || isAdditional} value={f.purchaseType} onChange={(e) => s.patch({ purchaseType: e.target.value })} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}>{PURCHASE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select>
             </Field>
-            <VendorFields lookups={lk} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors} lockVendor={!!f.purchaseChallanId || isAdditional}
+            <VendorFields lookups={lk} contextKey={String(p.companyId)} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors} lockVendor={!!f.purchaseChallanId || isAdditional}
               onChange={(c) => { s.patch(c); s.clearError("vendorGLId", "subLedgerId"); }} />
             <TextField label="Vendor Invoice No" name="vendorInvoiceNo" value={f.vendorInvoiceNo} onChange={(v) => s.patch({ vendorInvoiceNo: v })} readOnly={ro} error={s.err("vendorInvoiceNo")} />
             <DateField label="Vendor Invoice Date" name="vendorInvoiceDate" value={f.vendorInvoiceDate} onChange={(v) => { s.patch({ vendorInvoiceDate: v }); s.clearError("vendorInvoiceDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("vendorInvoiceDate")} />
@@ -227,11 +227,11 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
           {!isAdditional && (
             <>
               <h2 className="text-[13px] font-semibold">Lines</h2>
-              <LinesGrid kind="bill" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} lockProducts />
+              <LinesGrid kind="bill" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts />
             </>
           )}
           <h2 className="text-[13px] font-semibold">{isAdditional ? "Additional charges" : "Billing Terms"}</h2>
-          <TermsGrid terms={f.terms} onChange={(terms) => s.patch({ terms })} lookups={lk} masters={masters} lineCount={f.lines.filter((l) => !isBlankLine(l)).length} readOnly={ro} errors={s.errors} clearError={s.clearError} category={isAdditional ? "ADDITIONAL" : undefined} />
+          <TermsGrid terms={f.terms} onChange={(terms) => s.patch({ terms })} lookups={lk} masters={masters} lineCount={f.lines.filter((l) => !isBlankLine(l)).length} readOnly={ro} errors={s.errors} clearError={s.clearError} contextKey={String(p.companyId)} category={isAdditional ? "ADDITIONAL" : undefined} />
           {s.err("terms") && <p className="text-[12px] text-red-700">{s.err("terms")}</p>}
           {doc && (
             <div className="flex flex-wrap justify-end gap-x-4 gap-y-1 text-[13px] border border-slate-400 bg-slate-50 px-3 py-1.5">
