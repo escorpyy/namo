@@ -5,10 +5,13 @@ import { Combobox, type ComboOption } from "../../components/Combobox";
 import { COMMON_HELP, DocShell, Field, HINTS, Pill, focusStep, money } from "../../components/purchase/Bits";
 import { DateField, TextField, VendorFields } from "../../components/purchase/HeadFields";
 import { LinesGrid, TermsGrid } from "../../components/purchase/LinesGrid";
+import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
 import {
-  blankLine, dateErr, defaultDate, isBlankLine, isBlankTerm, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
+  blankLine, dateErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
   type LineRow, type TermRow,
 } from "../../lib/purchaseForm";
+import { parseDec } from "../../../shared/decimal";
+import { previewPurchase } from "../../../shared/purchase-preview";
 import type { PurchaseScreenProps } from "./PurchaseOrderScreen";
 import { useDocScreen, type DocConfig, type Errors } from "./useDocScreen";
 
@@ -93,6 +96,35 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
   const f = s.form, lk = s.lookups, doc = s.doc, ro = s.readOnly;
   const products = useMemo(() => new Map((lk?.products ?? []).map((x) => [String(x.id), x])), [lk]);
   const masters = useMemo(() => new Map((lk?.terms ?? []).map((x) => [String(x.id), x])), [lk]);
+  const isAdditional = !!f?.mainBillId;
+  const invoicePreview = useMemo(() => {
+    if (!f) return previewPurchase([], [], new Map(), true);
+    const liveLines = f.lines.filter((line) => !isBlankLine(line));
+    let incompleteLines = !isAdditional && liveLines.length === 0;
+    const pricedLines = liveLines.flatMap((line, index) => {
+      const product = products.get(line.productId);
+      const qty = effectiveQty(line, product);
+      const invalidAltUnit = (!!line.altQty && !line.altUnitId) || (!!line.altUnitId && !line.altQty);
+      const validQty = !!qty && !!parseDec(qty) && parseDec(qty)!.n > 0n;
+      const validRate = !!line.rate && !!parseDec(line.rate);
+      if (!product || invalidAltUnit || !validQty || !validRate) {
+        incompleteLines = true;
+        return [];
+      }
+      const amount = lineAmount(line, product);
+      if (!amount) {
+        incompleteLines = true;
+        return [];
+      }
+      return [{ lineNumber: index + 1, basicAmount: amount }];
+    });
+    const terms = f.terms.filter((term) => !isBlankTerm(term)).map((term) => ({
+      rowKey: term.key, termId: Number(term.termId), lineNumber: term.lineNumber, calcType: term.calcType,
+      rate: term.rate, inputAmount: term.inputAmount, isOverridden: term.isOverridden, overrideAmount: term.overrideAmount,
+    }));
+    const termMasters = new Map((lk?.terms ?? []).map((term) => [term.id, term]));
+    return previewPurchase(pricedLines, terms, termMasters, incompleteLines);
+  }, [f, isAdditional, lk?.terms, products]);
 
   // start from a confirmed challan (the "Create Bill" button on the challan screen)
   const started = useRef(0);
@@ -142,14 +174,13 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
   };
 
   const state = doc?.state as string | undefined;
-  const isAdditional = !!f?.mainBillId;
   const reversible = !!doc && state === "POSTED";
   const actions = doc && (
     <>
-      {state === "DRAFT" && <button className="btn btn-primary" onClick={() => s.run({ action: "post", title: "Post bill?", body: <>Post <b className="font-mono">{doc.invoiceNumber}</b> for <b>{money(doc.totalAmount)}</b>? A balanced journal voucher is written and the bill can no longer be edited or deleted — only reversed.</>, button: "Post", done: (d) => `Posted ${d.invoiceNumber}${d.journalVoucher ? ` (voucher ${d.journalVoucher.voucherNumber})` : ""}` })}><Send size={14} /> Post</button>}
-      {reversible && !doc.mainBillId && <button className="btn" onClick={addCharges}><FilePlus2 size={14} /> Add Charges</button>}
+      {state === "DRAFT" && <button data-nav className="btn btn-primary" onClick={() => s.run({ action: "post", title: "Post bill?", body: <>Post <b className="font-mono">{doc.invoiceNumber}</b> for <b>{money(doc.totalAmount)}</b>? A balanced journal voucher is written and the bill can no longer be edited or deleted — only reversed.</>, button: "Post", done: (d) => `Posted ${d.invoiceNumber}${d.journalVoucher ? ` (voucher ${d.journalVoucher.voucherNumber})` : ""}` })}><Send size={14} /> Post</button>}
+      {reversible && !doc.mainBillId && <button data-nav className="btn" onClick={addCharges}><FilePlus2 size={14} /> Add Charges</button>}
       {reversible && (
-        <button className="btn" onClick={() => {
+        <button data-nav className="btn" onClick={() => {
           const fy = lk?.fiscalYears.find((y) => y.code === p.fyCode);
           const d0 = defaultDate(fy), rv = { date: d0 < doc.invoiceDate ? doc.invoiceDate : d0, reason: "" };
           s.run({
@@ -189,6 +220,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
       )}>
       {f && lk && (
         <div className="space-y-3 pt-2">
+          <PurchaseInvoiceTotals preview={invoicePreview} savedDoc={doc} readOnly={ro} isAdditional={isAdditional} hasLines={f.lines.some((line) => !isBlankLine(line))} hasTerms={f.terms.some((term) => !isBlankTerm(term))} />
           <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-x-3 gap-y-2">
             <Field label="Invoice No"><input disabled className="fld bg-slate-100 text-slate-600" value={doc?.invoiceNumber ?? ""} placeholder="(next number)" aria-label="Invoice number" /></Field>
             <DateField label="Invoice Date" name="invoiceDate" value={f.invoiceDate} onChange={(v) => { s.patch({ invoiceDate: v }); s.clearError("invoiceDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("invoiceDate")} required />
@@ -231,13 +263,8 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
             </>
           )}
           <h2 className="text-[13px] font-semibold">{isAdditional ? "Additional charges" : "Billing Terms"}</h2>
-          <TermsGrid terms={f.terms} onChange={(terms) => s.patch({ terms })} lookups={lk} masters={masters} lineCount={f.lines.filter((l) => !isBlankLine(l)).length} readOnly={ro} errors={s.errors} clearError={s.clearError} contextKey={String(p.companyId)} category={isAdditional ? "ADDITIONAL" : undefined} />
+          <TermsGrid terms={f.terms} onChange={(terms) => s.patch({ terms })} lookups={lk} masters={masters} lineCount={f.lines.filter((l) => !isBlankLine(l)).length} readOnly={ro} errors={s.errors} clearError={s.clearError} contextKey={String(p.companyId)} calculationPreview={ro ? undefined : invoicePreview.terms} previewError={invoicePreview.message} category={isAdditional ? "ADDITIONAL" : undefined} />
           {s.err("terms") && <p className="text-[12px] text-red-700">{s.err("terms")}</p>}
-          {doc && (
-            <div className="flex flex-wrap justify-end gap-x-4 gap-y-1 text-[13px] border border-slate-400 bg-slate-50 px-3 py-1.5">
-              <span>Basic <b className="tabular-nums ml-1">{money(doc.basicAmount)}</b></span><span>Terms <b className="tabular-nums ml-1">{money(doc.termAmount)}</b></span><span>Total <b className="tabular-nums ml-1">{money(doc.totalAmount)}</b></span>
-            </div>
-          )}
           {ro && doc && !isAdditional && doc.lines.some((l) => Number(l.landedAmount) !== 0) && (
             <p className="text-[12px] text-slate-600">Landed cost per line: {doc.lines.map((l) => `${l.lineNumber}: ${money(l.landedAmount)}`).join(" · ")}</p>
           )}

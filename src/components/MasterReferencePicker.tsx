@@ -152,9 +152,9 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
     resultsRef.current?.querySelector<HTMLElement>("[data-active]")?.scrollIntoView({ block: "nearest" });
   }, [activeIndex, filtered, open]);
 
-  const selectActive = () => {
+  const selectActive = (direction: 1 | -1 = 1) => {
     const option = filtered[activeIndex];
-    if (option) choose(option);
+    if (option) choose(option, direction);
   };
 
   const onDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -209,6 +209,12 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
           onClick={() => openDialog()}
           onBlur={() => onBlurField?.()}
           onKeyDown={(event) => {
+            if (event.key === "Enter" && event.shiftKey) {
+              event.preventDefault();
+              event.stopPropagation();
+              onCommit?.(event.currentTarget, -1);
+              return;
+            }
             if (["Enter", " ", "ArrowDown"].includes(event.key) || ((event.altKey) && event.key === "ArrowDown")) {
               event.preventDefault();
               event.stopPropagation();
@@ -262,7 +268,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
                   onKeyDown={(event) => {
                     if (event.key === "ArrowDown") { event.preventDefault(); setActiveIndex((index) => Math.min(index + 1, filtered.length - 1)); }
                     else if (event.key === "ArrowUp") { event.preventDefault(); setActiveIndex((index) => Math.max(index - 1, 0)); }
-                    else if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); selectActive(); }
+                    else if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); selectActive(event.shiftKey ? -1 : 1); }
                     else if (event.key === "Home" && event.ctrlKey) { event.preventDefault(); setActiveIndex(0); }
                     else if (event.key === "End" && event.ctrlKey) { event.preventDefault(); setActiveIndex(Math.max(0, filtered.length - 1)); }
                   }}
@@ -347,7 +353,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
               <p className="text-xs text-slate-600">Search is ready on open. Press <kbd className="kbd">Alt+↓</kbd> on the field to open.</p>
               <div className="flex gap-2">
                 <button type="button" className="btn h-9" onClick={() => closeDialog()}>Cancel</button>
-                <button type="button" className="btn btn-primary h-9" disabled={!activeOption} onClick={selectActive}>Select{activeOption ? `: ${activeOption.code ?? activeOption.short ?? activeOption.label}` : ""}</button>
+                <button type="button" className="btn btn-primary h-9" disabled={!activeOption} onClick={() => selectActive()}>Select{activeOption ? `: ${activeOption.code ?? activeOption.short ?? activeOption.label}` : ""}</button>
               </div>
             </footer>
           </section>

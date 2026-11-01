@@ -1,4 +1,5 @@
-import { mulRound2, parseDec } from "../../shared/decimal";
+import { parseDec } from "../../shared/decimal";
+import { fmt, lineBasicAmount } from "../../shared/purchase-calculation";
 import type { PLookups } from "../api";
 import { isValidAd } from "./nepaliDate";
 
@@ -28,6 +29,7 @@ export interface LineRow {
 export interface TermRow {
   key: string;
   termId: string;
+  nature?: "ADDITIVE" | "DEDUCTIVE";
   lineNumber: string;
   calcType: "PERCENT" | "AMOUNT";
   rate: string;
@@ -67,7 +69,7 @@ export function lineFromDoc(l: Record<string, any>, product: Product | undefined
 }
 export function termFromDoc(t: Record<string, any>): TermRow {
   return blankTerm({
-    termId: str(t.termId), lineNumber: str(t.lineNumber), calcType: t.calcType, rate: num(t.rate), inputAmount: num(t.inputAmount),
+    termId: str(t.termId), nature: t.nature, lineNumber: str(t.lineNumber), calcType: t.calcType, rate: num(t.rate), inputAmount: num(t.inputAmount),
     isOverridden: !!t.isOverridden, overrideAmount: t.isOverridden ? num(t.finalAmount) : "", finalAmount: str(t.finalAmount),
   });
 }
@@ -92,7 +94,9 @@ export function derivedQty(l: LineRow, p: Product | undefined): string {
 export const effectiveQty = (l: LineRow, p: Product | undefined) => (l.altQty && l.altUnitId ? derivedQty(l, p) : l.qty);
 export const lineAmount = (l: LineRow, p: Product | undefined): string => {
   const q = effectiveQty(l, p);
-  return q && l.rate ? mulRound2(q, l.rate) : "";
+  if (!q || !l.rate) return "";
+  const qty = toMicro(q), rate = toMicro(l.rate);
+  return qty === null || rate === null ? "" : fmt(lineBasicAmount(qty, rate), 2);
 };
 
 // ---- payload ----

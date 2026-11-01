@@ -316,7 +316,7 @@ export function purchaseLookups(companyId: number) {
       products: products.map(({ stockDetailId, ...p }) => ({ ...p, alternateUnits: stockDetailId ? altBy.get(stockDetailId) ?? [] : [] })),
       terms: terms.map((t) => ({
         id: t.id, code: t.code, name: t.name, category: t.category, nature: t.nature, isProductwise: t.isProductwise, isMandatory: t.isMandatory, sequence: t.sequence,
-        defaultCalcType: t.defaultCalcType, defaultValue: t.defaultValue, calcBase: t.calcBase, distributeToLines: t.distributeToLines, isActive: t.isActive,
+        defaultCalcType: t.defaultCalcType, defaultValue: t.defaultValue, calcBase: t.calcBase, baseTermId: t.baseTermId, distributeToLines: t.distributeToLines, isActive: t.isActive,
       })),
       fiscalYears: years.map((y) => ({ ...y, startDate: iso(y.startDate), endDate: iso(y.endDate) })),
     };

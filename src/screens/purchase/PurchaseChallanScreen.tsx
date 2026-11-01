@@ -93,8 +93,8 @@ export default function PurchaseChallanScreen(p: PurchaseScreenProps & { onCreat
   const confirmed = !!doc?.isConfirmed;
   const actions = doc && (
     <>
-      {!confirmed && <button className="btn btn-primary" onClick={() => s.run({ action: "confirm", title: "Confirm challan?", body: <>Confirm <b className="font-mono">{doc.challanNumber}</b>? Stock is received and the challan can no longer be edited or deleted.</>, button: "Confirm", done: (d) => `Confirmed ${d.challanNumber}` })}><CheckCheck size={14} /> Confirm</button>}
-      {confirmed && <button className="btn btn-primary" onClick={() => p.onCreateBill(doc.id)}><FileText size={14} /> Create Bill</button>}
+      {!confirmed && <button data-nav className="btn btn-primary" onClick={() => s.run({ action: "confirm", title: "Confirm challan?", body: <>Confirm <b className="font-mono">{doc.challanNumber}</b>? Stock is received and the challan can no longer be edited or deleted.</>, button: "Confirm", done: (d) => `Confirmed ${d.challanNumber}` })}><CheckCheck size={14} /> Confirm</button>}
+      {confirmed && <button data-nav className="btn btn-primary" onClick={() => p.onCreateBill(doc.id)}><FileText size={14} /> Create Bill</button>}
     </>
   );
 

@@ -96,7 +96,7 @@ export interface PLookups {
   }[];
   terms: {
     id: number; code: string; name: string; category: "GENERAL" | "ADDITIONAL"; nature: "ADDITIVE" | "DEDUCTIVE"; isProductwise: boolean; isMandatory: boolean;
-    sequence: number; defaultCalcType: "PERCENT" | "AMOUNT"; defaultValue: string; calcBase: string; distributeToLines: boolean; isActive: boolean;
+    sequence: number; defaultCalcType: "PERCENT" | "AMOUNT"; defaultValue: string; calcBase: "ITEM_VALUE" | "RUNNING_TOTAL" | "SINGLE_TERM"; baseTermId: number | null; distributeToLines: boolean; isActive: boolean;
   }[];
   fiscalYears: { id: number; code: string; startDate: string; endDate: string; isActive: boolean; isClosed: boolean; isCurrent: boolean }[];
 }

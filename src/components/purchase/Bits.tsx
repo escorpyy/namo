@@ -27,14 +27,21 @@ export function Field({ label, error, children, className = "", required }: { la
   );
 }
 
-// Moves focus to the next / previous enabled field of the form (document order).
+// Moves focus through non-destructive purchase controls in document order. Row deletion stays on native Tab/Shift+Tab and its explicit shortcut.
 export function focusStep(el: Element, dir: 1 | -1) {
-  const all = Array.from(document.querySelectorAll<HTMLElement>("[data-zone=form] [data-field]"))
-    .filter((x) => !("disabled" in x && (x as HTMLInputElement).disabled) && x.getAttribute("aria-hidden") !== "true");
+  const root = el.closest<HTMLElement>("[data-purchase-document]") ?? document;
+  const all = Array.from(root.querySelectorAll<HTMLElement>("[data-field], [data-nav]:not([data-nav='remove-line']):not([data-nav='remove-term'])"))
+    .filter((x) => {
+      const focusable = x.matches("input:not([type=hidden]), select, textarea, button, [tabindex]:not([tabindex='-1'])");
+      const enabled = !("disabled" in x && (x as HTMLInputElement).disabled);
+      return focusable && enabled && x.getAttribute("aria-hidden") !== "true" && !x.closest("[aria-hidden='true']") && x.getClientRects().length > 0;
+    });
   const i = all.indexOf(el as HTMLElement);
   const next = all[i + dir];
-  next?.focus();
-  next?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  if (!next) return false;
+  next.focus();
+  next.scrollIntoView({ block: "nearest", inline: "nearest" });
+  return true;
 }
 
 interface ShellProps<F extends object> {
@@ -59,14 +66,21 @@ export function DocShell<F extends object>({ s, title, singular, branchName, fyC
   const view = s.mode === "view";
   const onFormKey = (e: React.KeyboardEvent) => {
     const el = e.target as HTMLElement;
-    if (e.key !== "Enter" || el.getAttribute("role") === "combobox" || !el.hasAttribute("data-field") || !(el instanceof HTMLInputElement || el instanceof HTMLSelectElement)) return;
+    if (e.key !== "Enter" || el.getAttribute("role") === "combobox" || !el.hasAttribute("data-field")) return;
+    if (el instanceof HTMLTextAreaElement) {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      focusStep(el, e.shiftKey ? -1 : 1);
+      return;
+    }
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLSelectElement)) return;
     e.preventDefault();
     focusStep(el, e.shiftKey ? -1 : 1);
   };
   return (
     <>
       <main className="flex-1 min-w-0 flex min-h-0">
-        <section className="flex-1 min-w-0 flex flex-col min-h-0">
+        <section data-purchase-document className="flex-1 min-w-0 flex flex-col min-h-0">
           <div className="px-4 pt-3 pb-2 shrink-0">
             <div className="flex items-end gap-3 flex-wrap">
               <h1 className="text-[22px] font-semibold">{title}</h1>
@@ -83,14 +97,14 @@ export function DocShell<F extends object>({ s, title, singular, branchName, fyC
           <div className="shrink-0 border-t border-slate-400 bg-slate-50 px-4 py-2 flex items-center gap-2 flex-wrap">
             {!view ? (
               <>
-                <button className="btn btn-primary" disabled={s.saving} onClick={() => void s.save()}><Save size={14} /> {s.mode === "edit" ? "Update" : "Save"} <span className="kbd">Ctrl+S</span></button>
-                <button className="btn" onClick={s.cancel}><X size={14} /> Cancel <span className="kbd">Esc</span></button>
+                <button data-nav className="btn btn-primary" disabled={s.saving} onClick={() => void s.save()}><Save size={14} /> {s.mode === "edit" ? "Update" : "Save"} <span className="kbd">Ctrl+S</span></button>
+                <button data-nav className="btn" onClick={s.cancel}><X size={14} /> Cancel <span className="kbd">Esc</span></button>
               </>
             ) : (
               <>
-                <button className="btn" onClick={() => s.newDoc()}><Plus size={14} /> New <span className="kbd">F3</span></button>
-                <button className="btn" disabled={!canEdit} onClick={s.edit}><Pencil size={14} /> Edit <span className="kbd">F2</span></button>
-                <button className="btn" disabled={!canDelete} onClick={s.askDelete}><Trash2 size={14} /> Delete <span className="kbd">Ctrl+Del</span></button>
+                <button data-nav className="btn" onClick={() => s.newDoc()}><Plus size={14} /> New <span className="kbd">F3</span></button>
+                <button data-nav className="btn" disabled={!canEdit} onClick={s.edit}><Pencil size={14} /> Edit <span className="kbd">F2</span></button>
+                <button data-nav className="btn" disabled={!canDelete} onClick={s.askDelete}><Trash2 size={14} /> Delete <span className="kbd">Ctrl+Del</span></button>
                 {actions && <><span className="w-px h-6 bg-slate-300 mx-1" />{actions}</>}
               </>
             )}
@@ -153,7 +167,9 @@ export function DocShell<F extends object>({ s, title, singular, branchName, fyC
 }
 
 export const COMMON_HELP: [string, string][] = [
-  ["Enter / Shift+Enter", "Next / previous field (last cell of the last line adds a line)"],
+  ["Enter / Shift+Enter", "Next / previous field (last cell adds a line or term)"],
+  ["Tab / Shift+Tab", "Navigate every control, including row actions"],
+  ["Ctrl+Enter / Ctrl+Shift+Enter", "Next / previous field from a multi-line field"],
   ["Ctrl+S", "Save / Update"],
   ["F3 / Ctrl+N", "New document"],
   ["F2", "Edit the open document"],
@@ -166,4 +182,4 @@ export const COMMON_HELP: [string, string][] = [
   ["Alt+4", "Expand / collapse the purchase document list"],
   ["F1 / ?", "This help"],
 ];
-export const HINTS = ["Enter: Next", "Ctrl+S: Save", "F3: New", "F2: Edit", "F4: Search", "Alt+4: Toggle list", "F1: Help"];
+export const HINTS = ["Enter: Next", "Shift+Enter: Previous", "Ctrl+S: Save", "F3: New", "F2: Edit", "F4: Search", "Alt+4: Toggle list", "F1: Help"];

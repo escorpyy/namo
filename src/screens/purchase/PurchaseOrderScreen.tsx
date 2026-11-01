@@ -77,9 +77,9 @@ export default function PurchaseOrderScreen(p: PurchaseScreenProps) {
 
   const actions = doc && (
     <>
-      {status === "DRAFT" && <button className="btn" onClick={() => s.run({ action: "approve", title: "Approve order?", body: <>Approve <b className="font-mono">{doc.orderNumber}</b>? It can no longer be edited, and challans and bills can be raised against it.</>, button: "Approve", done: (d) => `Approved ${d.orderNumber}` })}><Check size={14} /> Approve</button>}
-      {status === "APPROVED" && <button className="btn" onClick={() => s.run({ action: "close", title: "Close order?", body: <>Close <b className="font-mono">{doc.orderNumber}</b>? Nothing more can be received or billed against it.</>, button: "Close order", done: (d) => `Closed ${d.orderNumber}` })}><Lock size={14} /> Close</button>}
-      {(status === "DRAFT" || status === "APPROVED") && <button className="btn" onClick={() => s.run({ action: "cancel", title: "Cancel order?", body: <>Cancel <b className="font-mono">{doc.orderNumber}</b>? This cannot be undone.</>, button: "Cancel order", danger: true, done: (d) => `Cancelled ${d.orderNumber}` })}><Ban size={14} /> Cancel order</button>}
+      {status === "DRAFT" && <button data-nav className="btn" onClick={() => s.run({ action: "approve", title: "Approve order?", body: <>Approve <b className="font-mono">{doc.orderNumber}</b>? It can no longer be edited, and challans and bills can be raised against it.</>, button: "Approve", done: (d) => `Approved ${d.orderNumber}` })}><Check size={14} /> Approve</button>}
+      {status === "APPROVED" && <button data-nav className="btn" onClick={() => s.run({ action: "close", title: "Close order?", body: <>Close <b className="font-mono">{doc.orderNumber}</b>? Nothing more can be received or billed against it.</>, button: "Close order", done: (d) => `Closed ${d.orderNumber}` })}><Lock size={14} /> Close</button>}
+      {(status === "DRAFT" || status === "APPROVED") && <button data-nav className="btn" onClick={() => s.run({ action: "cancel", title: "Cancel order?", body: <>Cancel <b className="font-mono">{doc.orderNumber}</b>? This cannot be undone.</>, button: "Cancel order", danger: true, done: (d) => `Cancelled ${d.orderNumber}` })}><Ban size={14} /> Cancel order</button>}
     </>
   );
 
