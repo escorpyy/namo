@@ -12,6 +12,8 @@ import {
 } from "../../lib/purchaseForm";
 import { parseDec } from "../../../shared/decimal";
 import { previewPurchase } from "../../../shared/purchase-preview";
+import { formatImportCost } from "../../../shared/import-costing";
+import { toMicro } from "../../../shared/purchase-calculation";
 import type { PurchaseScreenProps } from "./PurchaseOrderScreen";
 import { useDocScreen, type DocConfig, type Errors } from "./useDocScreen";
 
@@ -33,7 +35,7 @@ const HELP: [string, string][] = [...COMMON_HELP, ["Post", "Writes the journal v
 
 interface BForm {
   invoiceDate: string; invoiceType: "LOCAL" | "IMPORT"; purchaseType: string; vendorGLId: string; subLedgerId: string; agentId: string; vendorInvoiceNo: string; vendorInvoiceDate: string;
-  dueDays: string; dueDate: string; remarks: string; purchaseChallanId: string; purchaseOrderId: string; mainBillId: string; challanNo: string; orderNo: string;
+  dueDays: string; dueDate: string; remarks: string; purchaseChallanId: string; purchaseOrderId: string; mainBillId: string; importCostForBillId: string; importCostAllocationBasis: "VALUE" | "QUANTITY"; importCostTreatment: "CIF" | "LANDED_ONLY"; challanNo: string; orderNo: string;
   lines: LineRow[]; terms: TermRow[]; imp: Record<string, string>;
 }
 const iso10 = (v: unknown) => (v ? String(v).slice(0, 10) : "");
@@ -43,7 +45,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
     kind: "bills", title: "Purchase Bill", singular: "Bill", statusOptions: OPTIONS,
     emptyForm: (lk) => ({
       invoiceDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), invoiceType: "LOCAL", purchaseType: "GOODS_PURCHASE_OTHERS", vendorGLId: "", subLedgerId: "", agentId: "",
-      vendorInvoiceNo: "", vendorInvoiceDate: "", dueDays: "", dueDate: "", remarks: "", purchaseChallanId: "", purchaseOrderId: "", mainBillId: "", challanNo: "", orderNo: "",
+      vendorInvoiceNo: "", vendorInvoiceDate: "", dueDays: "", dueDate: "", remarks: "", purchaseChallanId: "", purchaseOrderId: "", mainBillId: "", importCostForBillId: "", importCostAllocationBasis: "VALUE", importCostTreatment: "CIF", challanNo: "", orderNo: "",
       lines: [blankLine()], terms: [], imp: {},
     }),
     toForm: (d: PDoc, lk) => {
@@ -53,7 +55,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
       return {
         invoiceDate: str(d.invoiceDate), invoiceType: d.invoiceType, purchaseType: str(d.purchaseType), vendorGLId: str(d.vendorGLId), subLedgerId: str(d.subLedgerId), agentId: str(d.agentId),
         vendorInvoiceNo: str(d.vendorInvoiceNo), vendorInvoiceDate: str(d.vendorInvoiceDate), dueDays: str(d.dueDays), dueDate: str(d.dueDate), remarks: str(d.remarks),
-        purchaseChallanId: str(d.purchaseChallanId), purchaseOrderId: str(d.purchaseOrderId), mainBillId: str(d.mainBillId), challanNo: str(d.challanNumber), orderNo: str(d.orderNumber),
+        purchaseChallanId: str(d.purchaseChallanId), purchaseOrderId: str(d.purchaseOrderId), mainBillId: str(d.mainBillId), importCostForBillId: str(d.importCostForBillId), importCostAllocationBasis: d.importCostAllocationBasis === "QUANTITY" ? "QUANTITY" : "VALUE", importCostTreatment: d.importCostTreatment === "LANDED_ONLY" ? "LANDED_ONLY" : "CIF", challanNo: str(d.challanNumber), orderNo: str(d.orderNumber),
         lines: d.lines.length ? d.lines.map((l) => lineFromDoc(l, prods.get(str(l.productId)))) : [blankLine()], terms: (d.terms ?? []).map(termFromDoc), imp,
       };
     },
@@ -66,6 +68,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
         agentId: f.agentId ? Number(f.agentId) : null, vendorInvoiceNo: nn(f.vendorInvoiceNo), vendorInvoiceDate: f.vendorInvoiceDate || null,
         dueDays: f.dueDays ? Number(f.dueDays) : null, dueDate: f.dueDate || null, remarks: nn(f.remarks),
         purchaseChallanId: f.purchaseChallanId ? Number(f.purchaseChallanId) : null, purchaseOrderId: f.purchaseOrderId ? Number(f.purchaseOrderId) : null, mainBillId: f.mainBillId ? Number(f.mainBillId) : null,
+        importCostForBillId: f.importCostForBillId && !f.mainBillId ? Number(f.importCostForBillId) : null, importCostAllocationBasis: f.importCostAllocationBasis, importCostTreatment: f.importCostTreatment,
         lines: f.mainBillId ? [] : f.lines.filter((l) => !isBlankLine(l)).map((l) => lineToPayload(l, prods.get(l.productId), "bill")),
         terms: f.terms.filter((t) => !isBlankTerm(t)).map((t) => termToPayload(t, masters.get(t.termId))),
         importDetail: f.invoiceType === "IMPORT" ? Object.fromEntries(IMPORT_FIELDS.map((k) => [k.key, nn(f.imp[k.key] ?? "")])) : null,
@@ -80,6 +83,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
       e.vendorInvoiceDate = dateErr("Vendor invoice date", f.vendorInvoiceDate);
       e.dueDate = dateErr("Due date", f.dueDate);
       if (f.dueDays && !/^\d{1,4}$/.test(f.dueDays)) e.dueDays = "Due days must be a whole number.";
+      if (f.importCostForBillId && (f.mainBillId || !f.purchaseType.startsWith("SERVICE_PURCHASE_"))) e.importCostForBillId = "Only a normal service purchase bill can be linked as an import-cost source.";
       for (const k of IMPORT_FIELDS) if (f.invoiceType === "IMPORT" && k.kind === "date") { const m = dateErr(k.label, f.imp[k.key] ?? ""); if (m) e[`imp.${k.key}`] = m; }
       const live = f.lines.filter((l) => !isBlankLine(l)).length;
       if (f.mainBillId) { if (!f.terms.some((t) => !isBlankTerm(t))) e.terms = "An additional bill needs at least one charge (term)."; }
@@ -158,11 +162,19 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
     if (f?.mainBillId && !o.some((x) => x.value === f.mainBillId) && doc?.mainBill) o.push({ value: f.mainBillId, label: doc.mainBill.invoiceNumber });
     return o;
   }, [mains, f?.mainBillId, doc]);
+  const sourceTargetOpts = useMemo<ComboOption[]>(() => {
+    const o = mains.filter((x) => x.invoiceType === "IMPORT" && String(x.purchaseType).startsWith("GOODS_PURCHASE_") && !x.isAdditional)
+      .map((x) => ({ value: String(x.id), label: `${x.invoiceNumber} — ${x.vendorName} (${x.invoiceDate})` }));
+    if (f?.importCostForBillId && !o.some((x) => x.value === f.importCostForBillId) && doc?.importCostTarget) {
+      o.push({ value: f.importCostForBillId, label: doc.importCostTarget.invoiceNumber });
+    }
+    return o;
+  }, [mains, f?.importCostForBillId, doc]);
   const pickMain = async (id: string) => {
     if (!id) return s.patch({ mainBillId: "" });
     try {
       const m = await purchaseApi.get("bills", Number(id), p.companyId);
-      s.patch({ mainBillId: id, vendorGLId: str(m.vendorGLId), subLedgerId: str(m.subLedgerId), agentId: str(m.agentId), invoiceType: m.invoiceType, purchaseType: str(m.purchaseType), lines: [blankLine()] });
+      s.patch({ mainBillId: id, importCostForBillId: "", vendorGLId: str(m.vendorGLId), subLedgerId: str(m.subLedgerId), agentId: str(m.agentId), invoiceType: m.invoiceType, purchaseType: str(m.purchaseType), lines: [blankLine()] });
     } catch (e) { s.flash((e as Error).message, "err"); }
   };
   const addCharges = () => {
@@ -175,6 +187,12 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
 
   const state = doc?.state as string | undefined;
   const reversible = !!doc && state === "POSTED";
+  const includedSources = (doc?.importCostSources ?? []).filter((source: any) => source.includedInCIF);
+  const cifSources = includedSources.filter((source: any) => source.importCostTreatment === "CIF");
+  const landedOnlySources = includedSources.filter((source: any) => source.importCostTreatment === "LANDED_ONLY");
+  const cifSourceAmount = cifSources.reduce((sum: bigint, source: any) => sum + toMicro(source.basicAmount), 0n);
+  const landedOnlyAmount = landedOnlySources.reduce((sum: bigint, source: any) => sum + toMicro(source.basicAmount), 0n);
+  const cifTotal = doc?.invoiceType === "IMPORT" ? formatImportCost(toMicro(doc.basicAmount) + cifSourceAmount, 2) : null;
   const actions = doc && (
     <>
       {state === "DRAFT" && <button data-nav className="btn btn-primary" onClick={() => s.run({ action: "post", title: "Post bill?", body: <>Post <b className="font-mono">{doc.invoiceNumber}</b> for <b>{money(doc.totalAmount)}</b>? A balanced journal voucher is written and the bill can no longer be edited or deleted — only reversed.</>, button: "Post", done: (d) => `Posted ${d.invoiceNumber}${d.journalVoucher ? ` (voucher ${d.journalVoucher.voucherNumber})` : ""}` })}><Send size={14} /> Post</button>}
@@ -228,7 +246,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
               <select data-field="invoiceType" disabled={ro || isAdditional} value={f.invoiceType} onChange={(e) => s.patch({ invoiceType: e.target.value as BForm["invoiceType"] })} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}><option value="LOCAL">Local</option><option value="IMPORT">Import</option></select>
             </Field>
             <Field label="Purchase Type" className="col-span-1 sm:col-span-2 2xl:col-span-2">
-              <select data-field="purchaseType" disabled={ro || isAdditional} value={f.purchaseType} onChange={(e) => s.patch({ purchaseType: e.target.value })} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}>{PURCHASE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select>
+              <select data-field="purchaseType" disabled={ro || isAdditional} value={f.purchaseType} onChange={(e) => { const purchaseType = e.target.value; s.patch({ purchaseType, importCostForBillId: purchaseType.startsWith("SERVICE_PURCHASE_") ? f.importCostForBillId : "" }); s.clearError("importCostForBillId"); }} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}>{PURCHASE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select>
             </Field>
             <VendorFields lookups={lk} contextKey={String(p.companyId)} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors} lockVendor={!!f.purchaseChallanId || isAdditional}
               onChange={(c) => { s.patch(c); s.clearError("vendorGLId", "subLedgerId"); }} />
@@ -239,6 +257,23 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
             <Field label="Additional to Bill" error={s.err("mainBillId")}>
               <Combobox fieldName="mainBillId" placeholder="— (a normal bill)" value={f.mainBillId} hasError={!!s.err("mainBillId")} options={mainOpts} disabled={ro || !!doc || !!f.purchaseChallanId} onChange={(v) => void pickMain(v)} onCommit={(el, dir) => focusStep(el, dir)} />
             </Field>
+            {!isAdditional && f.purchaseType.startsWith("SERVICE_PURCHASE_") && (
+              <>
+                <Field label="Import cost of" error={s.err("importCostForBillId")}>
+                  <Combobox fieldName="importCostForBillId" placeholder="— (not linked to an import)" value={f.importCostForBillId} hasError={!!s.err("importCostForBillId")} options={sourceTargetOpts} disabled={ro} onChange={(value) => { s.patch({ importCostForBillId: value }); s.clearError("importCostForBillId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
+                </Field>
+                <Field label="Source allocation basis">
+                  <select data-field="importCostAllocationBasis" disabled={ro || !f.importCostForBillId} value={f.importCostAllocationBasis} onChange={(e) => s.patch({ importCostAllocationBasis: e.target.value as BForm["importCostAllocationBasis"] })} className={`fld ${ro || !f.importCostForBillId ? "bg-slate-100 text-slate-600" : ""}`}>
+                    <option value="VALUE">By goods value</option><option value="QUANTITY">By quantity</option>
+                  </select>
+                </Field>
+                <Field label="Cost treatment">
+                  <select data-field="importCostTreatment" disabled={ro || !f.importCostForBillId} value={f.importCostTreatment} onChange={(e) => s.patch({ importCostTreatment: e.target.value as BForm["importCostTreatment"] })} className={`fld ${ro || !f.importCostForBillId ? "bg-slate-100 text-slate-600" : ""}`}>
+                    <option value="CIF">CIF input (pre-customs)</option><option value="LANDED_ONLY">Landed only (post-CIF)</option>
+                  </select>
+                </Field>
+              </>
+            )}
             <Field label="Challan / Order"><input disabled className="fld bg-slate-100 text-slate-600" value={[f.challanNo && `Challan ${f.challanNo}`, f.orderNo && `Order ${f.orderNo}`].filter(Boolean).join(" · ")} placeholder="—" aria-label="Linked documents" /></Field>
             <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} className="col-span-1 sm:col-span-2 2xl:col-span-3" error={s.err("remarks")} />
           </div>
@@ -253,6 +288,34 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
                     ? <Field key={k.key} label={k.label}><select data-field={`imp.${k.key}`} disabled={ro} value={f.imp[k.key] ?? ""} onChange={(e) => s.patch({ imp: { ...f.imp, [k.key]: e.target.value } })} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}><option value="">—</option><option value="ROAD">Road</option><option value="AIR">Air</option><option value="RAIL">Rail</option><option value="OTHER">Other</option></select></Field>
                     : <TextField key={k.key} label={k.label} name={`imp.${k.key}`} value={f.imp[k.key] ?? ""} onChange={(v) => s.patch({ imp: { ...f.imp, [k.key]: v } })} readOnly={ro} max={k.max ?? 60} error={s.err(`imp.${k.key}`)} />)}
               </div>
+            </fieldset>
+          )}
+
+          {!isAdditional && doc?.invoiceType === "IMPORT" && (
+            <fieldset className="border border-sky-300 bg-sky-50/60 px-3 pt-1 pb-2">
+              <legend className="px-1 text-[12px] font-semibold text-sky-950">Import cost sources and CIF / landed value</legend>
+              <p className="text-[12px] text-slate-700">Only posted, unreversed service bills are included. Their tax-exclusive Basic Amount is allocated in accounting-currency values; the service bill's tax stays on its own term/ledger. Choose CIF input for costs included before customs duty, or Landed only for costs incurred after CIF. Foreign-currency conversion is not handled here.</p>
+              <div className="mt-1 grid grid-cols-1 gap-2 text-[12px] sm:grid-cols-2 xl:grid-cols-4">
+                <p>Goods basic: <b>{money(doc.basicAmount)}</b></p>
+                <p>CIF service costs: <b>{money(formatImportCost(cifSourceAmount, 2))}</b></p>
+                <p>Landed-only costs: <b>{money(formatImportCost(landedOnlyAmount, 2))}</b></p>
+                <p>CIF base: <b>{money(cifTotal ?? "0")}</b></p>
+              </div>
+              {(doc.importCostSources ?? []).length > 0 ? (
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full min-w-[560px] text-left text-[12px]">
+                    <thead><tr className="border-b border-sky-200 text-slate-600"><th className="py-1 pr-3">Service invoice</th><th className="py-1 pr-3">Vendor</th><th className="py-1 pr-3">Source basis</th><th className="py-1 pr-3">Treatment</th><th className="py-1 pr-3 text-right">Basic amount</th><th className="py-1 text-right">Cost status</th></tr></thead>
+                    <tbody>{doc.importCostSources.map((source: any) => <tr key={source.id} className="border-b border-sky-100 last:border-0">
+                      <td className="py-1 pr-3 font-mono">{source.invoiceNumber}{source.vendorInvoiceNo ? ` · ${source.vendorInvoiceNo}` : ""}</td>
+                      <td className="py-1 pr-3">{source.vendorName}</td>
+                      <td className="py-1 pr-3">{source.importCostAllocationBasis === "QUANTITY" ? "Quantity" : "Goods value"}</td>
+                      <td className="py-1 pr-3">{source.importCostTreatment === "LANDED_ONLY" ? "Landed only" : "CIF"}</td>
+                      <td className="py-1 pr-3 text-right tabular-nums">{money(source.basicAmount)}</td>
+                      <td className="py-1 text-right">{source.includedInCIF ? "Included" : source.state.toLowerCase()}</td>
+                    </tr>)}</tbody>
+                  </table>
+                </div>
+              ) : <p className="mt-1 text-[12px] text-slate-600">No service purchase invoices are linked yet.</p>}
             </fieldset>
           )}
 

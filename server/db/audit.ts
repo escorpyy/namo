@@ -11,6 +11,7 @@ import { sql, type SQL } from "drizzle-orm";
 export const AUDITED_TABLES = [
   "CashBankVoucher", "CashBankVoucherLine", "CompanyLock", "JournalVoucher", "JournalVoucherLine", "OpeningBalance",
   "PurchaseBill", "PurchaseBillImportDetail", "PurchaseBillLine", "PurchaseDocumentTerm", "PurchaseDocumentTermAllocation",
+  "PurchaseImportAssessment", "PurchaseImportAssessmentAllocation", "PurchaseImportAssessmentLine", "PurchaseImportAssessmentTerm",
 ] as const;
 
 export type AuditContext = { userId?: number | null; reason?: string | null };

@@ -1,0 +1,2 @@
+ALTER TABLE "PurchaseBill" ADD COLUMN "importCostTreatment" varchar(20) DEFAULT 'CIF' NOT NULL;--> statement-breakpoint
+ALTER TABLE "PurchaseBill" ADD CONSTRAINT "PurchaseBill_import_cost_treatment_check" CHECK ("PurchaseBill"."importCostTreatment" IN ('CIF', 'LANDED_ONLY'));

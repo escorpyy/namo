@@ -1,0 +1,1 @@
+ALTER TABLE "PurchaseImportAssessmentLine" ADD COLUMN "existingPurchaseTermCosts" numeric(18, 6) DEFAULT '0' NOT NULL;

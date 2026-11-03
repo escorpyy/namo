@@ -196,7 +196,8 @@ purchaseRouter.post("/challans/:id/confirm", wrap(async (req, res) => {
 const BILL_HEAD = {
   ...HEAD, invoiceNumber: "str", invoiceDate: "date", invoiceType: ["LOCAL", "IMPORT"],
   purchaseType: ["GOODS_PURCHASE_OTHERS", "GOODS_PURCHASE_CAPITAL", "SERVICE_PURCHASE_OTHERS", "SERVICE_PURCHASE_CAPITAL"],
-  vendorInvoiceNo: "str", vendorInvoiceDate: "date", purchaseChallanId: "int", purchaseOrderId: "int", mainBillId: "int", dueDays: "int", dueDate: "date",
+  vendorInvoiceNo: "str", vendorInvoiceDate: "date", purchaseChallanId: "int", purchaseOrderId: "int", mainBillId: "int", importCostForBillId: "int",
+  importCostAllocationBasis: ["VALUE", "QUANTITY"], importCostTreatment: ["CIF", "LANDED_ONLY"], dueDays: "int", dueDate: "date",
 } as const satisfies Record<string, Kind>;
 const billInput = (b: any, base: { companyId: number; branchId: number; id?: number }): P.PurchaseBillInput => ({
   ...(pick(b, BILL_HEAD, "Bill") as any),
@@ -238,4 +239,53 @@ purchaseRouter.post("/bills/:id/reverse", wrap(async (req, res) => {
   const o = pick(req.body ?? {}, { date: "date", reason: "str" }, "Reversal");
   const result = await P.reversePurchaseBill(id, await actorOf(req), { date: o.date || undefined, reason: o.reason?.trim() || undefined, lockOverride: lockOverrideOf(req) });
   res.json({ result, document: await P.getPurchaseBill(id, companyId) });
+}));
+
+// ===================================================================================================================
+// IMPORT COST ASSESSMENTS (invoice-free customs/excise costs; valuation only, no supplier or GL posting)
+// ===================================================================================================================
+const ASSESSMENT_TERM = {
+  termId: "int", calcType: ["PERCENT", "AMOUNT"], rate: "num", inputAmount: "num", isOverridden: "bool", overrideAmount: "num",
+  allocationBasis: ["VALUE", "QUANTITY"], capitalizable: "bool",
+} as const satisfies Record<string, Kind>;
+const ASSESSMENT_HEAD = { fiscalYear: "str", importBillId: "int", assessmentDate: "date", referenceNo: "str", remarks: "str" } as const satisfies Record<string, Kind>;
+const assessmentInput = (b: any, base: { companyId: number; branchId: number; id?: number }): P.AssessmentInput => ({
+  ...(pick(b, ASSESSMENT_HEAD, "Import assessment") as any),
+  terms: rows(b?.terms, ASSESSMENT_TERM, "terms", MAX_TERMS, "Charge") as any,
+  ...base,
+});
+purchaseRouter.get("/import-assessments/eligible-imports", wrap(async (req, res) => {
+  res.json(await P.eligibleImportBills({ companyId: companyOf(req), branchId: whole(q(req, "branchId"), "branchId"), fiscalYear: String(q(req, "fiscalYear") ?? "").slice(0, 15) }));
+}));
+purchaseRouter.post("/import-assessments/preview", wrap(async (req, res) => {
+  const companyId = whole(req.body?.companyId, "companyId"), branchId = whole(req.body?.branchId, "branchId"), importBillId = whole(req.body?.importBillId, "importBillId");
+  const terms = rows(req.body?.terms, ASSESSMENT_TERM, "terms", MAX_TERMS, "Charge");
+  res.json(await P.previewImportAssessment({ companyId, branchId, importBillId, terms: terms as any }));
+}));
+purchaseRouter.get("/import-assessments", wrap(async (req, res) => {
+  res.json(await P.listImportAssessments({ companyId: companyOf(req), branchId: whole(q(req, "branchId"), "branchId"), fiscalYear: String(q(req, "fiscalYear") ?? "").slice(0, 15), status: q(req, "status"), search: q(req, "search") }));
+}));
+purchaseRouter.get("/import-assessments/:id", wrap(async (req, res) => { res.json(await P.getImportAssessment(idOf(req), companyOf(req))); }));
+purchaseRouter.post("/import-assessments", wrap(async (req, res) => {
+  const companyId = whole(req.body?.companyId, "companyId"), branchId = whole(req.body?.branchId, "branchId");
+  const result = await P.createImportAssessment(assessmentInput(req.body, { companyId, branchId }), await actorOf(req), { lockOverride: lockOverrideOf(req) });
+  res.status(201).json({ result, ...(await P.getImportAssessment(result.id, companyId)) });
+}));
+purchaseRouter.put("/import-assessments/:id", wrap(async (req, res) => {
+  const id = idOf(req), companyId = companyOf(req), body = assessmentInput(req.body, { companyId, branchId: whole(req.body?.branchId, "branchId") });
+  const result = await P.updateImportAssessment(id, companyId, body, await actorOf(req), { lockOverride: lockOverrideOf(req) });
+  res.json({ result, ...(await P.getImportAssessment(id, companyId)) });
+}));
+purchaseRouter.delete("/import-assessments/:id", wrap(async (req, res) => {
+  res.json({ result: await P.deleteImportAssessment(idOf(req), companyOf(req), await actorOf(req), { lockOverride: lockOverrideOf(req) }) });
+}));
+purchaseRouter.post("/import-assessments/:id/apply", wrap(async (req, res) => {
+  const id = idOf(req), companyId = companyOf(req);
+  const result = await P.applyImportAssessment(id, companyId, await actorOf(req), { lockOverride: lockOverrideOf(req) });
+  res.json({ result, ...(await P.getImportAssessment(id, companyId)) });
+}));
+purchaseRouter.post("/import-assessments/:id/reverse", wrap(async (req, res) => {
+  const id = idOf(req), companyId = companyOf(req), reason = pick(req.body ?? {}, { reason: "str" }, "Reversal").reason?.trim();
+  const result = await P.reverseImportAssessment(id, companyId, { ...(await actorOf(req)), reason }, { lockOverride: lockOverrideOf(req) });
+  res.json({ result, ...(await P.getImportAssessment(id, companyId)) });
 }));

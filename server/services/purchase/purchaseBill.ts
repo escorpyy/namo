@@ -6,6 +6,7 @@ import { guardPeriod, type LockOverride } from "../periodLock";
 import { type Actor, type Opts, type Tx, addDays, assertBranch, assertVendorLedger, idList, inActorTx, inTx, nextNumber, optDate, parseDate, resolveFiscalYear, today } from "./common";
 import { assertMandatoryTerms, recalcTerms, saveTerms, type TermInput } from "./docTerms";
 import { landed } from "./landed";
+import { importCostBasis } from "./importCostBasis";
 import { resolveLines, type LineInput, type ResolvedLine } from "./lines";
 import { ZERO, fmt, toMicro, type Micro } from "./money";
 import { billedByChallanLine, billedByOrderLine, pending, receivedByOrderLine, withTolerance } from "./quantities";
@@ -57,6 +58,9 @@ export type PurchaseBillInput = {
   purchaseChallanId?: number | null;
   purchaseOrderId?: number | null;
   mainBillId?: number | null; // set = this is an ADDITIONAL bill of that (posted) main bill
+  importCostForBillId?: number | null; // service invoice contributes its tax-exclusive basic amount to an import goods bill
+  importCostAllocationBasis?: "VALUE" | "QUANTITY";
+  importCostTreatment?: "CIF" | "LANDED_ONLY";
   dueDays?: number;
   dueDate?: string | Date | null; // blank = invoiceDate + dueDays
   remarks?: string | null;
@@ -74,6 +78,18 @@ async function lockBill(tx: Tx, id: number) {
   const [b] = await tx.select().from(S.purchaseBill).where(eq(S.purchaseBill.id, id)).for("update");
   if (!b) throw new HttpError(404, "Purchase bill not found.");
   return b;
+}
+
+async function assertImportCostTarget(tx: Tx, companyId: number, branchId: number, targetId: number) {
+  const [target] = await tx.select().from(S.purchaseBill).where(and(eq(S.purchaseBill.id, targetId), eq(S.purchaseBill.companyId, companyId))).for("update");
+  if (!target) throw new HttpError(404, "Import goods bill not found in this company.", "importCostForBillId");
+  if (target.branchId !== branchId) throw new HttpError(400, "Link the service bill to an import goods bill in the same branch.", "importCostForBillId");
+  if (target.invoiceType !== "IMPORT" || !target.purchaseType.startsWith("GOODS_PURCHASE_") || target.mainBillId || target.reversalOfId) {
+    throw new HttpError(400, "Linked service costs must point to a main import goods bill.", "importCostForBillId");
+  }
+  const [reversal] = await tx.select({ id: S.purchaseBill.id }).from(S.purchaseBill).where(and(eq(S.purchaseBill.reversalOfId, target.id), eq(S.purchaseBill.isPosted, true)));
+  if (!target.isPosted || reversal) throw new HttpError(409, "Post and keep the import goods bill active before linking service costs.", "importCostForBillId");
+  return target;
 }
 
 // Billed qty (this bill + every other standing bill) may not exceed what the challan line received / the order line ordered.
@@ -117,9 +133,26 @@ export async function recomputeLanded(tx: Tx, lineIds: number[]) {
        and not exists (select 1 from "PurchaseBill" r where r."reversalOfId" = b.id and r."isPosted")
      group by 1`)) as any[];
   const alloc = new Map(rows.map((r) => [Number(r.id), toMicro(r.amt)]));
+  const assessmentRows = (await tx.execute(sql`
+    select a."purchaseBillLineId" as id, sum(a."allocatedAmount")::text as amt
+      from "PurchaseImportAssessmentAllocation" a
+      join "PurchaseImportAssessment" d on d.id = a."assessmentId"
+     where a."purchaseBillLineId" in (${idList(lineIds)})
+       and d."isPosted" and d."reversedAt" is null
+     group by 1`)) as any[];
+  const assessmentAllocation = new Map(assessmentRows.map((r) => [Number(r.id), toMicro(r.amt)]));
+  const sourceCostByLine = new Map<number, Micro>();
+  for (const billId of new Set(lines.map((line) => line.purchaseBillId))) {
+    const [bill] = await tx.select({ invoiceType: S.purchaseBill.invoiceType, mainBillId: S.purchaseBill.mainBillId }).from(S.purchaseBill).where(eq(S.purchaseBill.id, billId));
+    if (bill?.invoiceType !== "IMPORT" || bill.mainBillId) continue;
+    const basis = await importCostBasis(tx, billId);
+    for (const line of basis.lines) sourceCostByLine.set(line.id, (sourceCostByLine.get(line.id) ?? ZERO) + line.sourceCost);
+  }
   for (const l of lines) {
-    const x = landed({ basicAmount: toMicro(l.basicAmount), qty: toMicro(l.qty), allocated: alloc.get(l.id) ?? ZERO });
-    await tx.update(S.purchaseBillLine).set({ allocatedTermAmount: fmt(x.allocatedTermAmount, 2), landedAmount: fmt(x.landedAmount, 2), landedRate: fmt(x.landedRate) }).where(eq(S.purchaseBillLine.id, l.id));
+    const termAllocation = alloc.get(l.id) ?? ZERO;
+    const assessmentCost = assessmentAllocation.get(l.id) ?? ZERO;
+    const x = landed({ basicAmount: toMicro(l.basicAmount), qty: toMicro(l.qty), allocated: termAllocation + (sourceCostByLine.get(l.id) ?? ZERO) + assessmentCost });
+    await tx.update(S.purchaseBillLine).set({ allocatedTermAmount: fmt(termAllocation, 2), landedAmount: fmt(x.landedAmount, 2), landedRate: fmt(x.landedRate) }).where(eq(S.purchaseBillLine.id, l.id));
   }
 }
 
@@ -154,6 +187,13 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
     const fy = await resolveFiscalYear(tx, input.companyId, invoiceDate, input.fiscalYear ?? null);
 
     const isAdditional = !!input.mainBillId;
+    const importCostForBillId = input.importCostForBillId ?? null;
+    const purchaseType = input.purchaseType ?? "GOODS_PURCHASE_OTHERS";
+    if (importCostForBillId) {
+      if (isAdditional) throw new HttpError(400, "An additional bill cannot also be a service-cost source.", "importCostForBillId");
+      if (!purchaseType.startsWith("SERVICE_PURCHASE_")) throw new HttpError(400, "Only a service purchase bill can be linked as an import-cost source.", "importCostForBillId");
+      await assertImportCostTarget(tx, input.companyId, input.branchId, importCostForBillId);
+    }
     if (isAdditional) {
       const [m] = await tx.select().from(S.purchaseBill).where(and(eq(S.purchaseBill.id, input.mainBillId!), eq(S.purchaseBill.companyId, input.companyId)));
       if (!m) throw new HttpError(404, "Main bill not found in this company.", "mainBillId");
@@ -188,9 +228,10 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
     const dueDate = input.dueDate ? parseDate(input.dueDate, "dueDate") : addDays(invoiceDate, dueDays);
     const header = {
       companyId: input.companyId, branchId: input.branchId, invoiceNumber, invoiceDate, fiscalYear: fy.code, invoiceType,
-      purchaseType: input.purchaseType ?? "GOODS_PURCHASE_OTHERS", vendorGLId: input.vendorGLId, subLedgerId: input.subLedgerId ?? null, agentId: input.agentId ?? null,
+      purchaseType, vendorGLId: input.vendorGLId, subLedgerId: input.subLedgerId ?? null, agentId: input.agentId ?? null,
       vendorInvoiceNo: input.vendorInvoiceNo?.trim() || null, vendorInvoiceDate: optDate(input.vendorInvoiceDate, "vendorInvoiceDate"),
       purchaseChallanId: input.purchaseChallanId ?? null, purchaseOrderId: input.purchaseOrderId ?? null, mainBillId: input.mainBillId ?? null,
+      importCostForBillId, importCostAllocationBasis: input.importCostAllocationBasis ?? "VALUE", importCostTreatment: input.importCostTreatment ?? "CIF",
       dueDays, dueDate, remarks: input.remarks ?? null, updatedAt: new Date(),
     };
 
@@ -267,12 +308,21 @@ export function postPurchaseBill(id: number, actor: Actor, opts: Opts & QtyOpts 
     const isAdditional = !!bill.mainBillId;
 
     if (isAdditional) {
-      const [m] = await tx.select().from(S.purchaseBill).where(eq(S.purchaseBill.id, bill.mainBillId!));
+      const [m] = await tx.select().from(S.purchaseBill).where(eq(S.purchaseBill.id, bill.mainBillId!)).for("update");
       const [rev] = await tx.select({ id: S.purchaseBill.id }).from(S.purchaseBill).where(and(eq(S.purchaseBill.reversalOfId, m.id), eq(S.purchaseBill.isPosted, true)));
       if (!m.isPosted || rev) throw new HttpError(409, "The main bill is not posted (or has been reversed).");
+      const [assessment] = await tx.select({ id: S.purchaseImportAssessment.id }).from(S.purchaseImportAssessment)
+        .where(and(eq(S.purchaseImportAssessment.importBillId, m.id), eq(S.purchaseImportAssessment.isPosted, true), sql`${S.purchaseImportAssessment.reversedAt} IS NULL`)).limit(1);
+      if (assessment) throw new HttpError(409, "Reverse the applied import-cost assessment before posting an additional bill against its import goods bill.");
     } else if (bill.purchaseChallanId) {
       const [c] = await tx.select().from(S.purchaseChallan).where(eq(S.purchaseChallan.id, bill.purchaseChallanId));
       if (!c.isConfirmed) throw new HttpError(409, `Challan ${c.challanNumber} is not confirmed.`);
+    }
+    if (bill.importCostForBillId) await assertImportCostTarget(tx, bill.companyId, bill.branchId, bill.importCostForBillId);
+    if (bill.importCostForBillId) {
+      const [assessment] = await tx.select({ id: S.purchaseImportAssessment.id }).from(S.purchaseImportAssessment)
+        .where(and(eq(S.purchaseImportAssessment.importBillId, bill.importCostForBillId), eq(S.purchaseImportAssessment.isPosted, true), sql`${S.purchaseImportAssessment.reversedAt} IS NULL`)).limit(1);
+      if (assessment) throw new HttpError(409, "Reverse the applied import-cost assessment before posting another linked service invoice.");
     }
 
     const vendor = await assertVendorLedger(tx, bill.companyId, bill.vendorGLId, bill.subLedgerId, { requireSubWhenFlagged: true });
@@ -327,6 +377,10 @@ export function postPurchaseBill(id: number, actor: Actor, opts: Opts & QtyOpts 
     // Now that this bill stands, re-value the lines it allocates to (its own, or the main bill's).
     const targets = isAdditional ? await tx.select({ id: S.purchaseBillLine.id }).from(S.purchaseBillLine).where(eq(S.purchaseBillLine.purchaseBillId, bill.mainBillId!)) : dbLines;
     await recomputeLanded(tx, targets.map((l) => l.id));
+    if (bill.importCostForBillId) {
+      const sourceTargets = await tx.select({ id: S.purchaseBillLine.id }).from(S.purchaseBillLine).where(eq(S.purchaseBillLine.purchaseBillId, bill.importCostForBillId));
+      await recomputeLanded(tx, sourceTargets.map((line) => line.id));
+    }
     return { id, isPosted: true as const, journalVoucherId: jvId, voucherNumber: voucherNumberFor(bill), totalAmount: fmt(totals.total, 2), debit: fmt(dr, 2), credit: fmt(cr, 2) };
   });
 }
@@ -367,12 +421,27 @@ export function reversePurchaseBill(id: number, actor: Actor, opts: Opts & LockO
     if (orig.reversalOfId) throw new HttpError(409, "A reversal cannot itself be reversed.");
     const [already] = await tx.select({ id: S.purchaseBill.id }).from(S.purchaseBill).where(and(eq(S.purchaseBill.reversalOfId, id), eq(S.purchaseBill.isPosted, true)));
     if (already) throw new HttpError(409, "This bill has already been reversed.");
+    const assessmentTargetId = orig.importCostForBillId ?? orig.mainBillId ?? (orig.invoiceType === "IMPORT" ? orig.id : null);
+    if (assessmentTargetId) {
+      await tx.select({ id: S.purchaseBill.id }).from(S.purchaseBill).where(eq(S.purchaseBill.id, assessmentTargetId)).for("update");
+      const [assessment] = await tx.select({ id: S.purchaseImportAssessment.id }).from(S.purchaseImportAssessment)
+        .where(and(eq(S.purchaseImportAssessment.importBillId, assessmentTargetId), sql`${S.purchaseImportAssessment.reversedAt} IS NULL`)).limit(1);
+      if (assessment) throw new HttpError(409, "Delete the draft or reverse the active import-cost assessment before reversing this linked bill.");
+    }
     if (!orig.mainBillId) {
       const live = (await tx.execute(sql`
         select a.id from "PurchaseBill" a
          where a."mainBillId" = ${id} and a."isPosted" and a."reversalOfId" is null
            and not exists (select 1 from "PurchaseBill" r where r."reversalOfId" = a.id and r."isPosted")`)) as any[];
       if (live.length) throw new HttpError(409, "Reverse this bill's additional bills first.");
+    }
+    if (!orig.mainBillId && orig.invoiceType === "IMPORT") {
+      const liveSources = (await tx.execute(sql`
+        select s.id from "PurchaseBill" s
+         where s."importCostForBillId" = ${id} and s."isPosted" and s."reversalOfId" is null
+           and not exists (select 1 from "PurchaseBill" r where r."reversalOfId" = s.id and r."isPosted")
+      `)) as any[];
+      if (liveSources.length) throw new HttpError(409, "Reverse the linked service purchase bills before reversing this import goods bill.");
     }
 
     const date = opts.date ? parseDate(opts.date, "date") : today();
@@ -419,6 +488,10 @@ export function reversePurchaseBill(id: number, actor: Actor, opts: Opts & LockO
 
     if (orig.mainBillId) {
       const ml = await tx.select({ id: S.purchaseBillLine.id }).from(S.purchaseBillLine).where(eq(S.purchaseBillLine.purchaseBillId, orig.mainBillId));
+      await recomputeLanded(tx, ml.map((l) => l.id));
+    }
+    if (orig.importCostForBillId) {
+      const ml = await tx.select({ id: S.purchaseBillLine.id }).from(S.purchaseBillLine).where(eq(S.purchaseBillLine.purchaseBillId, orig.importCostForBillId));
       await recomputeLanded(tx, ml.map((l) => l.id));
     }
     return { reversalBillId: rb.id, invoiceNumber: number, reversalVoucherId: rjv, voucherNumber: rvNumber };

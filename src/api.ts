@@ -123,3 +123,27 @@ export const purchaseApi = {
     req<PWrite>(`/api/purchase/${kind}/${id}/${action}?companyId=${companyId}`, { method: "POST", body: JSON.stringify(body) }),
   billFromChallan: (companyId: number, challanId: number) => req<Record<string, any>>(`/api/purchase/bills/from-challan/${challanId}?companyId=${companyId}`),
 };
+
+export interface ImportAssessmentTermInput {
+  termId: number; calcType?: "PERCENT" | "AMOUNT"; rate?: string | number | null; inputAmount?: string | number | null;
+  isOverridden?: boolean; overrideAmount?: string | number | null; allocationBasis: "VALUE" | "QUANTITY"; capitalizable: boolean;
+}
+export interface ImportAssessmentPreview {
+  goodsValue: string; customsValueFromSources: string; cifValue: string; invoicedCapitalizedCosts: string;
+  existingPurchaseTermCosts: string; assessedNet: string; capitalizedAssessments: string; totalLandedValue: string;
+  lines: { key?: number; id?: number; lineNumber: number; productCode?: string; description?: string; quantity?: string; goodsValue: string; customsValue: string; capitalizedSources: string; existingPurchaseTermCosts: string; capitalizedAssessments: string; landedValue: string; landedRate: string }[];
+  [k: string]: any;
+}
+export const importAssessmentApi = {
+  list: (p: { companyId: number; branchId: number; fiscalYear: string; status?: string; search?: string }) =>
+    req<{ total: number; rows: Record<string, any>[] }>(`/api/purchase/import-assessments?${qstr(p)}`),
+  eligibleImports: (p: { companyId: number; branchId: number; fiscalYear: string }) =>
+    req<{ rows: Record<string, any>[] }>(`/api/purchase/import-assessments/eligible-imports?${qstr(p)}`),
+  get: (id: number, companyId: number) => req<{ document: Record<string, any> }>(`/api/purchase/import-assessments/${id}?companyId=${companyId}`),
+  preview: (body: Record<string, unknown>) => req<{ preview: ImportAssessmentPreview }>('/api/purchase/import-assessments/preview', { method: "POST", body: JSON.stringify(body) }),
+  create: (body: Record<string, unknown>) => req<{ document: Record<string, any> }>('/api/purchase/import-assessments', { method: "POST", body: JSON.stringify(body) }),
+  update: (id: number, companyId: number, body: Record<string, unknown>) => req<{ document: Record<string, any> }>(`/api/purchase/import-assessments/${id}?companyId=${companyId}`, { method: "PUT", body: JSON.stringify(body) }),
+  remove: (id: number, companyId: number, userId: number) => req<{ result: { id: number } }>(`/api/purchase/import-assessments/${id}?${qstr({ companyId, userId })}`, { method: "DELETE" }),
+  apply: (id: number, companyId: number, userId: number) => req<{ document: Record<string, any> }>(`/api/purchase/import-assessments/${id}/apply?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId }) }),
+  reverse: (id: number, companyId: number, userId: number, reason: string) => req<{ document: Record<string, any> }>(`/api/purchase/import-assessments/${id}/reverse?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId, reason }) }),
+};

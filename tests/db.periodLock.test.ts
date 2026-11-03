@@ -10,7 +10,7 @@ describe.skipIf(!DB_READY)("company lock date (database level)", () => {
   let db: any;
   class Rollback extends Error {}
   const NOW = sql`now()`;
-  const COVERED = ["CashBankVoucher", "CashBankVoucherLine", "JournalVoucher", "JournalVoucherLine", "PurchaseBill", "PurchaseBillImportDetail", "PurchaseBillLine", "PurchaseDocumentTerm", "PurchaseDocumentTermAllocation"];
+  const COVERED = ["CashBankVoucher", "CashBankVoucherLine", "JournalVoucher", "JournalVoucherLine", "PurchaseBill", "PurchaseBillImportDetail", "PurchaseBillLine", "PurchaseDocumentTerm", "PurchaseDocumentTermAllocation", "PurchaseImportAssessment", "PurchaseImportAssessmentTerm", "PurchaseImportAssessmentAllocation", "PurchaseImportAssessmentLine"];
   const LOCK = "2025-09-01"; // documents dated 2025-09-01 or earlier are locked
 
   beforeAll(async () => {

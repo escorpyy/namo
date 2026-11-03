@@ -7,7 +7,7 @@ import {
 import { MASTERS } from "../../shared/masters";
 
 // Master-engine ke bahar ki custom screens (grid etc.)
-export const CUSTOM_SCREENS = ["opening-balance", "stock-opening", "purchase-orders", "purchase-challans", "purchase-bills"];
+export const CUSTOM_SCREENS = ["opening-balance", "stock-opening", "purchase-orders", "purchase-challans", "purchase-bills", "purchase-import-assessments"];
 
 type Item = { id: string; label: string; icon: React.ElementType };
 type Section = { id: string; label: string; icon: React.ElementType; items: Item[] };
@@ -52,6 +52,7 @@ const sections: Section[] = [
       { id: "purchase-orders", label: "Purchase Order", icon: ClipboardList },
       { id: "purchase-challans", label: "Purchase Challan", icon: Package },
       { id: "purchase-bills", label: "Purchase Bill", icon: Receipt },
+      { id: "purchase-import-assessments", label: "Import Cost Assessment", icon: FileText },
     ],
   },
   {

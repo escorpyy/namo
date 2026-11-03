@@ -411,6 +411,54 @@ describe.skipIf(!DB_READY)("purchase service layer", () => {
       });
     });
 
+    it("links separate service invoices into import CIF using each source basis, excludes input tax, and reverses cleanly", async () => {
+      await run(async (tx, W) => {
+        const goods = await svc.savePurchaseBill(billIn(W, {
+          invoiceType: "IMPORT", importDetail: { customsDeclarationNo: "CD-CIF-1" },
+        }), ACTOR, { tx });
+        await svc.postPurchaseBill(goods.id, ACTOR, { tx });
+
+        const insurance = await svc.savePurchaseBill(billIn(W, {
+          invoiceType: "LOCAL", purchaseType: "SERVICE_PURCHASE_OTHERS",
+          lines: [{ productId: W.consult.id, qty: 1, rate: 200 }],
+          terms: [{ termId: W.tVat }], // Rs 26 input tax is recoverable and must not be capitalized into CIF.
+          importCostForBillId: goods.id, importCostAllocationBasis: "VALUE",
+        }), ACTOR, { tx });
+        expect(insurance).toMatchObject({ basicAmount: "200.00", termAmount: "26.00", totalAmount: "226.00" });
+        const insurancePost = await svc.postPurchaseBill(insurance.id, ACTOR, { tx });
+        const serviceVoucher = await voucher(tx, insurancePost.journalVoucherId);
+        expect(serviceVoucher.rows).toEqual([
+          { gl: W.purchase, debit: "200.00", credit: "0.00" },
+          { gl: W.vat, debit: "26.00", credit: "0.00" },
+          { gl: W.vendor, debit: "0.00", credit: "226.00" },
+        ]);
+
+        const freight = await svc.savePurchaseBill(billIn(W, {
+          invoiceType: "LOCAL", purchaseType: "SERVICE_PURCHASE_OTHERS",
+          lines: [{ productId: W.consult.id, qty: 1, rate: 300 }],
+          importCostForBillId: goods.id, importCostAllocationBasis: "QUANTITY", importCostTreatment: "LANDED_ONLY",
+        }), ACTOR, { tx });
+        await svc.postPurchaseBill(freight.id, ACTOR, { tx });
+        let lines = await blines(tx, goods.id);
+        expect(lines.map((line) => [n2(line.landedAmount), Number(line.landedRate).toFixed(2)])).toEqual([["1300.00", "130.00"], ["1200.00", "240.00"]]);
+        const { importCostBasis } = await import("../server/services/purchase/importCostBasis");
+        const amount = (micro: bigint) => (Number(micro) / 1_000_000).toFixed(2);
+        let basis = await importCostBasis(tx, goods.id);
+        expect([amount(basis.cifValue), amount(basis.landedValue), amount(basis.cifSourceCost), amount(basis.landedOnlyCost)]).toEqual(["2200.00", "2500.00", "200.00", "300.00"]);
+
+        await svc.reversePurchaseBill(freight.id, ACTOR, { tx, date: "2025-10-20", reason: "Freight invoice corrected" });
+        lines = await blines(tx, goods.id);
+        expect(lines.map((line) => n2(line.landedAmount))).toEqual(["1100.00", "1100.00"]);
+        basis = await importCostBasis(tx, goods.id);
+        expect([amount(basis.cifValue), amount(basis.landedValue)]).toEqual(["2200.00", "2200.00"]);
+        await svc.reversePurchaseBill(insurance.id, ACTOR, { tx, date: "2025-10-21", reason: "Insurance invoice corrected" });
+        lines = await blines(tx, goods.id);
+        expect(lines.map((line) => n2(line.landedAmount))).toEqual(["1000.00", "1000.00"]);
+        basis = await importCostBasis(tx, goods.id);
+        expect([amount(basis.cifValue), amount(basis.landedValue)]).toEqual(["2000.00", "2000.00"]);
+      });
+    });
+
     it("the vendor ledger and sub-ledger are validated", async () => {
       await run(async (tx, W) => {
         await rejects(tx, svc.savePurchaseBill(billIn(W, { vendorGLId: 999999 }), ACTOR, { tx }), 404, /Vendor ledger not found/);

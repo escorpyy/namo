@@ -211,7 +211,8 @@ export async function listPurchaseBills(f: DocListFilter) {
       .select({
         id: B.id, branchId: B.branchId, invoiceNumber: B.invoiceNumber, invoiceDate: B.invoiceDate, fiscalYear: B.fiscalYear, invoiceType: B.invoiceType, purchaseType: B.purchaseType,
         vendorGLId: B.vendorGLId, vendorCode: G.code, vendorName: G.name, vendorInvoiceNo: B.vendorInvoiceNo, dueDate: B.dueDate,
-        mainBillId: B.mainBillId, reversalOfId: B.reversalOfId, isPosted: B.isPosted, reversed: reversedSql(B.id),
+        mainBillId: B.mainBillId, importCostForBillId: B.importCostForBillId, importCostAllocationBasis: B.importCostAllocationBasis,
+        reversalOfId: B.reversalOfId, isPosted: B.isPosted, reversed: reversedSql(B.id),
         basicAmount: B.basicAmount, termAmount: B.termAmount, totalAmount: B.totalAmount,
       })
       .from(B).innerJoin(G, eq(G.id, B.vendorGLId)).where(and(...where)).orderBy(desc(B.invoiceDate), desc(B.id)).limit(capLimit(f.limit));
@@ -227,14 +228,21 @@ export function getPurchaseBill(id: number, companyId: number) {
     const B = S.purchaseBill;
     const [b] = await tx.select().from(B).where(and(eq(B.id, id), eq(B.companyId, companyId)));
     if (!b) throw new HttpError(404, "Purchase bill not found.");
-    const [names, lines, importRow, voucher, reversedBy, main, additional, challan, order] = await Promise.all([
+    const [names, lines, importRow, voucher, reversedBy, main, importTarget, additional, importCostSources, challan, order] = await Promise.all([
       headerNames(tx, b.vendorGLId, b.subLedgerId, b.agentId, b.branchId),
       tx.select().from(S.purchaseBillLine).where(eq(S.purchaseBillLine.purchaseBillId, id)).orderBy(asc(S.purchaseBillLine.lineNumber)),
       tx.select().from(S.purchaseBillImportDetail).where(eq(S.purchaseBillImportDetail.purchaseBillId, id)),
       b.journalVoucherId ? tx.select({ id: S.journalVoucher.id, voucherNumber: S.journalVoucher.voucherNumber, voucherDate: S.journalVoucher.voucherDate }).from(S.journalVoucher).where(eq(S.journalVoucher.id, b.journalVoucherId)) : Promise.resolve([]),
       tx.select({ id: B.id, invoiceNumber: B.invoiceNumber }).from(B).where(and(eq(B.reversalOfId, id), eq(B.isPosted, true))),
       b.mainBillId ? tx.select({ id: B.id, invoiceNumber: B.invoiceNumber }).from(B).where(eq(B.id, b.mainBillId)) : Promise.resolve([]),
+      b.importCostForBillId ? tx.select({ id: B.id, invoiceNumber: B.invoiceNumber }).from(B).where(eq(B.id, b.importCostForBillId)) : Promise.resolve([]),
       tx.select({ id: B.id, invoiceNumber: B.invoiceNumber, isPosted: B.isPosted, totalAmount: B.totalAmount, reversalOfId: B.reversalOfId, reversed: reversedSql(B.id) }).from(B).where(eq(B.mainBillId, id)).orderBy(asc(B.id)),
+      tx.select({
+        id: B.id, invoiceNumber: B.invoiceNumber, invoiceDate: B.invoiceDate, vendorName: S.generalLedger.name,
+        vendorInvoiceNo: B.vendorInvoiceNo, basicAmount: B.basicAmount, importCostAllocationBasis: B.importCostAllocationBasis,
+        importCostTreatment: B.importCostTreatment,
+        isPosted: B.isPosted, reversalOfId: B.reversalOfId, reversed: reversedSql(B.id),
+      }).from(B).innerJoin(S.generalLedger, eq(S.generalLedger.id, B.vendorGLId)).where(eq(B.importCostForBillId, id)).orderBy(asc(B.invoiceDate), asc(B.id)),
       b.purchaseChallanId ? tx.select({ challanNumber: S.purchaseChallan.challanNumber }).from(S.purchaseChallan).where(eq(S.purchaseChallan.id, b.purchaseChallanId)) : Promise.resolve([]),
       b.purchaseOrderId ? tx.select({ orderNumber: S.purchaseOrder.orderNumber }).from(S.purchaseOrder).where(eq(S.purchaseOrder.id, b.purchaseOrderId)) : Promise.resolve([]),
     ]);
@@ -254,6 +262,7 @@ export function getPurchaseBill(id: number, companyId: number) {
       vendorGLId: b.vendorGLId, subLedgerId: b.subLedgerId, agentId: b.agentId, vendorInvoiceNo: b.vendorInvoiceNo, vendorInvoiceDate: iso(b.vendorInvoiceDate),
       purchaseChallanId: b.purchaseChallanId, challanNumber: challan[0]?.challanNumber ?? null, purchaseOrderId: b.purchaseOrderId, orderNumber: order[0]?.orderNumber ?? null,
       mainBillId: b.mainBillId, mainBill: main[0] ?? null, reversalOfId: b.reversalOfId, reversalOf, reversedBy: reversedBy[0] ?? null,
+      importCostForBillId: b.importCostForBillId, importCostTarget: importTarget[0] ?? null, importCostAllocationBasis: b.importCostAllocationBasis,
       dueDays: b.dueDays, dueDate: iso(b.dueDate), remarks: b.remarks,
       isPosted: b.isPosted, postedAt: b.postedAt, state: billState(b.isPosted, b.reversalOfId, reversed),
       journalVoucher: voucher[0] ? { ...voucher[0], voucherDate: iso(voucher[0].voucherDate) } : null,
@@ -277,6 +286,10 @@ export function getPurchaseBill(id: number, companyId: number) {
           }
         : null,
       additionalBills: additional.map(({ reversed: r, ...a }) => ({ ...a, totalAmount: amt(a.totalAmount), state: billState(a.isPosted, a.reversalOfId, r) })),
+      importCostSources: importCostSources.map(({ reversed: r, ...source }) => ({
+        ...source, invoiceDate: iso(source.invoiceDate), basicAmount: amt(source.basicAmount),
+        state: billState(source.isPosted, source.reversalOfId, r), includedInCIF: source.isPosted && source.reversalOfId === null && !r,
+      })),
     };
   });
 }

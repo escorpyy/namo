@@ -13,7 +13,7 @@ describe.skipIf(!DB_READY)("reason required to change a posted document (databas
   let svc: typeof import("../server/services/purchase");
   class Rollback extends Error {}
   const NOW = sql`now()`;
-  const GATED = ["CashBankVoucher", "CashBankVoucherLine", "JournalVoucher", "JournalVoucherLine", "PurchaseBill", "PurchaseBillImportDetail", "PurchaseBillLine", "PurchaseDocumentTerm", "PurchaseDocumentTermAllocation"];
+  const GATED = ["CashBankVoucher", "CashBankVoucherLine", "JournalVoucher", "JournalVoucherLine", "PurchaseBill", "PurchaseBillImportDetail", "PurchaseBillLine", "PurchaseDocumentTerm", "PurchaseDocumentTermAllocation", "PurchaseImportAssessment", "PurchaseImportAssessmentTerm", "PurchaseImportAssessmentAllocation", "PurchaseImportAssessmentLine"];
 
   beforeAll(async () => {
     ({ db } = await import("../server/db"));

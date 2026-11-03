@@ -63,6 +63,24 @@ export const percentOf = (base: Micro, ratePercent: Micro): Micro => roundTo(div
 export const sum = (values: Micro[]): Micro => values.reduce((a, b) => a + b, ZERO);
 export const lineBasicAmount = (qty: Micro, rate: Micro): Micro => roundTo(mul(qty, rate), 2);
 
+/** Allocate an amount in whole paisa, preserving its exact total; ties award the remainder to earlier lines. */
+export function allocateByWeights(amount: Micro, weights: Micro[]): Micro[] {
+  if (weights.length === 0) throw new PurchaseCalculationError("There are no lines to distribute this term over.");
+  if (amount < ZERO) throw new PurchaseCalculationError("The amount to distribute cannot be negative.");
+  if (weights.some((weight) => weight < ZERO)) throw new PurchaseCalculationError("Distribution weights cannot be negative.");
+  const total = sum(weights);
+  if (total === ZERO) throw new PurchaseCalculationError("Cannot distribute a term over lines whose quantity or value is all zero.");
+  const paisa = 10_000n;
+  const units = roundTo(amount, 2) / paisa;
+  const products = weights.map((weight) => units * weight);
+  const shares = products.map((product) => product / total);
+  const remainders = products.map((product) => product % total);
+  let left = units - sum(shares);
+  const order = weights.map((_, index) => index).sort((a, b) => remainders[b] > remainders[a] ? 1 : remainders[b] < remainders[a] ? -1 : a - b);
+  for (let i = 0; left > ZERO; i++, left--) shares[order[i]] += 1n;
+  return shares.map((share) => share * paisa);
+}
+
 export type EngineLine = { key: number; basicAmount: Micro };
 export type EngineTerm = {
   key: number;

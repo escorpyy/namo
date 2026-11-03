@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { createdAt, money, updatedAt } from "./_helpers";
 import {
+  billingAllocationBasisEnum,
   documentTypeEnum,
   importTransportModeEnum,
   purchaseInvoiceTypeEnum,
@@ -129,6 +130,13 @@ export const purchaseBill = pgTable(
     mainBillId: integer().references((): AnyPgColumn => purchaseBill.id, {
       onDelete: "restrict",
     }),
+    // A separate service purchase invoice can contribute to the CIF/landed cost of one import goods bill.
+    // This is deliberately distinct from mainBillId: the service invoice remains a normal, independently-posted bill.
+    importCostForBillId: integer().references((): AnyPgColumn => purchaseBill.id, {
+      onDelete: "restrict",
+    }),
+    importCostAllocationBasis: billingAllocationBasisEnum().notNull().default("VALUE"),
+    importCostTreatment: varchar({ length: 20 }).notNull().default("CIF"),
     reversalOfId: integer().references((): AnyPgColumn => purchaseBill.id, {
       onDelete: "set null",
     }),
@@ -164,6 +172,7 @@ export const purchaseBill = pgTable(
     index("PurchaseBill_subLedgerId_idx").on(t.subLedgerId),
     index("PurchaseBill_agentId_idx").on(t.agentId),
     index("PurchaseBill_mainBillId_idx").on(t.mainBillId),
+    index("PurchaseBill_importCostForBillId_idx").on(t.importCostForBillId),
     index("PurchaseBill_purchaseChallanId_idx").on(t.purchaseChallanId),
     index("PurchaseBill_purchaseOrderId_idx").on(t.purchaseOrderId),
     index("PurchaseBill_purchaseType_idx").on(t.purchaseType),
@@ -183,6 +192,11 @@ export const purchaseBill = pgTable(
       "PurchaseBill_not_own_main_check",
       sql`${t.mainBillId} IS NULL OR ${t.mainBillId} <> ${t.id}`,
     ),
+    check(
+      "PurchaseBill_import_cost_source_check",
+      sql`${t.importCostForBillId} IS NULL OR (${t.mainBillId} IS NULL AND ${t.importCostForBillId} <> ${t.id} AND ${t.purchaseType} IN ('SERVICE_PURCHASE_OTHERS', 'SERVICE_PURCHASE_CAPITAL'))`,
+    ),
+    check("PurchaseBill_import_cost_treatment_check", sql`${t.importCostTreatment} IN ('CIF', 'LANDED_ONLY')`),
     check(
       "PurchaseBill_documentType_check",
       sql`${t.documentType} = 'PURCHASE_BILL'`,
