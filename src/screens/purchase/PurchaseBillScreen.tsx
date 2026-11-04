@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FilePlus2, RotateCcw, Send } from "lucide-react";
+import { ChevronDown, ChevronRight, FilePlus2, RotateCcw, Send } from "lucide-react";
 import { purchaseApi, type PDoc, type PListRow } from "../../api";
 import { Combobox, type ComboOption } from "../../components/Combobox";
-import { COMMON_HELP, DocShell, Field, HINTS, Pill, focusStep, money } from "../../components/purchase/Bits";
+import { COMMON_HELP, DocShell, Field, FormSection, HINTS, Pill, focusStep, money } from "../../components/purchase/Bits";
 import { DateField, TextField, VendorFields } from "../../components/purchase/HeadFields";
 import { LinesGrid, TermsGrid } from "../../components/purchase/LinesGrid";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
@@ -156,6 +156,11 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
 
   // posted main bills that a charge can be added to
   const [mains, setMains] = useState<PListRow[]>([]);
+  // Import / landed-cost detail panels stay collapsed until the user opens them (or existing data forces open once).
+  const [importOpen, setImportOpen] = useState(false);
+  const [landedOpen, setLandedOpen] = useState(false);
+  const importAutoOpened = useRef(false);
+  const landedAutoOpened = useRef(false);
   useEffect(() => {
     purchaseApi.list("bills", { companyId: p.companyId, branchId: p.branchId, fiscalYear: "", status: "POSTED" }).then((r) => setMains(r.rows.filter((x) => !x.isAdditional))).catch(() => {});
   }, [p.companyId, p.branchId, s.doc?.id, s.mode]);
@@ -172,6 +177,19 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
     }
     return o;
   }, [mains, f?.importCostForBillId, doc]);
+
+  // Auto-expand collapsible panels once when the open document already carries data.
+  useEffect(() => {
+    if (!f || f.invoiceType !== "IMPORT") { importAutoOpened.current = false; return; }
+    const hasImp = Object.values(f.imp).some((v) => String(v ?? "").trim() !== "");
+    if (hasImp && !importAutoOpened.current) { setImportOpen(true); importAutoOpened.current = true; }
+  }, [f?.invoiceType, f?.imp, doc?.id]);
+  useEffect(() => {
+    const sources = doc?.importCostSources?.length ?? 0;
+    if (sources > 0 && !landedAutoOpened.current) { setLandedOpen(true); landedAutoOpened.current = true; }
+    if (!doc) landedAutoOpened.current = false;
+  }, [doc?.id, doc?.importCostSources?.length]);
+
   const pickMain = async (id: string) => {
     if (!id) return s.patch({ mainBillId: "" });
     try {
@@ -238,105 +256,161 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
           <div className="flex flex-wrap justify-between gap-x-2 text-[12px] text-slate-500"><span>{r.invoiceDate}</span><span className="tabular-nums whitespace-nowrap">{money(r.totalAmount)}</span></div>
         </>
       )}>
-      {f && lk && (
+      {f && lk && (() => {
+        const liveLines = f.lines.filter((line) => !isBlankLine(line)).length;
+        const liveTerms = f.terms.filter((term) => !isBlankTerm(term)).length;
+        const vendorOk = !!f.vendorGLId;
+        const dateOk = !!f.invoiceDate && !s.err("invoiceDate");
+        const linesOk = isAdditional ? liveTerms > 0 : liveLines > 0;
+        const totalsOk = invoicePreview.status === "ready" || (ro && !!doc);
+        const check = (ok: boolean, label: string) => (
+          <span className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[11px] font-medium ${ok ? "border-green-300 bg-green-50 text-green-800" : "border-slate-300 bg-slate-50 text-slate-600"}`}>
+            <span aria-hidden="true">{ok ? "✓" : "○"}</span>{label}
+          </span>
+        );
+        const impFilled = Object.values(f.imp).filter((v) => String(v ?? "").trim() !== "").length;
+        return (
         <div className="space-y-3 pt-2">
-          <PurchaseInvoiceTotals preview={invoicePreview} savedDoc={doc} readOnly={ro} isAdditional={isAdditional} hasLines={f.lines.some((line) => !isBlankLine(line))} hasTerms={f.terms.some((term) => !isBlankTerm(term))} />
-          <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-x-3 gap-y-2">
-            <Field label="Invoice No"><input disabled className="fld bg-slate-100 text-slate-600" value={doc?.invoiceNumber ?? ""} placeholder="(next number)" aria-label="Invoice number" /></Field>
-            <DateField label="Invoice Date" name="invoiceDate" value={f.invoiceDate} onChange={(v) => { s.patch({ invoiceDate: v }); s.clearError("invoiceDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("invoiceDate")} required />
-            <Field label="Invoice Type">
-              <select data-field="invoiceType" disabled={ro || isAdditional} value={f.invoiceType} onChange={(e) => s.patch({ invoiceType: e.target.value as BForm["invoiceType"] })} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}><option value="LOCAL">Local</option><option value="IMPORT">Import</option></select>
-            </Field>
-            <Field label="Purchase Type" className="col-span-1 sm:col-span-2 2xl:col-span-2">
-              <select data-field="purchaseType" disabled={ro || isAdditional} value={f.purchaseType} onChange={(e) => { const purchaseType = e.target.value; s.patch({ purchaseType, importCostForBillId: purchaseType.startsWith("SERVICE_PURCHASE_") ? f.importCostForBillId : "" }); s.clearError("importCostForBillId"); }} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}>{PURCHASE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select>
-            </Field>
-            <VendorFields lookups={lk} contextKey={String(p.companyId)} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors} lockVendor={!!f.purchaseChallanId || isAdditional}
-              onChange={(c) => { s.patch(c); s.clearError("vendorGLId", "subLedgerId"); }} />
-            <TextField label="Vendor Invoice No" name="vendorInvoiceNo" value={f.vendorInvoiceNo} onChange={(v) => s.patch({ vendorInvoiceNo: v })} readOnly={ro} error={s.err("vendorInvoiceNo")} />
-            <DateField label="Vendor Invoice Date" name="vendorInvoiceDate" value={f.vendorInvoiceDate} onChange={(v) => { s.patch({ vendorInvoiceDate: v }); s.clearError("vendorInvoiceDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("vendorInvoiceDate")} />
-            <TextField label="Due Days" name="dueDays" value={f.dueDays} onChange={(v) => /^\d{0,4}$/.test(v) && s.patch({ dueDays: v })} readOnly={ro} error={s.err("dueDays")} max={4} />
-            <DateField label="Due Date" name="dueDate" value={f.dueDate} onChange={(v) => { s.patch({ dueDate: v }); s.clearError("dueDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("dueDate")} />
-            <Field label="Additional to Bill" error={s.err("mainBillId")}>
-              <Combobox fieldName="mainBillId" placeholder="— (a normal bill)" value={f.mainBillId} hasError={!!s.err("mainBillId")} options={mainOpts} disabled={ro || !!doc || !!f.purchaseChallanId} allowClear onChange={(v) => void pickMain(v)} onCommit={(el, dir) => focusStep(el, dir)} />
-            </Field>
-            {!isAdditional && f.purchaseType.startsWith("SERVICE_PURCHASE_") && (
-              <>
-                <Field label="Cost of goods bill" error={s.err("importCostForBillId")}>
-                  <Combobox fieldName="importCostForBillId" placeholder="— (not linked: stays an expense)" value={f.importCostForBillId} hasError={!!s.err("importCostForBillId")} options={sourceTargetOpts} disabled={ro} allowClear onChange={(value) => { const target = mains.find((x) => String(x.id) === value); s.patch({ importCostForBillId: value, ...(value && target && target.invoiceType !== "IMPORT" ? { importCostTreatment: "LANDED_ONLY" as const } : {}) }); s.clearError("importCostForBillId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
-                </Field>
-                <Field label="Source allocation basis">
-                  <select data-field="importCostAllocationBasis" disabled={ro || !f.importCostForBillId} value={f.importCostAllocationBasis} onChange={(e) => s.patch({ importCostAllocationBasis: e.target.value as BForm["importCostAllocationBasis"] })} className={`fld ${ro || !f.importCostForBillId ? "bg-slate-100 text-slate-600" : ""}`}>
-                    <option value="VALUE">By goods value</option><option value="QUANTITY">By quantity</option>
-                  </select>
-                </Field>
-                <Field label="Cost treatment">
-                  <select data-field="importCostTreatment" disabled={ro || !f.importCostForBillId} value={f.importCostTreatment} onChange={(e) => s.patch({ importCostTreatment: e.target.value as BForm["importCostTreatment"] })} className={`fld ${ro || !f.importCostForBillId ? "bg-slate-100 text-slate-600" : ""}`}>
-                    <option value="CIF">CIF input (pre-customs)</option><option value="LANDED_ONLY">Landed only (post-CIF)</option>
-                  </select>
-                </Field>
-              </>
-            )}
-            <Field label="Challan / Order"><input disabled className="fld bg-slate-100 text-slate-600" value={[f.challanNo && `Challan ${f.challanNo}`, f.orderNo && `Order ${f.orderNo}`].filter(Boolean).join(" · ")} placeholder="—" aria-label="Linked documents" /></Field>
-            <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} className="col-span-1 sm:col-span-2 2xl:col-span-3" error={s.err("remarks")} />
-          </div>
+          <PurchaseInvoiceTotals preview={invoicePreview} savedDoc={doc} readOnly={ro} isAdditional={isAdditional} hasLines={liveLines > 0} hasTerms={liveTerms > 0} />
+
+          {!ro && (
+            <div className="flex flex-wrap items-center gap-1.5 border border-slate-300 bg-slate-50 px-2.5 py-1.5" role="status" aria-label="Post checklist">
+              <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Before post</span>
+              {check(vendorOk, "Vendor")}
+              {check(dateOk, "Date")}
+              {check(linesOk, isAdditional ? "Charges" : "Lines")}
+              {check(totalsOk, "Totals")}
+              {f.invoiceType === "IMPORT" && check(!!String(f.imp.customsDeclarationNo ?? "").trim(), "Customs no")}
+            </div>
+          )}
+
+          <FormSection title="Identity" hint="What kind of bill this is">
+            <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-x-3 gap-y-2">
+              <Field label="Invoice No"><input disabled className="fld bg-slate-100 text-slate-600" value={doc?.invoiceNumber ?? ""} placeholder="(next number)" aria-label="Invoice number" /></Field>
+              <DateField label="Invoice Date" name="invoiceDate" value={f.invoiceDate} onChange={(v) => { s.patch({ invoiceDate: v }); s.clearError("invoiceDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("invoiceDate")} required />
+              <Field label="Invoice Type">
+                <select data-field="invoiceType" disabled={ro || isAdditional} value={f.invoiceType} onChange={(e) => { s.patch({ invoiceType: e.target.value as BForm["invoiceType"] }); if (e.target.value !== "IMPORT") setImportOpen(false); }} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}><option value="LOCAL">Local</option><option value="IMPORT">Import</option></select>
+              </Field>
+              <Field label="Purchase Type">
+                <select data-field="purchaseType" disabled={ro || isAdditional} value={f.purchaseType} onChange={(e) => { const purchaseType = e.target.value; s.patch({ purchaseType, importCostForBillId: purchaseType.startsWith("SERVICE_PURCHASE_") ? f.importCostForBillId : "" }); s.clearError("importCostForBillId"); }} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}>{PURCHASE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select>
+              </Field>
+            </div>
+          </FormSection>
+
+          <FormSection title="Vendor & payment" hint="Who is owed and when">
+            <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-x-3 gap-y-2">
+              <VendorFields lookups={lk} contextKey={String(p.companyId)} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors} lockVendor={!!f.purchaseChallanId || isAdditional}
+                onChange={(c) => { s.patch(c); s.clearError("vendorGLId", "subLedgerId"); }} />
+              <TextField label="Vendor Invoice No" name="vendorInvoiceNo" value={f.vendorInvoiceNo} onChange={(v) => s.patch({ vendorInvoiceNo: v })} readOnly={ro} error={s.err("vendorInvoiceNo")} />
+              <DateField label="Vendor Invoice Date" name="vendorInvoiceDate" value={f.vendorInvoiceDate} onChange={(v) => { s.patch({ vendorInvoiceDate: v }); s.clearError("vendorInvoiceDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("vendorInvoiceDate")} />
+              <TextField label="Due Days" name="dueDays" value={f.dueDays} onChange={(v) => /^\d{0,4}$/.test(v) && s.patch({ dueDays: v })} readOnly={ro} error={s.err("dueDays")} max={4} />
+              <DateField label="Due Date" name="dueDate" value={f.dueDate} onChange={(v) => { s.patch({ dueDate: v }); s.clearError("dueDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("dueDate")} />
+              <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} className="col-span-1 sm:col-span-2" error={s.err("remarks")} />
+            </div>
+          </FormSection>
+
+          <FormSection title="Links" hint="Optional links to other documents — leave blank when not needed">
+            <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-3 gap-y-2">
+              <Field label="Additional to Bill" error={s.err("mainBillId")}>
+                <Combobox fieldName="mainBillId" placeholder="— (a normal bill)" value={f.mainBillId} hasError={!!s.err("mainBillId")} options={mainOpts} disabled={ro || !!doc || !!f.purchaseChallanId} allowClear onChange={(v) => void pickMain(v)} onCommit={(el, dir) => focusStep(el, dir)} />
+              </Field>
+              {!isAdditional && f.purchaseType.startsWith("SERVICE_PURCHASE_") && (
+                <>
+                  <Field label="Cost of goods bill" error={s.err("importCostForBillId")}>
+                    <Combobox fieldName="importCostForBillId" placeholder="— (not linked: stays an expense)" value={f.importCostForBillId} hasError={!!s.err("importCostForBillId")} options={sourceTargetOpts} disabled={ro} allowClear onChange={(value) => { const target = mains.find((x) => String(x.id) === value); s.patch({ importCostForBillId: value, ...(value && target && target.invoiceType !== "IMPORT" ? { importCostTreatment: "LANDED_ONLY" as const } : {}) }); s.clearError("importCostForBillId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
+                  </Field>
+                  <Field label="Source allocation basis">
+                    <select data-field="importCostAllocationBasis" disabled={ro || !f.importCostForBillId} value={f.importCostAllocationBasis} onChange={(e) => s.patch({ importCostAllocationBasis: e.target.value as BForm["importCostAllocationBasis"] })} className={`fld ${ro || !f.importCostForBillId ? "bg-slate-100 text-slate-600" : ""}`}>
+                      <option value="VALUE">By goods value</option><option value="QUANTITY">By quantity</option>
+                    </select>
+                  </Field>
+                  <Field label="Cost treatment">
+                    <select data-field="importCostTreatment" disabled={ro || !f.importCostForBillId} value={f.importCostTreatment} onChange={(e) => s.patch({ importCostTreatment: e.target.value as BForm["importCostTreatment"] })} className={`fld ${ro || !f.importCostForBillId ? "bg-slate-100 text-slate-600" : ""}`}>
+                      <option value="CIF">CIF input (pre-customs)</option><option value="LANDED_ONLY">Landed only (post-CIF)</option>
+                    </select>
+                  </Field>
+                </>
+              )}
+              <Field label="Challan / Order"><input disabled className="fld bg-slate-100 text-slate-600" value={[f.challanNo && `Challan ${f.challanNo}`, f.orderNo && `Order ${f.orderNo}`].filter(Boolean).join(" · ")} placeholder="—" aria-label="Linked documents" /></Field>
+            </div>
+          </FormSection>
 
           {f.invoiceType === "IMPORT" && (
-            <fieldset className="border border-slate-400 bg-white/60 px-3 pt-1 pb-2">
-              <legend className="px-1 text-[12px] font-semibold">Import details <span className="font-normal text-slate-600">(the customs declaration no is needed to post)</span></legend>
-              <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-x-3 gap-y-2">
-                {IMPORT_FIELDS.map((k) => k.kind === "date"
-                  ? <DateField key={k.key} label={k.label} name={`imp.${k.key}`} value={f.imp[k.key] ?? ""} onChange={(v) => { s.patch({ imp: { ...f.imp, [k.key]: v } }); s.clearError(`imp.${k.key}`); }} calendar={p.calendar} readOnly={ro} error={s.err(`imp.${k.key}`)} />
-                  : k.kind === "mode"
-                    ? <Field key={k.key} label={k.label}><select data-field={`imp.${k.key}`} disabled={ro} value={f.imp[k.key] ?? ""} onChange={(e) => s.patch({ imp: { ...f.imp, [k.key]: e.target.value } })} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}><option value="">—</option><option value="ROAD">Road</option><option value="AIR">Air</option><option value="RAIL">Rail</option><option value="OTHER">Other</option></select></Field>
-                    : <TextField key={k.key} label={k.label} name={`imp.${k.key}`} value={f.imp[k.key] ?? ""} onChange={(v) => s.patch({ imp: { ...f.imp, [k.key]: v } })} readOnly={ro} max={k.max ?? 60} error={s.err(`imp.${k.key}`)} />)}
-              </div>
-              {Number(f.imp.exchangeRate) > 0 && Number(f.imp.foreignInvoiceAmount) > 0 && <p className="mt-1 text-[11px] text-slate-600">{(f.imp.currencyCode ?? "").toUpperCase()} {f.imp.foreignInvoiceAmount} × {f.imp.exchangeRate} = NPR <b>{(Math.round(Number(f.imp.foreignInvoiceAmount) * Number(f.imp.exchangeRate) * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}</b>. Enter line rates in NPR (foreign rate × exchange rate).</p>}
-            </fieldset>
+            <section className="rounded-sm border border-slate-300 bg-white/70">
+              <button type="button" className="flex w-full items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-left" onClick={() => setImportOpen((v) => !v)} aria-expanded={importOpen}>
+                {importOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                <span className="text-[12px] font-semibold text-slate-800">Import details</span>
+                <span className="text-[11px] text-slate-500">{impFilled ? `${impFilled} field${impFilled === 1 ? "" : "s"} filled` : "Optional — expand to enter customs, LC, transport, FX"}</span>
+              </button>
+              {importOpen && (
+                <div className="px-3 py-2">
+                  <p className="mb-2 text-[11px] text-slate-600">Customs declaration number is needed to post an import bill. Other fields are optional.</p>
+                  <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-x-3 gap-y-2">
+                    {IMPORT_FIELDS.map((k) => k.kind === "date"
+                      ? <DateField key={k.key} label={k.label} name={`imp.${k.key}`} value={f.imp[k.key] ?? ""} onChange={(v) => { s.patch({ imp: { ...f.imp, [k.key]: v } }); s.clearError(`imp.${k.key}`); }} calendar={p.calendar} readOnly={ro} error={s.err(`imp.${k.key}`)} />
+                      : k.kind === "mode"
+                        ? <Field key={k.key} label={k.label}><select data-field={`imp.${k.key}`} disabled={ro} value={f.imp[k.key] ?? ""} onChange={(e) => s.patch({ imp: { ...f.imp, [k.key]: e.target.value } })} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}><option value="">—</option><option value="ROAD">Road</option><option value="AIR">Air</option><option value="RAIL">Rail</option><option value="OTHER">Other</option></select></Field>
+                        : <TextField key={k.key} label={k.label} name={`imp.${k.key}`} value={f.imp[k.key] ?? ""} onChange={(v) => s.patch({ imp: { ...f.imp, [k.key]: v } })} readOnly={ro} max={k.max ?? 60} error={s.err(`imp.${k.key}`)} />)}
+                  </div>
+                  {Number(f.imp.exchangeRate) > 0 && Number(f.imp.foreignInvoiceAmount) > 0 && <p className="mt-1 text-[11px] text-slate-600">{(f.imp.currencyCode ?? "").toUpperCase()} {f.imp.foreignInvoiceAmount} × {f.imp.exchangeRate} = NPR <b>{(Math.round(Number(f.imp.foreignInvoiceAmount) * Number(f.imp.exchangeRate) * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}</b>. Enter line rates in NPR (foreign rate × exchange rate).</p>}
+                </div>
+              )}
+            </section>
           )}
 
           {!isAdditional && !!doc && String(doc.purchaseType ?? "").startsWith("GOODS_PURCHASE_") && (
-            <fieldset className="border border-sky-300 bg-sky-50/60 px-3 pt-1 pb-2">
-              <legend className="px-1 text-[12px] font-semibold text-sky-950">Linked service costs and landed value</legend>
-              <p className="text-[12px] text-slate-700">Only posted, unreversed service bills are included. Their tax-exclusive Basic Amount is allocated in accounting-currency values; the service bill's tax stays on its own term/ledger. Choose CIF input for costs included before customs duty, or Landed only for costs incurred after CIF. Foreign-currency conversion is not handled here.</p>
-              <div className="mt-1 grid grid-cols-1 gap-2 text-[12px] sm:grid-cols-2 xl:grid-cols-4">
-                <p>Goods basic: <b>{money(doc.basicAmount)}</b></p>
-                <p>CIF service costs: <b>{money(formatImportCost(cifSourceAmount, 2))}</b></p>
-                <p>Landed-only costs: <b>{money(formatImportCost(landedOnlyAmount, 2))}</b></p>
-                <p>CIF base: <b>{money(cifTotal ?? "0")}</b></p>
-              </div>
-              {(doc.importCostSources ?? []).length > 0 ? (
-                <div className="mt-2 overflow-x-auto">
-                  <table className="w-full min-w-[560px] text-left text-[12px]">
-                    <thead><tr className="border-b border-sky-200 text-slate-600"><th className="py-1 pr-3">Service invoice</th><th className="py-1 pr-3">Vendor</th><th className="py-1 pr-3">Source basis</th><th className="py-1 pr-3">Treatment</th><th className="py-1 pr-3 text-right">Basic amount</th><th className="py-1 text-right">Cost status</th></tr></thead>
-                    <tbody>{doc.importCostSources.map((source: any) => <tr key={source.id} className="border-b border-sky-100 last:border-0">
-                      <td className="py-1 pr-3 font-mono">{source.invoiceNumber}{source.vendorInvoiceNo ? ` · ${source.vendorInvoiceNo}` : ""}</td>
-                      <td className="py-1 pr-3">{source.vendorName}</td>
-                      <td className="py-1 pr-3">{source.importCostAllocationBasis === "QUANTITY" ? "Quantity" : "Goods value"}</td>
-                      <td className="py-1 pr-3">{source.importCostTreatment === "LANDED_ONLY" ? "Landed only" : "CIF"}</td>
-                      <td className="py-1 pr-3 text-right tabular-nums">{money(source.basicAmount)}</td>
-                      <td className="py-1 text-right">{source.includedInCIF ? "Included" : source.state.toLowerCase()}</td>
-                    </tr>)}</tbody>
-                  </table>
+            <section className="rounded-sm border border-sky-300 bg-sky-50/40">
+              <button type="button" className="flex w-full items-center gap-2 border-b border-sky-200 bg-sky-50 px-3 py-1.5 text-left" onClick={() => setLandedOpen((v) => !v)} aria-expanded={landedOpen}>
+                {landedOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                <span className="text-[12px] font-semibold text-sky-950">Linked service costs & landed value</span>
+                <span className="text-[11px] text-sky-800/80">{(doc.importCostSources ?? []).length ? `${(doc.importCostSources ?? []).length} linked` : "No service invoices linked yet"}</span>
+              </button>
+              {landedOpen && (
+                <div className="px-3 py-2">
+                  <p className="text-[12px] text-slate-700">Only posted, unreversed service bills are included. Tax-exclusive basic amount is allocated; the service bill&apos;s tax stays on its own term. CIF = before customs; Landed only = after CIF.</p>
+                  <div className="mt-1 grid grid-cols-1 gap-2 text-[12px] sm:grid-cols-2 xl:grid-cols-4">
+                    <p>Goods basic: <b>{money(doc.basicAmount)}</b></p>
+                    <p>CIF service costs: <b>{money(formatImportCost(cifSourceAmount, 2))}</b></p>
+                    <p>Landed-only costs: <b>{money(formatImportCost(landedOnlyAmount, 2))}</b></p>
+                    <p>CIF base: <b>{money(cifTotal ?? "0")}</b></p>
+                  </div>
+                  {(doc.importCostSources ?? []).length > 0 ? (
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="w-full min-w-[560px] text-left text-[12px]">
+                        <thead><tr className="border-b border-sky-200 text-slate-600"><th className="py-1 pr-3">Service invoice</th><th className="py-1 pr-3">Vendor</th><th className="py-1 pr-3">Source basis</th><th className="py-1 pr-3">Treatment</th><th className="py-1 pr-3 text-right">Basic amount</th><th className="py-1 text-right">Cost status</th></tr></thead>
+                        <tbody>{doc.importCostSources.map((source: any) => <tr key={source.id} className="border-b border-sky-100 last:border-0">
+                          <td className="py-1 pr-3 font-mono">{source.invoiceNumber}{source.vendorInvoiceNo ? ` · ${source.vendorInvoiceNo}` : ""}</td>
+                          <td className="py-1 pr-3">{source.vendorName}</td>
+                          <td className="py-1 pr-3">{source.importCostAllocationBasis === "QUANTITY" ? "Quantity" : "Goods value"}</td>
+                          <td className="py-1 pr-3">{source.importCostTreatment === "LANDED_ONLY" ? "Landed only" : "CIF"}</td>
+                          <td className="py-1 pr-3 text-right tabular-nums">{money(source.basicAmount)}</td>
+                          <td className="py-1 text-right">{source.includedInCIF ? "Included" : source.state.toLowerCase()}</td>
+                        </tr>)}</tbody>
+                      </table>
+                    </div>
+                  ) : <p className="mt-1 text-[12px] text-slate-600">No service purchase invoices are linked yet.</p>}
                 </div>
-              ) : <p className="mt-1 text-[12px] text-slate-600">No service purchase invoices are linked yet.</p>}
-            </fieldset>
+              )}
+            </section>
           )}
 
           {!isAdditional && (
-            <>
-              <h2 className="text-[13px] font-semibold">Lines</h2>
+            <FormSection title="Lines" hint="Product, quantity and rate — stock columns appear only when a product needs them">
               <LinesGrid kind="bill" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts />
-            </>
+            </FormSection>
           )}
-          <h2 className="text-[13px] font-semibold">{isAdditional ? "Additional charges" : "Billing Terms"}</h2>
-          <TermsGrid terms={f.terms} onChange={(terms) => s.patch({ terms })} lookups={lk} masters={masters} lineCount={f.lines.filter((l) => !isBlankLine(l)).length} readOnly={ro} errors={s.errors} clearError={s.clearError} contextKey={String(p.companyId)} calculationPreview={ro ? undefined : invoicePreview.terms} previewError={invoicePreview.message} category={isAdditional ? "ADDITIONAL" : undefined} />
-          {s.err("terms") && <p className="text-[12px] text-red-700">{s.err("terms")}</p>}
+          <FormSection title={isAdditional ? "Additional charges" : "Billing terms"} hint={isAdditional ? "At least one charge term is required" : "VAT and other document terms"}>
+            <TermsGrid terms={f.terms} onChange={(terms) => s.patch({ terms })} lookups={lk} masters={masters} lineCount={liveLines} readOnly={ro} errors={s.errors} clearError={s.clearError} contextKey={String(p.companyId)} calculationPreview={ro ? undefined : invoicePreview.terms} previewError={invoicePreview.message} category={isAdditional ? "ADDITIONAL" : undefined} />
+            {s.err("terms") && <p className="mt-1 text-[12px] text-red-700">{s.err("terms")}</p>}
+          </FormSection>
           {ro && doc && !isAdditional && doc.lines.some((l) => Number(l.landedAmount) !== 0) && (
             <p className="text-[12px] text-slate-600">Landed cost per line: {doc.lines.map((l) => `${l.lineNumber}: ${money(l.landedAmount)}`).join(" · ")}</p>
           )}
           {doc && doc.additionalBills?.length > 0 && <p className="text-[12px] text-slate-600">Additional bills: {doc.additionalBills.map((a: any) => `${a.invoiceNumber} (${money(a.totalAmount)}, ${a.state.toLowerCase()})`).join(", ")}</p>}
         </div>
-      )}
+        );
+      })()}
+
     </DocShell>
   );
 }

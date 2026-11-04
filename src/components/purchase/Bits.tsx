@@ -27,6 +27,19 @@ export function Field({ label, error, children, className = "", required }: { la
   );
 }
 
+/** Light visual grouping for dense purchase document headers. */
+export function FormSection({ title, hint, children, className = "" }: { title: string; hint?: string; children: ReactNode; className?: string }) {
+  return (
+    <section className={`min-w-0 rounded-sm border border-slate-300 bg-white/70 ${className}`}>
+      <header className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-slate-200 bg-slate-50 px-3 py-1.5">
+        <h2 className="text-[12px] font-semibold tracking-wide text-slate-800">{title}</h2>
+        {hint && <p className="text-[11px] text-slate-500">{hint}</p>}
+      </header>
+      <div className="px-3 py-2">{children}</div>
+    </section>
+  );
+}
+
 // Moves focus through non-destructive purchase controls in document order. Row deletion stays on native Tab/Shift+Tab and its explicit shortcut.
 export function focusStep(el: Element, dir: 1 | -1) {
   const root = el.closest<HTMLElement>("[data-purchase-document]") ?? document;

@@ -12,16 +12,31 @@ type Errs = Record<string, string | undefined>;
 const decOnly = (re: RegExp, set: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => { if (re.test(e.target.value)) set(e.target.value); };
 const QTY = /^\d{0,12}(\.\d{0,6})?$/, RATE = /^\d{0,12}(\.\d{0,6})?$/, INT = /^\d{0,9}$/;
 
-const COLS: Record<LineKind, string> = {
-  order: "36px minmax(220px,1.6fr) 88px 92px 92px 72px 100px 120px 140px 32px",
-  challan: "36px minmax(230px,1.6fr) 84px 100px 96px 72px 100px 124px 130px 130px 150px 150px minmax(140px,1fr) 32px",
-  bill: "36px minmax(230px,1.6fr) 84px 100px 96px 72px 100px 124px 130px 130px 150px 150px minmax(140px,1fr) 32px",
+type ColKey = "n" | "p" | "aq" | "au" | "q" | "u" | "r" | "amt" | "xd" | "lc" | "b" | "mf" | "ex" | "link" | "rm";
+const COL_SIZE: Record<ColKey, string> = {
+  n: "36px", p: "minmax(230px,1.6fr)", aq: "84px", au: "100px", q: "96px", u: "72px", r: "100px", amt: "124px",
+  xd: "140px", lc: "130px", b: "130px", mf: "150px", ex: "150px", link: "minmax(140px,1fr)", rm: "32px",
 };
-const HEAD: Record<LineKind, string[]> = {
-  order: ["#", "Product", "Alt Qty", "Alt Unit", "Quantity", "Unit", "Rate", "Amount", "Expected", ""],
-  challan: ["#", "Product", "Alt Qty", "Alt Unit", "Quantity", "Unit", "Rate", "Amount", "Location", "Batch", "Mfg Date", "Expiry", "Linked to", ""],
-  bill: ["#", "Product", "Alt Qty", "Alt Unit", "Quantity", "Unit", "Rate", "Amount", "Location", "Batch", "Mfg Date", "Expiry", "Linked to", ""],
+const COL_HEAD: Record<ColKey, string> = {
+  n: "#", p: "Product", aq: "Alt Qty", au: "Alt Unit", q: "Quantity", u: "Unit", r: "Rate", amt: "Amount",
+  xd: "Expected", lc: "Location", b: "Batch", mf: "Mfg Date", ex: "Expiry", link: "Linked to", rm: "",
 };
+const RIGHT_HEAD = new Set(["Alt Qty", "Quantity", "Rate", "Amount"]);
+
+function lineColumns(kind: LineKind, showAlt: boolean, showLoc: boolean, showBatch: boolean, showExpiry: boolean, showLink: boolean): ColKey[] {
+  const cols: ColKey[] = ["n", "p"];
+  if (showAlt) cols.push("aq", "au");
+  cols.push("q", "u", "r", "amt");
+  if (kind === "order") cols.push("xd");
+  if (kind !== "order") {
+    if (showLoc) cols.push("lc");
+    if (showBatch) cols.push("b");
+    if (showExpiry) cols.push("mf", "ex");
+    if (showLink) cols.push("link");
+  }
+  cols.push("rm");
+  return cols;
+}
 
 interface Props {
   kind: LineKind;
@@ -42,6 +57,27 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
   const unitCode = useMemo(() => new Map(lookups.units.map((u) => [u.id, u.code])), [lookups.units]);
   const productOpts = useMemo<ReferenceOption[]>(() => lookups.products.map((p) => ({ value: String(p.id), label: `${p.code} — ${p.description}`, code: p.code, name: p.description, detail: p.type.replaceAll("_", " "), searchText: `${p.type} ${p.tracksBatch ? "batch" : ""} ${p.tracksExpiry ? "expiry" : ""}`, isActive: p.isActive, badge: p.type === "STOCK" ? undefined : p.type.replace("_", " ").toLowerCase() })), [lookups.products]);
   const locOpts = useMemo<ReferenceOption[]>(() => lookups.locations.map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, isActive: l.isActive })), [lookups.locations]);
+  // Only show extra columns when a line product actually needs them (keeps simple bills narrow).
+  const layout = useMemo(() => {
+    let showAlt = false, showLoc = false, showBatch = false, showExpiry = false, showLink = false;
+    for (const row of lines) {
+      const p = products.get(row.productId);
+      if (!p) continue;
+      if (p.alternateUnits?.length) showAlt = true;
+      if (kind !== "order" && p.type === "STOCK") showLoc = true;
+      if (kind !== "order" && p.tracksBatch) showBatch = true;
+      if (kind !== "order" && p.tracksExpiry) showExpiry = true;
+      if (kind !== "order" && row.link) showLink = true;
+    }
+    if (kind !== "order" && lines.some((row) => row.link)) showLink = true;
+    const cols = lineColumns(kind, showAlt, showLoc, showBatch, showExpiry, showLink);
+    return {
+      cols,
+      showAlt, showLoc, showBatch, showExpiry, showLink,
+      template: cols.map((c) => COL_SIZE[c]).join(" "),
+      heads: cols.map((c) => COL_HEAD[c]),
+    };
+  }, [kind, lines, products]);
 
   const patch = (i: number, p: Partial<LineRow>) => { onChange(lines.map((l, k) => (k === i ? { ...l, ...p } : l))); clearError(...Object.keys(errors).filter((k) => k.startsWith(`L.${i}.`)), "lines"); };
   const pick = (i: number, id: string) => {
@@ -94,10 +130,10 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
 
   return (
     <div className="border border-slate-400 bg-white/60">
-      <div className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-blue-700" data-grid="lines" onKeyDown={onKey} tabIndex={0} aria-label={`${kind} line items; scroll horizontally to see all columns`}>
+      <div className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-blue-700" data-grid="lines" onKeyDown={onKey} tabIndex={0} aria-label={`${kind} line items`}>
         <div className="min-w-max">
-          <div style={{ gridTemplateColumns: COLS[kind] }} className="grid gap-x-1 px-2 py-1 text-[11px] font-semibold text-slate-600 border-b border-slate-300 bg-slate-100">
-            {HEAD[kind].map((h, i) => <span key={i} className={["Alt Qty", "Quantity", "Rate", "Amount"].includes(h) ? "text-right pr-2" : ""}>{h}</span>)}
+          <div style={{ gridTemplateColumns: layout.template }} className="grid gap-x-1 px-2 py-1 text-[11px] font-semibold text-slate-600 border-b border-slate-300 bg-slate-100">
+            {layout.heads.map((h, i) => <span key={i} className={RIGHT_HEAD.has(h) ? "text-right pr-2" : ""}>{h}</span>)}
           </div>
           {lines.map((l, i) => {
             const p = products.get(l.productId);
@@ -109,14 +145,17 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
             const unitOpts: ReferenceOption[] = lookups.units.map((u) => ({ value: String(u.id), label: `${u.code} — ${u.name}`, code: u.code, name: u.name, detail: `${u.decimalPlaces} decimal place${u.decimalPlaces === 1 ? "" : "s"}`, isActive: true }));
             const errMsgs = Object.entries(errors).filter(([k, v]) => k.startsWith(`L.${i}.`) && v).map(([, v]) => v!);
             const qtyShown = useAlt ? derivedQty(l, p) : l.qty;
-            const tracked = kind !== "order";
             return (
               <div key={l.key} className={`border-b border-slate-200 ${errMsgs.length ? "bg-red-50" : ""}`}>
-                <div style={{ gridTemplateColumns: COLS[kind] }} className="grid gap-x-1 px-2 py-1 items-center">
+                <div style={{ gridTemplateColumns: layout.template }} className="grid gap-x-1 px-2 py-1 items-center">
                   <span className="text-slate-500 tabular-nums">{i + 1}</span>
                   <MasterReferencePicker fieldName={`L.${i}.p`} label="Product" scopeKey="products" contextKey={contextKey} placeholder="Choose product…" value={l.productId} hasError={bad("p")} options={productOpts} disabled={off || (lockProducts && !!l.link)} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
-                  <input data-field={`L.${i}.aq`} disabled={off || !p || altOpts.length === 0} inputMode="decimal" autoComplete="off" value={l.altQty} placeholder={altOpts.length ? "" : "—"} onChange={decOnly(QTY, (v) => patch(i, { altQty: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("aq", "text-right tabular-nums")} aria-label="Alternate quantity" />
-                  <MasterReferencePicker fieldName={`L.${i}.au`} label="Alternate unit" scopeKey="product-units" contextKey={contextKey} placeholder={altOpts.length ? "Choose unit" : "—"} value={l.altUnitId} hasError={bad("au")} options={altOpts} disabled={off || !p || altOpts.length === 0} onChange={(v) => patch(i, { altUnitId: v })} onCommit={afterCombo} />
+                  {layout.showAlt && (
+                    <>
+                      <input data-field={`L.${i}.aq`} disabled={off || !p || altOpts.length === 0} inputMode="decimal" autoComplete="off" value={l.altQty} placeholder={altOpts.length ? "" : "—"} onChange={decOnly(QTY, (v) => patch(i, { altQty: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("aq", "text-right tabular-nums")} aria-label="Alternate quantity" />
+                      <MasterReferencePicker fieldName={`L.${i}.au`} label="Alternate unit" scopeKey="product-units" contextKey={contextKey} placeholder={altOpts.length ? "Choose unit" : "—"} value={l.altUnitId} hasError={bad("au")} options={altOpts} disabled={off || !p || altOpts.length === 0} onChange={(v) => patch(i, { altUnitId: v })} onCommit={afterCombo} />
+                    </>
+                  )}
                   <input data-field={`L.${i}.q`} disabled={off || !p || useAlt} inputMode="decimal" autoComplete="off" value={useAlt ? trimDec(qtyShown) : l.qty} onChange={decOnly(QTY, (v) => patch(i, { qty: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("q", `text-right tabular-nums ${useAlt ? "bg-slate-100" : ""}`)} aria-label="Quantity" />
                   {p && !p.baseUnitId
                     ? <MasterReferencePicker fieldName={`L.${i}.u`} label="Unit" scopeKey="product-units" contextKey={contextKey} placeholder="Choose unit" value={l.unitId} hasError={bad("u")} options={unitOpts} disabled={off} onChange={(v) => patch(i, { unitId: v })} onCommit={afterCombo} />
@@ -126,15 +165,19 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                   {kind === "order" && (off
                     ? <input disabled className="fld h-8 bg-slate-100 text-slate-600" value={l.expectedDate} aria-label="Expected date" />
                     : <DateInput fieldName={`L.${i}.xd`} value={l.expectedDate} onChange={(v) => patch(i, { expectedDate: v })} calendar={calendar} hasError={bad("xd")} onBlurField={() => {}} compact />)}
-                  {tracked && (
+                  {layout.showLoc && (
+                    <MasterReferencePicker fieldName={`L.${i}.lc`} label="Location" scopeKey="locations" contextKey={contextKey} placeholder={p?.type === "STOCK" ? "Choose location" : "—"} value={l.locationId} hasError={bad("lc")} options={locOpts} disabled={off || p?.type !== "STOCK"} onChange={(v) => patch(i, { locationId: v })} onCommit={afterCombo} />
+                  )}
+                  {layout.showBatch && (
+                    <input data-field={`L.${i}.b`} disabled={off || !p?.tracksBatch} maxLength={50} placeholder={p?.tracksBatch ? "Batch" : "—"} value={l.batchNo} onChange={(e) => patch(i, { batchNo: e.target.value })} onFocus={(e) => e.currentTarget.select()} className={cls("b", !p?.tracksBatch ? "bg-slate-100" : "")} aria-label="Batch no" />
+                  )}
+                  {layout.showExpiry && (
                     <>
-                      <MasterReferencePicker fieldName={`L.${i}.lc`} label="Location" scopeKey="locations" contextKey={contextKey} placeholder={p?.type === "STOCK" ? "Choose location" : "—"} value={l.locationId} hasError={bad("lc")} options={locOpts} disabled={off || p?.type !== "STOCK"} onChange={(v) => patch(i, { locationId: v })} onCommit={afterCombo} />
-                      <input data-field={`L.${i}.b`} disabled={off || !p?.tracksBatch} maxLength={50} placeholder={p?.tracksBatch ? "Batch" : "—"} value={l.batchNo} onChange={(e) => patch(i, { batchNo: e.target.value })} onFocus={(e) => e.currentTarget.select()} className={cls("b", !p?.tracksBatch ? "bg-slate-100" : "")} aria-label="Batch no" />
                       <DateInput fieldName={`L.${i}.mf`} value={l.manufactureDate} onChange={(v) => patch(i, { manufactureDate: v })} calendar={calendar} hasError={bad("mf")} onBlurField={() => {}} compact disabled={off || !p?.tracksExpiry} />
                       <DateInput fieldName={`L.${i}.ex`} value={l.expiryDate} onChange={(v) => patch(i, { expiryDate: v })} calendar={calendar} hasError={bad("ex")} onBlurField={() => {}} compact disabled={off || !p?.tracksExpiry} />
-                      <span className="text-[11px] text-slate-600 break-words leading-tight" title={l.link}>{l.link || "—"}</span>
                     </>
                   )}
+                  {layout.showLink && <span className="text-[11px] text-slate-600 break-words leading-tight" title={l.link}>{l.link || "—"}</span>}
                   <button type="button" data-nav="remove-line" disabled={off} onClick={() => remove(i)} title="Remove line (Shift+Delete)" aria-label="Remove line" className="h-8 w-8 grid place-items-center text-slate-500 hover:text-red-700 focus-visible:outline-2 focus-visible:outline-blue-700 disabled:opacity-30"><X size={14} /></button>
                 </div>
                 {errMsgs.length > 0 && <p className="px-3 pb-1 text-[12px] text-red-700">{errMsgs[0]}</p>}
