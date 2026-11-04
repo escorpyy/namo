@@ -26,8 +26,8 @@ describe.skipIf(!DB_READY)("Import cost assessment (API)", () => {
   };
   const action = async (id: number, name: string, body: Record<string, unknown> = {}) => call("POST", `${api("bills")}/${id}/${name}?companyId=${W.co}`, { userId, ...body });
   const assessmentTerms = () => [
-    { termId: W.duty, calcType: "PERCENT", rate: "10", allocationBasis: "VALUE", capitalizable: true },
-    { termId: W.excise, calcType: "AMOUNT", inputAmount: "50", allocationBasis: "QUANTITY", capitalizable: true },
+    { termId: W.duty, calcType: "PERCENT", rate: "10", allocationBasis: "VALUE", capitalizable: true, againstLedgerId: W.bank },
+    { termId: W.excise, calcType: "AMOUNT", inputAmount: "50", allocationBasis: "QUANTITY", capitalizable: true, againstLedgerId: W.bank },
   ];
 
   beforeAll(async () => {
@@ -43,6 +43,8 @@ describe.skipIf(!DB_READY)("Import cost assessment (API)", () => {
     W.vendor = await gl("VENDOR", "CREDIT");
     W.purchase = await gl("PURCH");
     W.inputTax = await gl("INPUTVAT");
+    W.bank = await gl("BANK");
+    W.exciseGL = await gl("EXCISEGL");
     W.unit = await ins("ProductUnit", { companyId: W.co, code: c("PCS").slice(0, 10), name: "Piece", updatedAt: NOW });
     const group = await ins("ProductGroup", { companyId: W.co, code: c("PG"), name: "Stock", updatedAt: NOW });
     const subGroup = await ins("ProductSubGroup", { code: c("PSG"), name: "Stock", productGroupId: group, updatedAt: NOW });
@@ -52,7 +54,7 @@ describe.skipIf(!DB_READY)("Import cost assessment (API)", () => {
     await ins("NonStockDetail", { productId: W.service, unitId: W.unit, purchaseGLId: W.purchase, salesGLId: W.purchase, updatedAt: NOW });
     W.vat = await ins("PurchaseTerm", { companyId: W.co, code: c("VAT"), name: "Input VAT", nature: "ADDITIVE", sequence: 90, defaultCalcType: "PERCENT", defaultValue: "13", generalLedgerId: W.inputTax, updatedAt: NOW });
     W.duty = await ins("PurchaseTerm", { companyId: W.co, code: c("DUTY"), name: "Import duty", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 10, defaultCalcType: "PERCENT", defaultValue: "10", distributeToLines: true, allocationBasis: "QUANTITY", generalLedgerId: W.purchase, updatedAt: NOW });
-    W.excise = await ins("PurchaseTerm", { companyId: W.co, code: c("EXCISE"), name: "Excise", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 20, defaultCalcType: "AMOUNT", defaultValue: "50", updatedAt: NOW });
+    W.excise = await ins("PurchaseTerm", { companyId: W.co, code: c("EXCISE"), name: "Excise", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 20, defaultCalcType: "AMOUNT", defaultValue: "50", generalLedgerId: W.exciseGL, updatedAt: NOW });
   });
 
   afterAll(async () => {
@@ -83,7 +85,7 @@ describe.skipIf(!DB_READY)("Import cost assessment (API)", () => {
     await close();
   });
 
-  it("previews CIF and assessed charges, applies product-wise valuation without a GL voucher, and reverses cleanly", async () => {
+  it("previews CIF and assessed charges, applies product-wise valuation, posts Dr own ledger / Cr against ledger, and reverses with a mirror voucher", async () => {
     const goods = await createBill({ invoiceType: "IMPORT", purchaseType: "GOODS_PURCHASE_OTHERS", importDetail: { customsDeclarationNo: "CUS-1" }, lines: [
       { productId: W.goods, qty: 10, rate: 100 }, { productId: W.goods, qty: 1, rate: 500 },
     ] });
@@ -125,7 +127,17 @@ describe.skipIf(!DB_READY)("Import cost assessment (API)", () => {
     expect(appliedLines.map((l) => Number(l.landedAmount).toFixed(2))).toEqual(["1433.63", "671.37"]);
     expect(appliedLines.map((l) => l.landedRate)).toEqual(["143.363000", "671.370000"]);
     expect(Number(appliedLines.reduce((total, l) => total + Number(l.landedAmount), 0).toFixed(2))).toBe(Number(applied.body.document.totalLandedValue));
-    expect(Number((await rows(sql`select count(*)::int as n from "JournalVoucher" where "companyId" = ${W.co}`))[0].n)).toBe(beforeVoucherCount);
+    // Applying posted exactly one voucher: Dr duty ledger 180 + Dr excise ledger 50 / Cr Bank 230.
+    expect(Number((await rows(sql`select count(*)::int as n from "JournalVoucher" where "companyId" = ${W.co}`))[0].n)).toBe(beforeVoucherCount + 1);
+    expect(applied.body.document).toMatchObject({ glPosted: true });
+    expect(applied.body.document.voucherNumber).toMatch(/^CA-/);
+    const voucherLines = (voucherId: number) => rows(sql`select "generalLedgerId" as gl, debit::text as dr, credit::text as cr from "JournalVoucherLine" where "journalVoucherId" = ${voucherId} order by "lineNumber"`);
+    const postedLines = await voucherLines(applied.body.document.journalVoucherId);
+    const amountOf = (lines: any[], gl: number, side: "dr" | "cr") => Number(lines.filter((l) => l.gl === gl).reduce((a, l) => a + Number(l[side]), 0).toFixed(2));
+    expect(amountOf(postedLines, W.purchase, "dr")).toBe(180);
+    expect(amountOf(postedLines, W.exciseGL, "dr")).toBe(50);
+    expect(amountOf(postedLines, W.bank, "cr")).toBe(230);
+    expect(postedLines.reduce((a, l) => a + Number(l.dr), 0)).toBe(postedLines.reduce((a, l) => a + Number(l.cr), 0));
 
     const lateAdditional = await createBill({ invoiceType: "LOCAL", mainBillId: goods.id, terms: [{ termId: W.duty, calcType: "AMOUNT", inputAmount: "10" }] });
     let directPostError: any;
@@ -168,8 +180,15 @@ describe.skipIf(!DB_READY)("Import cost assessment (API)", () => {
     expect(blockedPost.status).toBe(409);
     expect(blockedPost.body.message).toMatch(/reverse the applied import-cost assessment/i);
 
-    const reversed = await call("POST", `${api("import-assessments")}/${assessmentId}/reverse?companyId=${W.co}`, { userId, reason: "Correct assessed charge basis" });
+    const vouchersBeforeReverse = Number((await rows(sql`select count(*)::int as n from "JournalVoucher" where "companyId" = ${W.co}`))[0].n);
+    const reversed = await call("POST", `${api("import-assessments")}/${assessmentId}/reverse?companyId=${W.co}`, { userId, reason: "Correct assessed charge basis", date: "2025-10-20" });
     expect(reversed.status, JSON.stringify(reversed.body)).toBe(200);
+    expect(Number((await rows(sql`select count(*)::int as n from "JournalVoucher" where "companyId" = ${W.co}`))[0].n)).toBe(vouchersBeforeReverse + 1);
+    expect(reversed.body.document.reversalVoucherNumber).toMatch(/^R-CA-/);
+    const mirrorLines = await voucherLines(reversed.body.document.reversalVoucherId);
+    expect(amountOf(mirrorLines, W.bank, "dr")).toBe(230);
+    expect(amountOf(mirrorLines, W.purchase, "cr")).toBe(180);
+    expect(amountOf(mirrorLines, W.exciseGL, "cr")).toBe(50);
     expect(reversed.body.document).toMatchObject({ isPosted: true, state: "REVERSED", reversalReason: "Correct assessed charge basis" });
     expect(Number(reversed.body.document.totalLandedValue)).toBe(2105);
     const rolledBackLines = await rows(sql`select "landedAmount" from "PurchaseBillLine" where "purchaseBillId" = ${goods.id} order by "lineNumber"`);

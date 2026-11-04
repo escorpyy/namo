@@ -1,0 +1,4 @@
+ALTER TABLE "PurchaseBillImportDetail" ADD COLUMN "currencyCode" varchar(3);--> statement-breakpoint
+ALTER TABLE "PurchaseBillImportDetail" ADD COLUMN "exchangeRate" numeric(18, 6);--> statement-breakpoint
+ALTER TABLE "PurchaseBillImportDetail" ADD COLUMN "foreignInvoiceAmount" numeric(18, 6);--> statement-breakpoint
+ALTER TABLE "PurchaseBillImportDetail" ADD CONSTRAINT "PurchaseBillImportDetail_currency_check" CHECK (("PurchaseBillImportDetail"."currencyCode" IS NULL AND "PurchaseBillImportDetail"."exchangeRate" IS NULL AND "PurchaseBillImportDetail"."foreignInvoiceAmount" IS NULL) OR ("PurchaseBillImportDetail"."currencyCode" ~ '^[A-Z]{3}$' AND "PurchaseBillImportDetail"."exchangeRate" > 0 AND ("PurchaseBillImportDetail"."foreignInvoiceAmount" IS NULL OR "PurchaseBillImportDetail"."foreignInvoiceAmount" >= 0)));

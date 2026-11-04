@@ -193,7 +193,17 @@ function termMaster(kind: "purchase" | "sales"): MasterDef {
       { name: "allocationBasis", label: "Allocation Basis", type: "select", options: ALLOC_BASIS, showIf: { field: "distributeToLines", in: ["true"] }, requiredIf: { field: "distributeToLines", in: ["true"] } },
     );
   }
-  fields.push(glf("generalLedgerId", "General Ledger"), active());
+  // Every purchase term must have its own ledger (e.g. Import Duty under Direct Expenses): it is where the term posts.
+  fields.push(purchase ? { ...glf("generalLedgerId", "General Ledger"), required: true } : glf("generalLedgerId", "General Ledger"));
+  if (purchase) {
+    fields.push(
+      // Cost assessment (ADDITIONAL terms): does the amount enter the stock value of the goods? Claimable import VAT does not.
+      { name: "affectsStockValue", label: "Affects stock value (landed cost)", type: "checkbox", default: true, showIf: { field: "category", in: ["ADDITIONAL"] } },
+      // Cost assessment: the usual other side of the entry. Only a default; each assessment picks the real one.
+      { ...glf("defaultAgainstLedgerId", "Default Against Ledger"), showIf: { field: "category", in: ["ADDITIONAL"] } },
+    );
+  }
+  fields.push(active());
   return {
     key, title: purchase ? "Purchase Term" : "Sales Term", singular: purchase ? "Purchase Term" : "Sales Term",
     labelFields: ["code", "name"], cols: 2, sortBy: "sequence", sortDir: "asc",

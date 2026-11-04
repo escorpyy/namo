@@ -5,11 +5,18 @@ describe.skipIf(!DB_READY)("Purchase / Sales Term masters (API)", () => {
   let call: (m: string, p: string, b?: unknown) => Promise<Res>;
   let close: () => Promise<void>;
   let companyId = 0;
+  let glA = 0;
+  let glB = 0;
   const created: { key: string; id: number }[] = [];
 
   beforeAll(async () => {
     ({ call, close } = await startApi());
     ({ companyId } = await seededContext(call));
+    // A purchase term must have its own ledger; the seeded demo company has ledgers to pick from.
+    const gls = (await call("GET", `/api/masters/general-ledger?companyId=${companyId}`)).body as { id: number }[];
+    glA = gls[0].id;
+    glB = gls[1].id;
+    purchase.generalLedgerId = glA;
   });
   afterAll(async () => {
     for (const c of created.reverse()) await call("DELETE", `/api/masters/${c.key}/${c.id}`);
@@ -17,7 +24,7 @@ describe.skipIf(!DB_READY)("Purchase / Sales Term masters (API)", () => {
   });
 
   const base = { category: "GENERAL", nature: "ADDITIVE", isProductwise: false, isMandatory: false, defaultCalcType: "PERCENT", defaultValue: 13, calcBase: "ITEM_VALUE", baseTermId: null, generalLedgerId: null, isActive: true };
-  const purchase = { ...base, distributeToLines: false, allocationBasis: null };
+  const purchase: Record<string, unknown> = { ...base, distributeToLines: false, allocationBasis: null, affectsStockValue: true, defaultAgainstLedgerId: null };
   const post = async (key: string, body: Record<string, unknown>) => {
     const r = await call("POST", `/api/masters/${key}?companyId=${companyId}`, body);
     if (r.status === 201) created.push({ key, id: r.body.id });
@@ -38,6 +45,20 @@ describe.skipIf(!DB_READY)("Purchase / Sales Term masters (API)", () => {
     const r = await post(P, { ...purchase, code: `i${tag}`.toLowerCase(), name: "Insurance", sequence: 600 });
     expect(r.status).toBe(201);
     expect(r.body.code).toBe(`I${tag}`);
+  });
+
+  it("a purchase term must have its own general ledger", async () => {
+    const r = await post(P, { ...purchase, code: `L${tag}`, name: "No ledger", sequence: 602, generalLedgerId: null });
+    expect(r.status).toBe(400);
+  });
+
+  it("saves the stock-value flag and a default against ledger, and the against ledger must differ from the term's own ledger", async () => {
+    const ok = await post(P, { ...purchase, code: `V${tag}`, name: "Import VAT", category: "ADDITIONAL", sequence: 603, affectsStockValue: false, defaultAgainstLedgerId: glB });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+    expect(ok.body.affectsStockValue).toBe(false);
+    expect(ok.body.defaultAgainstLedgerId).toBe(glB);
+    const same = await post(P, { ...purchase, code: `W${tag}`, name: "Same ledger", category: "ADDITIONAL", sequence: 604, defaultAgainstLedgerId: glA });
+    expect(same.status).toBe(400);
   });
 
   it("rejects a duplicate code (case-insensitive) with 409", async () => {

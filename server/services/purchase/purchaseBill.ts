@@ -39,6 +39,7 @@ export type ImportDetailInput = Partial<{
   lcNo: string; lcDate: string | Date; lcBankName: string;
   transportMode: "ROAD" | "AIR" | "RAIL" | "OTHER"; blAwbNo: string; blAwbDate: string | Date; transporterName: string; vehicleNo: string; lrNo: string; lrDate: string | Date;
   importPermitNo: string; importPermitDate: string | Date;
+  currencyCode: string; exchangeRate: string | number; foreignInvoiceAmount: string | number;
 }>;
 
 export type PurchaseBillInput = {
@@ -82,13 +83,13 @@ async function lockBill(tx: Tx, id: number) {
 
 async function assertImportCostTarget(tx: Tx, companyId: number, branchId: number, targetId: number) {
   const [target] = await tx.select().from(S.purchaseBill).where(and(eq(S.purchaseBill.id, targetId), eq(S.purchaseBill.companyId, companyId))).for("update");
-  if (!target) throw new HttpError(404, "Import goods bill not found in this company.", "importCostForBillId");
-  if (target.branchId !== branchId) throw new HttpError(400, "Link the service bill to an import goods bill in the same branch.", "importCostForBillId");
-  if (target.invoiceType !== "IMPORT" || !target.purchaseType.startsWith("GOODS_PURCHASE_") || target.mainBillId || target.reversalOfId) {
-    throw new HttpError(400, "Linked service costs must point to a main import goods bill.", "importCostForBillId");
+  if (!target) throw new HttpError(404, "Goods bill not found in this company.", "importCostForBillId");
+  if (target.branchId !== branchId) throw new HttpError(400, "Link the service bill to a goods bill in the same branch.", "importCostForBillId");
+  if (!target.purchaseType.startsWith("GOODS_PURCHASE_") || target.mainBillId || target.reversalOfId) {
+    throw new HttpError(400, "Linked service costs must point to a main goods bill (local or import).", "importCostForBillId");
   }
   const [reversal] = await tx.select({ id: S.purchaseBill.id }).from(S.purchaseBill).where(and(eq(S.purchaseBill.reversalOfId, target.id), eq(S.purchaseBill.isPosted, true)));
-  if (!target.isPosted || reversal) throw new HttpError(409, "Post and keep the import goods bill active before linking service costs.", "importCostForBillId");
+  if (!target.isPosted || reversal) throw new HttpError(409, "Post and keep the goods bill active before linking service costs.", "importCostForBillId");
   return target;
 }
 
@@ -143,8 +144,8 @@ export async function recomputeLanded(tx: Tx, lineIds: number[]) {
   const assessmentAllocation = new Map(assessmentRows.map((r) => [Number(r.id), toMicro(r.amt)]));
   const sourceCostByLine = new Map<number, Micro>();
   for (const billId of new Set(lines.map((line) => line.purchaseBillId))) {
-    const [bill] = await tx.select({ invoiceType: S.purchaseBill.invoiceType, mainBillId: S.purchaseBill.mainBillId }).from(S.purchaseBill).where(eq(S.purchaseBill.id, billId));
-    if (bill?.invoiceType !== "IMPORT" || bill.mainBillId) continue;
+    const [bill] = await tx.select({ purchaseType: S.purchaseBill.purchaseType, mainBillId: S.purchaseBill.mainBillId }).from(S.purchaseBill).where(eq(S.purchaseBill.id, billId));
+    if (!bill?.purchaseType.startsWith("GOODS_PURCHASE_") || bill.mainBillId) continue;
     const basis = await importCostBasis(tx, billId);
     for (const line of basis.lines) sourceCostByLine.set(line.id, (sourceCostByLine.get(line.id) ?? ZERO) + line.sourceCost);
   }
@@ -261,11 +262,19 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
 
     if (input.importDetail && invoiceType === "IMPORT") {
       const d = input.importDetail;
+      const currencyCode = d.currencyCode ? String(d.currencyCode).trim().toUpperCase() : null;
+      const exchangeRate = d.exchangeRate === undefined || d.exchangeRate === null || d.exchangeRate === "" ? null : String(d.exchangeRate);
+      const foreignInvoiceAmount = d.foreignInvoiceAmount === undefined || d.foreignInvoiceAmount === null || d.foreignInvoiceAmount === "" ? null : String(d.foreignInvoiceAmount);
+      if (currencyCode && !/^[A-Z]{3}$/.test(currencyCode)) throw new HttpError(400, "Currency must be a 3-letter code such as USD.", "importDetail");
+      if (currencyCode && (exchangeRate === null || !(Number(exchangeRate) > 0))) throw new HttpError(400, "Enter the exchange rate (NPR per 1 unit of the foreign currency) when a foreign currency is given.", "importDetail");
+      if (!currencyCode && (exchangeRate !== null || foreignInvoiceAmount !== null)) throw new HttpError(400, "Enter the currency code for the exchange rate and foreign amount.", "importDetail");
+      if (foreignInvoiceAmount !== null && !(Number(foreignInvoiceAmount) >= 0)) throw new HttpError(400, "The foreign invoice amount cannot be negative.", "importDetail");
       await tx.insert(S.purchaseBillImportDetail).values({
         purchaseBillId: id, customsDeclarationNo: d.customsDeclarationNo ?? null, customsDeclarationDate: optDate(d.customsDeclarationDate, "customsDeclarationDate"),
         customsOffice: d.customsOffice ?? null, countryOfOrigin: d.countryOfOrigin ?? null, lcNo: d.lcNo ?? null, lcDate: optDate(d.lcDate, "lcDate"), lcBankName: d.lcBankName ?? null,
         transportMode: d.transportMode ?? null, blAwbNo: d.blAwbNo ?? null, blAwbDate: optDate(d.blAwbDate, "blAwbDate"), transporterName: d.transporterName ?? null,
         vehicleNo: d.vehicleNo ?? null, lrNo: d.lrNo ?? null, lrDate: optDate(d.lrDate, "lrDate"), importPermitNo: d.importPermitNo ?? null, importPermitDate: optDate(d.importPermitDate, "importPermitDate"),
+        currencyCode, exchangeRate, foreignInvoiceAmount,
       });
     }
 
@@ -275,10 +284,10 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
   });
 }
 
-type JvRow = { generalLedgerId: number; debit: Micro; credit: Micro; narration: string; agentId?: number | null };
+export type JvRow = { generalLedgerId: number; debit: Micro; credit: Micro; narration: string; agentId?: number | null };
 
 // Same ledger on the same side is one row.
-function mergeRows(rows: JvRow[]): JvRow[] {
+export function mergeRows(rows: JvRow[]): JvRow[] {
   const out = new Map<string, JvRow>();
   for (const r of rows) {
     const k = `${r.generalLedgerId}:${r.debit > ZERO ? "D" : "C"}`;
@@ -401,7 +410,7 @@ const voucherNumberFor = (b: { id: number; invoiceNumber: string; fiscalYear: st
   return n.length <= 30 ? n : `PB-${b.id}`;
 };
 
-async function writeVoucher(tx: Tx, h: { companyId: number; branchId: number; voucherNumber: string; voucherDate: Date; fiscalYear: string; remarks: string; reversalOfId: number | null }, rows: JvRow[], actor: Actor) {
+export async function writeVoucher(tx: Tx, h: { companyId: number; branchId: number; voucherNumber: string; voucherDate: Date; fiscalYear: string; remarks: string; reversalOfId: number | null }, rows: JvRow[], actor: Actor) {
   const [v] = await tx.insert(S.journalVoucher).values({ ...h, isPosted: true, postedAt: new Date(), postedBy: actor.userId, createdBy: actor.userId }).returning({ id: S.journalVoucher.id });
   await withInitialPostedChildInsert(tx, "JournalVoucherLine", v.id, async () => {
     let n = 1;
@@ -421,7 +430,7 @@ export function reversePurchaseBill(id: number, actor: Actor, opts: Opts & LockO
     if (orig.reversalOfId) throw new HttpError(409, "A reversal cannot itself be reversed.");
     const [already] = await tx.select({ id: S.purchaseBill.id }).from(S.purchaseBill).where(and(eq(S.purchaseBill.reversalOfId, id), eq(S.purchaseBill.isPosted, true)));
     if (already) throw new HttpError(409, "This bill has already been reversed.");
-    const assessmentTargetId = orig.importCostForBillId ?? orig.mainBillId ?? (orig.invoiceType === "IMPORT" ? orig.id : null);
+    const assessmentTargetId = orig.importCostForBillId ?? orig.mainBillId ?? (orig.purchaseType.startsWith("GOODS_PURCHASE_") ? orig.id : null);
     if (assessmentTargetId) {
       await tx.select({ id: S.purchaseBill.id }).from(S.purchaseBill).where(eq(S.purchaseBill.id, assessmentTargetId)).for("update");
       const [assessment] = await tx.select({ id: S.purchaseImportAssessment.id }).from(S.purchaseImportAssessment)
@@ -435,13 +444,13 @@ export function reversePurchaseBill(id: number, actor: Actor, opts: Opts & LockO
            and not exists (select 1 from "PurchaseBill" r where r."reversalOfId" = a.id and r."isPosted")`)) as any[];
       if (live.length) throw new HttpError(409, "Reverse this bill's additional bills first.");
     }
-    if (!orig.mainBillId && orig.invoiceType === "IMPORT") {
+    if (!orig.mainBillId && orig.purchaseType.startsWith("GOODS_PURCHASE_")) {
       const liveSources = (await tx.execute(sql`
         select s.id from "PurchaseBill" s
          where s."importCostForBillId" = ${id} and s."isPosted" and s."reversalOfId" is null
            and not exists (select 1 from "PurchaseBill" r where r."reversalOfId" = s.id and r."isPosted")
       `)) as any[];
-      if (liveSources.length) throw new HttpError(409, "Reverse the linked service purchase bills before reversing this import goods bill.");
+      if (liveSources.length) throw new HttpError(409, "Reverse the linked service purchase bills before reversing this goods bill.");
     }
 
     const date = opts.date ? parseDate(opts.date, "date") : today();

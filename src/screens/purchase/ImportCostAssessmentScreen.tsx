@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { FileCheck2, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
 import { ApiError, importAssessmentApi, purchaseApi, type ImportAssessmentPreview, type ImportAssessmentTermInput, type PLookups } from "../../api";
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
@@ -9,16 +9,16 @@ import { toMicro } from "../../../shared/purchase-calculation";
 import type { PurchaseScreenProps } from "./PurchaseOrderScreen";
 
 type Basis = "VALUE" | "QUANTITY";
-type AssessmentTerm = { key: string; termId: string; calcType: "PERCENT" | "AMOUNT"; rate: string; inputAmount: string; allocationBasis: Basis; capitalizable: boolean; isOverridden: boolean; overrideAmount: string };
+type AssessmentTerm = { key: string; termId: string; calcType: "PERCENT" | "AMOUNT"; rate: string; inputAmount: string; allocationBasis: Basis; capitalizable: boolean; isOverridden: boolean; overrideAmount: string; againstLedgerId: string; againstSubLedgerId: string; allocationMode: "AUTO" | "MANUAL"; manual: Record<string, string> };
 type Form = { importBillId: string; assessmentDate: string; referenceNo: string; remarks: string; terms: AssessmentTerm[] };
 type Doc = Record<string, any> & { id: number; isPosted: boolean; state: string; terms: Record<string, any>[] };
 type ImportOption = Record<string, any> & { id: number; invoiceNumber: string; invoiceDate: string };
 const fieldClass = "fld min-w-0";
-const blankTerm = (): AssessmentTerm => ({ key: Math.random().toString(36).slice(2), termId: "", calcType: "AMOUNT", rate: "", inputAmount: "", allocationBasis: "VALUE", capitalizable: true, isOverridden: false, overrideAmount: "" });
+const blankTerm = (): AssessmentTerm => ({ key: Math.random().toString(36).slice(2), termId: "", calcType: "AMOUNT", rate: "", inputAmount: "", allocationBasis: "VALUE", capitalizable: true, isOverridden: false, overrideAmount: "", againstLedgerId: "", againstSubLedgerId: "", allocationMode: "AUTO", manual: {} });
 const safeMoney = (v: unknown) => { try { return formatImportCost(toMicro(String(v ?? "0")), 2); } catch { return "0.00"; } };
 const asForm = (d: Doc): Form => ({
   importBillId: String(d.importBillId ?? ""), assessmentDate: String(d.assessmentDate ?? "").slice(0, 10), referenceNo: d.referenceNo ?? "", remarks: d.remarks ?? "",
-  terms: (d.terms ?? []).map((t: any) => ({ key: String(t.id ?? Math.random()), termId: String(t.termId), calcType: t.calcType ?? "AMOUNT", rate: t.rate ?? "", inputAmount: t.inputAmount ?? "", allocationBasis: t.allocationBasis === "QUANTITY" ? "QUANTITY" : "VALUE", capitalizable: !!t.capitalizable, isOverridden: !!t.isOverridden, overrideAmount: t.overrideAmount ?? "" })),
+  terms: (d.terms ?? []).map((t: any) => ({ key: String(t.id ?? Math.random()), termId: String(t.termId), calcType: t.calcType ?? "AMOUNT", rate: t.rate ?? "", inputAmount: t.inputAmount ?? "", allocationBasis: t.allocationBasis === "QUANTITY" ? "QUANTITY" : "VALUE", capitalizable: !!t.capitalizable, isOverridden: !!t.isOverridden, overrideAmount: t.overrideAmount ?? "", againstLedgerId: t.againstLedgerId ? String(t.againstLedgerId) : "", againstSubLedgerId: t.againstSubLedgerId ? String(t.againstSubLedgerId) : "", allocationMode: t.allocationMode === "MANUAL" ? "MANUAL" : "AUTO", manual: Object.fromEntries((t.manualAmounts ?? []).map((m: any) => [String(m.purchaseBillLineId), String(m.amount)])) })),
 });
 
 export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
@@ -75,7 +75,10 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
   const termOptions: ReferenceOption[] = useMemo(() => masters.filter((t: any) => t.category === "ADDITIONAL").map((t: any) => ({ value: String(t.id), label: `${t.code} — ${t.name}`, code: t.code, name: t.name, detail: `${t.category} · ${t.nature ?? "charge"}${t.distributeToLines ? " · normally capitalized" : ""}`, isActive: t.isActive })), [masters]);
   const importOptions: ReferenceOption[] = useMemo(() => imports.map((b) => ({ value: String(b.id), label: `${b.invoiceNumber} — ${b.invoiceDate}`, code: b.invoiceNumber, name: b.invoiceNumber, detail: `${safeMoney(b.cifValue)} CIF · ${b.lines?.length ?? 0} product lines`, isActive: true })), [imports]);
   const selectedImport = imports.find((b) => String(b.id) === form?.importBillId);
-  const requestTerms = (f: Form): ImportAssessmentTermInput[] => f.terms.filter((t) => t.termId).map((t) => ({ termId: Number(t.termId), calcType: t.calcType, rate: t.calcType === "PERCENT" ? t.rate : undefined, inputAmount: t.calcType === "AMOUNT" ? t.inputAmount : undefined, isOverridden: t.isOverridden, overrideAmount: t.isOverridden ? t.overrideAmount : undefined, allocationBasis: t.allocationBasis, capitalizable: t.capitalizable }));
+  const requestTerms = (f: Form): ImportAssessmentTermInput[] => f.terms.filter((t) => t.termId).map((t) => ({ termId: Number(t.termId), calcType: t.calcType, rate: t.calcType === "PERCENT" ? t.rate : undefined, inputAmount: t.calcType === "AMOUNT" ? t.inputAmount : undefined, isOverridden: t.isOverridden, overrideAmount: t.isOverridden ? t.overrideAmount : undefined, allocationBasis: t.allocationBasis, capitalizable: t.capitalizable,
+    againstLedgerId: t.againstLedgerId ? Number(t.againstLedgerId) : null, againstSubLedgerId: t.againstSubLedgerId ? Number(t.againstSubLedgerId) : null,
+    allocationMode: t.capitalizable ? t.allocationMode : "AUTO",
+    manualAmounts: t.capitalizable && t.allocationMode === "MANUAL" ? Object.entries(t.manual).filter(([, v]) => v !== "").map(([line, amount]) => ({ purchaseBillLineId: Number(line), amount })) : undefined }));
 
   useEffect(() => {
     if (!editing || !form?.importBillId) { if (!editing && doc?.preview) setPreview(doc.preview); return; }
@@ -109,16 +112,17 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
   const updateTerm = (index: number, patch: Partial<AssessmentTerm>) => setForm((f) => f ? ({ ...f, terms: f.terms.map((t, i) => i === index ? { ...t, ...patch } : t) }) : f);
   const selectTerm = (i: number, id: string) => {
     const m: any = termById.get(id);
-    updateTerm(i, { termId: id, calcType: m?.defaultCalcType ?? "AMOUNT", rate: m?.defaultCalcType === "PERCENT" ? m.defaultValue : "", inputAmount: m?.defaultCalcType === "AMOUNT" ? m.defaultValue : "", allocationBasis: m?.allocationBasis === "QUANTITY" ? "QUANTITY" : "VALUE", capitalizable: !!m?.distributeToLines, isOverridden: false, overrideAmount: "" });
+    updateTerm(i, { termId: id, calcType: m?.defaultCalcType ?? "AMOUNT", rate: m?.defaultCalcType === "PERCENT" ? m.defaultValue : "", inputAmount: m?.defaultCalcType === "AMOUNT" ? m.defaultValue : "", allocationBasis: m?.allocationBasis === "QUANTITY" ? "QUANTITY" : "VALUE", capitalizable: m?.affectsStockValue ?? !!m?.distributeToLines, isOverridden: false, overrideAmount: "", againstLedgerId: (m?.lastAgainstLedgerId ?? m?.defaultAgainstLedgerId) ? String(m.lastAgainstLedgerId ?? m.defaultAgainstLedgerId) : "", againstSubLedgerId: "", allocationMode: "AUTO", manual: {} });
   };
   const save = async () => {
     if (!form || busy) return;
     const e: Record<string, string> = {};
-    if (!form.importBillId) e.importBillId = "Choose a posted import goods bill.";
+    if (!form.importBillId) e.importBillId = "Choose a posted goods bill.";
     if (!/^\d{4}-\d{2}-\d{2}$/.test(form.assessmentDate)) e.assessmentDate = "Enter an assessment date in YYYY-MM-DD format.";
     const terms = form.terms.filter((t) => t.termId);
-    if (!terms.length) e.terms = "Add at least one customs or excise charge.";
+    if (!terms.length) e.terms = "Add at least one assessed charge.";
     for (const t of terms) {
+      if (!t.againstLedgerId) e.terms = "Choose the against ledger (cash, bank, or the party owed) for each charge.";
       if (t.calcType === "PERCENT" && (!t.rate || !/^\d+(\.\d{1,4})?$/.test(t.rate))) e.terms = "Enter a valid percentage for each percentage charge.";
       if (t.calcType === "AMOUNT" && (!t.inputAmount || !/^\d+(\.\d{1,6})?$/.test(t.inputAmount))) e.terms = "Enter a valid amount for each amount charge.";
       if (t.isOverridden && (!t.overrideAmount || !/^\d+(\.\d{1,6})?$/.test(t.overrideAmount))) e.terms = "Enter a valid override amount.";
@@ -142,7 +146,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
     setErrors({}); setMessage("Changes discarded");
   };
   const applyAssessment = async () => {
-    if (!doc || dirty || !window.confirm(`Apply assessment ${doc.assessmentNumber}? This freezes the assessment and updates each import product's landed cost. No supplier or GL posting is created.`)) return;
+    if (!doc || dirty || !window.confirm(`Apply assessment ${doc.assessmentNumber}? This freezes it, posts each charge to its own ledger against the chosen against ledger, and updates each product's landed cost.`)) return;
     setBusy(true);
     try { const r = await importAssessmentApi.apply(doc.id, p.companyId, p.userId); const d = r.document as Doc; setDoc(d); setForm(asForm(d)); setPreview(d.preview ?? null); setMessage(`Applied assessment ${d.assessmentNumber}; landed valuation updated.`); await loadList(); await loadImports(lookups); }
     catch (e) { setMessage((e as Error).message); }
@@ -192,30 +196,44 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
         <header className="px-4 pt-3 pb-2 shrink-0">
           <div className="flex items-end gap-3 flex-wrap"><h1 className="text-[22px] font-semibold">Import Cost Assessment</h1><span className="pb-1 text-slate-600">Branch: <b>{p.branchName}</b> · FY <b>{p.fyCode}</b></span>{doc && <span className={`mb-1 rounded-sm px-2 py-0.5 text-xs font-semibold ${stateTone(doc.state)}`}>{doc.state}</span>}{dirty && <span className="pb-1 text-[11px] text-amber-700">Unsaved changes</span>}</div>
           <div className="double-rule mt-1" />
-          <p className="mt-2 text-[12px] text-slate-700" role="status">{message}. This document records assessed costs for landed valuation only; it does not create a supplier invoice, payable, or GL voucher.</p>
+          <p className="mt-2 text-[12px] text-slate-700" role="status">{message}. Applying posts each charge to its own ledger against the ledger you choose (cash, bank or a party), and updates landed valuation. Charges that do not affect stock value are posted but kept out of inventory cost.</p>
         </header>
         <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-3 space-y-3">
           {!lookups || !form ? <p className="text-slate-500 p-2">Loading…</p> : <>
             <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Assessment details">
               <label className="block text-[11px] font-semibold text-slate-600">Assessment date<input data-assessment-field type="date" className={fieldClass} disabled={!editing || busy} value={form.assessmentDate} aria-invalid={!!errors.assessmentDate} onChange={(e) => setForm({ ...form, assessmentDate: e.target.value })} /></label>
-              <div data-assessment-field><MasterReferencePicker fieldName="importBillId" label="Posted import goods bill" value={form.importBillId} options={importOptions} onChange={(v) => setForm({ ...form, importBillId: v })} disabled={!editing || busy || !!doc} hasError={!!errors.importBillId} scopeKey="purchase-bills" contextKey={`${p.companyId}:${p.branchId}`} placeholder="Choose an import bill…" /></div>
+              <div data-assessment-field><MasterReferencePicker fieldName="importBillId" label="Posted goods bill (local or import)" value={form.importBillId} options={importOptions} onChange={(v) => setForm({ ...form, importBillId: v })} disabled={!editing || busy || !!doc} hasError={!!errors.importBillId} scopeKey="purchase-bills" contextKey={`${p.companyId}:${p.branchId}`} placeholder="Choose a goods bill…" /></div>
               <label className="block text-[11px] font-semibold text-slate-600">Customs assessment reference<input data-assessment-field className={fieldClass} maxLength={60} disabled={!editing || busy} value={form.referenceNo} onChange={(e) => setForm({ ...form, referenceNo: e.target.value })} /></label>
               <label className="block text-[11px] font-semibold text-slate-600">Linked goods invoice<input className={`${fieldClass} bg-slate-100`} readOnly aria-readonly="true" value={source ? `${source.invoiceNumber}${source.invoiceDate ? ` · ${source.invoiceDate}` : ""}` : "Choose a posted import bill"} /></label>
             </section>
             {errors.importBillId && <p className="text-xs text-red-700" role="alert">{errors.importBillId}</p>}
             <section className="border border-slate-300 bg-white" aria-label="Assessed charges">
               <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-300"><div><h2 className="font-semibold text-sm">Customs and assessed charges</h2><p className="text-[11px] text-slate-600">Percentages use the CIF base and term sequence from the shared purchase calculation engine.</p></div><button type="button" className="btn" disabled={!editing || busy} onClick={() => setForm({ ...form, terms: [...form.terms, blankTerm()] })}><Plus size={14} /> Add charge</button></div>
-              <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-xs"><thead className="bg-slate-50 text-slate-600"><tr><th className="p-2 text-left">Charge term</th><th className="p-2 text-left">Calculation</th><th className="p-2 text-left">Rate / amount</th><th className="p-2 text-left">Allocate by</th><th className="p-2 text-center">Capitalize</th><th className="p-2 text-right">Calculated</th><th className="p-2" aria-label="Remove" /></tr></thead>
-                <tbody>{form.terms.map((t, i) => { const m: any = termById.get(t.termId); const result = preview?.termResults?.find?.((x: any) => x.termId === Number(t.termId) || x.termId === t.termId) ?? preview?.terms?.find?.((x: any) => x.termId === Number(t.termId)); return <tr key={t.key} className="border-t border-slate-200 align-top">
+              <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-xs"><thead className="bg-slate-50 text-slate-600"><tr><th className="p-2 text-left">Charge term</th><th className="p-2 text-left">Calculation</th><th className="p-2 text-left">Rate / amount</th><th className="p-2 text-left">Allocate by</th><th className="p-2 text-left">Against ledger</th><th className="p-2 text-center">In stock value</th><th className="p-2 text-right">Calculated</th><th className="p-2" aria-label="Remove" /></tr></thead>
+                <tbody>{form.terms.map((t, i) => { const m: any = termById.get(t.termId); const result = preview?.termResults?.find?.((x: any) => x.termId === Number(t.termId) || x.termId === t.termId) ?? preview?.terms?.find?.((x: any) => x.termId === Number(t.termId)); const typed = Object.values(t.manual).reduce((a, v) => { try { return a + Number(v || 0); } catch { return a; } }, 0);
+                  const target = Number(result?.finalAmount ?? 0); const gap = Math.round((target - typed) * 100) / 100;
+                  const subs = (lookups?.subLedgers ?? []).filter((x) => String(x.generalLedgerId) === t.againstLedgerId);
+                  return <Fragment key={t.key}><tr className="border-t border-slate-200 align-top">
                   <td className="p-2 w-[260px]"><MasterReferencePicker fieldName={`terms.${i}.termId`} label={`Charge ${i + 1}`} value={t.termId} options={termOptions} onChange={(v) => selectTerm(i, v)} disabled={!editing || busy} scopeKey="purchase-terms" contextKey={`${p.companyId}:${p.branchId}`} placeholder="Choose customs charge…" hasError={!!errors.terms && !t.termId} /></td>
                   <td className="p-2"><select className={fieldClass} disabled={!editing || busy || !t.termId} aria-label={`Calculation type for charge ${i + 1}`} value={t.calcType} onChange={(e) => updateTerm(i, { calcType: e.target.value as AssessmentTerm["calcType"] })}><option value="PERCENT">Percent</option><option value="AMOUNT">Fixed amount</option></select><div className="mt-1 text-[10px] text-slate-500">{m?.nature ?? "Charge"} · {m?.calcBase ?? "CIF / running total"}</div></td>
                   <td className="p-2"><div className="flex gap-2"><input aria-label={t.calcType === "PERCENT" ? `Rate for charge ${i + 1}` : `Amount for charge ${i + 1}`} className={fieldClass} disabled={!editing || busy || !t.termId} value={t.calcType === "PERCENT" ? t.rate : t.inputAmount} inputMode="decimal" onChange={(e) => updateTerm(i, t.calcType === "PERCENT" ? { rate: e.target.value } : { inputAmount: e.target.value })} placeholder={t.calcType === "PERCENT" ? "Percent" : "Amount"} />{t.isOverridden && <input aria-label={`Override amount for charge ${i + 1}`} className={fieldClass} disabled={!editing || busy} value={t.overrideAmount} inputMode="decimal" onChange={(e) => updateTerm(i, { overrideAmount: e.target.value })} placeholder="Final override" />}</div><label className="mt-1 inline-flex items-center gap-1 text-[10px] text-slate-600"><input type="checkbox" disabled={!editing || busy || !t.termId} checked={t.isOverridden} onChange={(e) => updateTerm(i, { isOverridden: e.target.checked })} /><span>Override calculated amount</span></label>
                   </td>
                   <td className="p-2"><select className={fieldClass} disabled={!editing || busy || !t.capitalizable} aria-label={`Allocation basis for charge ${i + 1}`} value={t.allocationBasis} onChange={(e) => updateTerm(i, { allocationBasis: e.target.value as Basis })}><option value="VALUE">Product value</option><option value="QUANTITY">Quantity</option></select></td>
+                  <td className="p-2 w-[210px]"><select className={fieldClass} disabled={!editing || busy || !t.termId} aria-label={`Against ledger for charge ${i + 1}`} aria-invalid={!!errors.terms && !!t.termId && !t.againstLedgerId} value={t.againstLedgerId} onChange={(e) => updateTerm(i, { againstLedgerId: e.target.value, againstSubLedgerId: "" })}><option value="">Choose…</option>{(lookups?.vendors ?? []).filter((l) => l.isActive && String(l.id) !== String(m?.generalLedgerId)).map((l) => <option key={l.id} value={l.id}>{l.code} — {l.name}</option>)}</select>
+                    {subs.length > 0 && <select className={`${fieldClass} mt-1`} disabled={!editing || busy} aria-label={`Sub-ledger for charge ${i + 1}`} value={t.againstSubLedgerId} onChange={(e) => updateTerm(i, { againstSubLedgerId: e.target.value })}><option value="">Sub-ledger…</option>{subs.map((x) => <option key={x.id} value={x.id}>{x.code} — {x.name}</option>)}</select>}
+                    <div className="mt-1 text-[10px] text-slate-500">Own ledger: {m ? ((lookups?.vendors ?? []).find((l) => l.id === m.generalLedgerId)?.name ?? "—") : "—"}</div></td>
                   <td className="p-2 text-center"><label className="inline-flex items-center gap-1.5"><input aria-label={`Capitalize charge ${i + 1} into inventory`} type="checkbox" disabled={!editing || busy} checked={t.capitalizable} onChange={(e) => updateTerm(i, { capitalizable: e.target.checked })} /><span className="sr-only">Capitalize</span></label></td>
                   <td className="p-2 text-right tabular-nums">{result ? safeMoney(result.finalAmount ?? result.amount) : "—"}</td>
                   <td className="p-2 text-right"><button type="button" className="btn btn-compact" disabled={!editing || busy || form.terms.length === 1} aria-label={`Remove charge ${i + 1}`} onClick={() => setForm({ ...form, terms: form.terms.filter((_, n) => n !== i) })}><Trash2 size={13} /></button></td>
-                </tr>; })}</tbody></table></div>
+                </tr>
+                {t.termId && t.capitalizable && <tr className="bg-slate-50/60"><td colSpan={8} className="px-3 py-1.5">
+                  <label className="inline-flex items-center gap-2 text-[11px] text-slate-700"><span className="font-semibold">Split across products:</span><select className="fld" disabled={!editing || busy} aria-label={`Allocation mode for charge ${i + 1}`} value={t.allocationMode} onChange={(e) => updateTerm(i, { allocationMode: e.target.value as "AUTO" | "MANUAL", manual: e.target.value === "MANUAL" ? t.manual : {} })}><option value="AUTO">Automatic</option><option value="MANUAL">Enter amounts myself</option></select></label>
+                  {t.allocationMode === "MANUAL" && <div className="mt-1.5 flex flex-wrap items-end gap-3">
+                    {lineRows.map((line, n) => { const id = String(line.key ?? line.id); return <label key={id} className="block text-[10px] font-semibold text-slate-600">{line.lineNumber}. {line.productCode ?? line.description ?? `Line ${n + 1}`}<input className="fld w-28 text-right" inputMode="decimal" disabled={!editing || busy} aria-label={`Amount for line ${line.lineNumber}, charge ${i + 1}`} value={t.manual[id] ?? ""} onChange={(e) => updateTerm(i, { manual: { ...t.manual, [id]: e.target.value } })} /></label>; })}
+                    <span className={`pb-1 text-[11px] font-semibold ${gap === 0 ? "text-green-700" : "text-red-700"}`} role="status">{gap === 0 ? "Adds up to the charge" : `Difference ${gap.toFixed(2)} — must be 0 before applying`}</span>
+                  </div>}
+                </td></tr>}
+                </Fragment>; })}</tbody></table></div>
               {errors.terms && <p className="px-3 py-2 text-xs text-red-700" role="alert">{errors.terms}</p>}
             </section>
             <label className="block text-[11px] font-semibold text-slate-600">Notes<textarea data-assessment-field className={`${fieldClass} min-h-16`} maxLength={1024} disabled={!editing || busy} value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} /></label>

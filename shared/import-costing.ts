@@ -39,6 +39,11 @@ export interface ImportAssessmentTermInput {
   allocationBasis: ImportAllocationBasis;
   /** False for recoverable tax or other assessed amounts that must not increase inventory value. */
   capitalizable: boolean;
+  /**
+   * Product-wise amounts typed by the user (line key -> amount). When present they replace the automatic split of this charge;
+   * the engine reports in manualDifference by how much they miss the charge, and the caller decides whether that is acceptable.
+   */
+  manualAmounts?: Map<number, Micro>;
 }
 
 export interface ImportCostLineResult {
@@ -64,6 +69,8 @@ export interface ImportCostingResult {
   lines: Map<number, ImportCostLineResult>;
   sourceAllocations: Map<string, Map<number, Micro>>;
   termAllocations: Map<number, Map<number, Micro>>;
+  /** Charge amount minus the sum of its manual product-wise amounts; only set for charges split by hand. Zero means it ties. */
+  manualDifference: Map<number, Micro>;
   termResults: ReturnType<typeof priceTerms>["results"];
 }
 
@@ -139,6 +146,7 @@ export function calculateImportCosting(
   const priced = priceTerms(cifLines, assessmentTerms.map((row) => row.term));
   const capitalizedAssessmentsByLine = new Map(lines.map((line) => [line.key, ZERO]));
   const termAllocations = new Map<number, Map<number, Micro>>();
+  const manualDifference = new Map<number, Micro>();
   let capitalizedAssessments = ZERO;
 
   for (const row of assessmentTerms) {
@@ -146,7 +154,18 @@ export function calculateImportCosting(
     if (!row.capitalizable) continue;
     const sign = row.term.nature === "ADDITIVE" ? 1n : -1n;
     const amount = result.finalAmount;
-    const parts = split(amount, weightsFor(lines, row.allocationBasis)).map((part) => part * sign);
+    let parts: Micro[];
+    if (row.manualAmounts) {
+      for (const [lineKey, value] of row.manualAmounts) {
+        if (!lineKeys.has(lineKey)) throw new Error("A manual amount points to a line that is not on this bill.");
+        if (value < ZERO) throw new Error("Manual product-wise amounts cannot be negative.");
+      }
+      const entered = lines.map((line) => roundTo(row.manualAmounts!.get(line.key) ?? ZERO, 2));
+      manualDifference.set(row.term.key, amount - sum(entered));
+      parts = entered.map((part) => part * sign);
+    } else {
+      parts = split(amount, weightsFor(lines, row.allocationBasis)).map((part) => part * sign);
+    }
     const allocations = new Map<number, Micro>();
     for (let i = 0; i < lines.length; i++) {
       const key = lines[i].key;
@@ -154,7 +173,7 @@ export function calculateImportCosting(
       allocations.set(key, parts[i]);
     }
     termAllocations.set(row.term.key, allocations);
-    capitalizedAssessments += amount * sign;
+    capitalizedAssessments += sum(parts); // the lines' own total, so the header always equals the sum of the lines
   }
 
   const lineResults = new Map<number, ImportCostLineResult>();
@@ -191,6 +210,7 @@ export function calculateImportCosting(
     lines: lineResults,
     sourceAllocations,
     termAllocations,
+    manualDifference,
     termResults: priced.results,
   };
 }

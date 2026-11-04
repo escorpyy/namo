@@ -24,6 +24,8 @@ const IMPORT_FIELDS: { key: string; label: string; kind: "text" | "date" | "mode
   { key: "transportMode", label: "Transport Mode", kind: "mode" }, { key: "blAwbNo", label: "BL / AWB No", kind: "text" }, { key: "blAwbDate", label: "BL / AWB Date", kind: "date" },
   { key: "transporterName", label: "Transporter", kind: "text" }, { key: "vehicleNo", label: "Vehicle No", kind: "text" }, { key: "lrNo", label: "LR No", kind: "text" }, { key: "lrDate", label: "LR Date", kind: "date" },
   { key: "importPermitNo", label: "Import Permit No", kind: "text" }, { key: "importPermitDate", label: "Permit Date", kind: "date" },
+  // Optional foreign currency: amounts on the bill stay in NPR; these record how they were converted.
+  { key: "currencyCode", label: "Foreign Currency (optional, e.g. USD)", kind: "text", max: 3 }, { key: "exchangeRate", label: "Exchange Rate (NPR per 1 unit)", kind: "text", max: 20 }, { key: "foreignInvoiceAmount", label: "Invoice Total in Foreign Currency", kind: "text", max: 20 },
 ];
 const PURCHASE_TYPES = [
   { value: "GOODS_PURCHASE_OTHERS", label: "Goods — Others" }, { value: "GOODS_PURCHASE_CAPITAL", label: "Goods — Capital" },
@@ -83,7 +85,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
       e.vendorInvoiceDate = dateErr("Vendor invoice date", f.vendorInvoiceDate);
       e.dueDate = dateErr("Due date", f.dueDate);
       if (f.dueDays && !/^\d{1,4}$/.test(f.dueDays)) e.dueDays = "Due days must be a whole number.";
-      if (f.importCostForBillId && (f.mainBillId || !f.purchaseType.startsWith("SERVICE_PURCHASE_"))) e.importCostForBillId = "Only a normal service purchase bill can be linked as an import-cost source.";
+      if (f.importCostForBillId && (f.mainBillId || !f.purchaseType.startsWith("SERVICE_PURCHASE_"))) e.importCostForBillId = "Only a normal service purchase bill can be linked to a goods bill as a cost.";
       for (const k of IMPORT_FIELDS) if (f.invoiceType === "IMPORT" && k.kind === "date") { const m = dateErr(k.label, f.imp[k.key] ?? ""); if (m) e[`imp.${k.key}`] = m; }
       const live = f.lines.filter((l) => !isBlankLine(l)).length;
       if (f.mainBillId) { if (!f.terms.some((t) => !isBlankTerm(t))) e.terms = "An additional bill needs at least one charge (term)."; }
@@ -163,8 +165,8 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
     return o;
   }, [mains, f?.mainBillId, doc]);
   const sourceTargetOpts = useMemo<ComboOption[]>(() => {
-    const o = mains.filter((x) => x.invoiceType === "IMPORT" && String(x.purchaseType).startsWith("GOODS_PURCHASE_") && !x.isAdditional)
-      .map((x) => ({ value: String(x.id), label: `${x.invoiceNumber} — ${x.vendorName} (${x.invoiceDate})` }));
+    const o = mains.filter((x) => String(x.purchaseType).startsWith("GOODS_PURCHASE_") && !x.isAdditional)
+      .map((x) => ({ value: String(x.id), label: `${x.invoiceNumber} — ${x.vendorName} (${x.invoiceDate})${x.invoiceType === "IMPORT" ? " · import" : " · local"}` }));
     if (f?.importCostForBillId && !o.some((x) => x.value === f.importCostForBillId) && doc?.importCostTarget) {
       o.push({ value: f.importCostForBillId, label: doc.importCostTarget.invoiceNumber });
     }
@@ -259,8 +261,8 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
             </Field>
             {!isAdditional && f.purchaseType.startsWith("SERVICE_PURCHASE_") && (
               <>
-                <Field label="Import cost of" error={s.err("importCostForBillId")}>
-                  <Combobox fieldName="importCostForBillId" placeholder="— (not linked to an import)" value={f.importCostForBillId} hasError={!!s.err("importCostForBillId")} options={sourceTargetOpts} disabled={ro} onChange={(value) => { s.patch({ importCostForBillId: value }); s.clearError("importCostForBillId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
+                <Field label="Cost of goods bill" error={s.err("importCostForBillId")}>
+                  <Combobox fieldName="importCostForBillId" placeholder="— (not linked: stays an expense)" value={f.importCostForBillId} hasError={!!s.err("importCostForBillId")} options={sourceTargetOpts} disabled={ro} onChange={(value) => { const target = mains.find((x) => String(x.id) === value); s.patch({ importCostForBillId: value, ...(value && target && target.invoiceType !== "IMPORT" ? { importCostTreatment: "LANDED_ONLY" as const } : {}) }); s.clearError("importCostForBillId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
                 </Field>
                 <Field label="Source allocation basis">
                   <select data-field="importCostAllocationBasis" disabled={ro || !f.importCostForBillId} value={f.importCostAllocationBasis} onChange={(e) => s.patch({ importCostAllocationBasis: e.target.value as BForm["importCostAllocationBasis"] })} className={`fld ${ro || !f.importCostForBillId ? "bg-slate-100 text-slate-600" : ""}`}>
@@ -288,12 +290,13 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
                     ? <Field key={k.key} label={k.label}><select data-field={`imp.${k.key}`} disabled={ro} value={f.imp[k.key] ?? ""} onChange={(e) => s.patch({ imp: { ...f.imp, [k.key]: e.target.value } })} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}><option value="">—</option><option value="ROAD">Road</option><option value="AIR">Air</option><option value="RAIL">Rail</option><option value="OTHER">Other</option></select></Field>
                     : <TextField key={k.key} label={k.label} name={`imp.${k.key}`} value={f.imp[k.key] ?? ""} onChange={(v) => s.patch({ imp: { ...f.imp, [k.key]: v } })} readOnly={ro} max={k.max ?? 60} error={s.err(`imp.${k.key}`)} />)}
               </div>
+              {Number(f.imp.exchangeRate) > 0 && Number(f.imp.foreignInvoiceAmount) > 0 && <p className="mt-1 text-[11px] text-slate-600">{(f.imp.currencyCode ?? "").toUpperCase()} {f.imp.foreignInvoiceAmount} × {f.imp.exchangeRate} = NPR <b>{(Math.round(Number(f.imp.foreignInvoiceAmount) * Number(f.imp.exchangeRate) * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}</b>. Enter line rates in NPR (foreign rate × exchange rate).</p>}
             </fieldset>
           )}
 
-          {!isAdditional && doc?.invoiceType === "IMPORT" && (
+          {!isAdditional && !!doc && String(doc.purchaseType ?? "").startsWith("GOODS_PURCHASE_") && (
             <fieldset className="border border-sky-300 bg-sky-50/60 px-3 pt-1 pb-2">
-              <legend className="px-1 text-[12px] font-semibold text-sky-950">Import cost sources and CIF / landed value</legend>
+              <legend className="px-1 text-[12px] font-semibold text-sky-950">Linked service costs and landed value</legend>
               <p className="text-[12px] text-slate-700">Only posted, unreversed service bills are included. Their tax-exclusive Basic Amount is allocated in accounting-currency values; the service bill's tax stays on its own term/ledger. Choose CIF input for costs included before customs duty, or Landed only for costs incurred after CIF. Foreign-currency conversion is not handled here.</p>
               <div className="mt-1 grid grid-cols-1 gap-2 text-[12px] sm:grid-cols-2 xl:grid-cols-4">
                 <p>Goods basic: <b>{money(doc.basicAmount)}</b></p>

@@ -6,6 +6,7 @@ import {
   date,
   index,
   integer,
+  numeric,
   pgTable,
   serial,
   timestamp,
@@ -334,6 +335,12 @@ export const purchaseBillImportDetail = pgTable(
     // No duty / excise / VAT amounts here: those are purchase terms on the
     // additional purchase (PurchaseDocumentTerm), not columns.
 
+    // Optional foreign currency (reference for the NPR figures on the bill, which are always entered in the company currency):
+    // currency, the customs exchange rate used to convert, and the invoice total in that currency.
+    currencyCode: varchar({ length: 3 }),
+    exchangeRate: numeric({ precision: 18, scale: 6 }),
+    foreignInvoiceAmount: money(),
+
     // Payment: letter of credit
     lcNo: varchar({ length: 30 }),
     lcDate: date({ mode: "date" }),
@@ -364,5 +371,6 @@ export const purchaseBillImportDetail = pgTable(
     index("PurchaseBillImportDetail_customsDeclarationNo_idx").on(
       t.customsDeclarationNo,
     ),
+    check("PurchaseBillImportDetail_currency_check", sql`(${t.currencyCode} IS NULL AND ${t.exchangeRate} IS NULL AND ${t.foreignInvoiceAmount} IS NULL) OR (${t.currencyCode} ~ '^[A-Z]{3}$' AND ${t.exchangeRate} > 0 AND (${t.foreignInvoiceAmount} IS NULL OR ${t.foreignInvoiceAmount} >= 0))`),
   ],
 );

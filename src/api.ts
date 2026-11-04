@@ -95,7 +95,7 @@ export interface PLookups {
     tracksBatch: boolean; tracksExpiry: boolean; defaultLocationId: number | null; alternateUnits: { unitId: number; conversionFactor: string }[];
   }[];
   terms: {
-    id: number; code: string; name: string; category: "GENERAL" | "ADDITIONAL"; nature: "ADDITIVE" | "DEDUCTIVE"; isProductwise: boolean; isMandatory: boolean;
+    id: number; code: string; name: string; generalLedgerId?: number | null; affectsStockValue?: boolean; defaultAgainstLedgerId?: number | null; lastAgainstLedgerId?: number | null; allocationBasis?: string; category: "GENERAL" | "ADDITIONAL"; nature: "ADDITIVE" | "DEDUCTIVE"; isProductwise: boolean; isMandatory: boolean;
     sequence: number; defaultCalcType: "PERCENT" | "AMOUNT"; defaultValue: string; calcBase: "ITEM_VALUE" | "RUNNING_TOTAL" | "SINGLE_TERM"; baseTermId: number | null; distributeToLines: boolean; isActive: boolean;
   }[];
   fiscalYears: { id: number; code: string; startDate: string; endDate: string; isActive: boolean; isClosed: boolean; isCurrent: boolean }[];
@@ -127,6 +127,7 @@ export const purchaseApi = {
 export interface ImportAssessmentTermInput {
   termId: number; calcType?: "PERCENT" | "AMOUNT"; rate?: string | number | null; inputAmount?: string | number | null;
   isOverridden?: boolean; overrideAmount?: string | number | null; allocationBasis: "VALUE" | "QUANTITY"; capitalizable: boolean;
+  againstLedgerId?: number | null; againstSubLedgerId?: number | null; allocationMode?: "AUTO" | "MANUAL"; manualAmounts?: { purchaseBillLineId: number; amount: string }[];
 }
 export interface ImportAssessmentPreview {
   goodsValue: string; customsValueFromSources: string; cifValue: string; invoicedCapitalizedCosts: string;

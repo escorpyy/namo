@@ -95,6 +95,16 @@ export const purchaseTerm = pgTable(
       onDelete: "restrict",
     }),
 
+    // Cost assessment. Does this term's amount enter the stock value of the goods (landed cost)? Import VAT that can be
+    // claimed as input credit does not; duty and agent charges do. A document may override this per row (VAT that cannot
+    // be claimed is part of the cost).
+    affectsStockValue: boolean().notNull().default(true),
+    // Cost assessment. The usual other side of the entry (Bank, Customs Payable, ...). Only a default: the document picks
+    // the real one (Cash A/c, an agent's account, ...).
+    defaultAgainstLedgerId: integer().references(() => generalLedger.id, {
+      onDelete: "restrict",
+    }),
+
     isActive: boolean().notNull().default(true),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -103,6 +113,7 @@ export const purchaseTerm = pgTable(
     uniqueIndex("PurchaseTerm_companyId_code_key").on(t.companyId, t.code),
     index("PurchaseTerm_companyId_idx").on(t.companyId),
     index("PurchaseTerm_generalLedgerId_idx").on(t.generalLedgerId),
+    index("PurchaseTerm_defaultAgainstLedgerId_idx").on(t.defaultAgainstLedgerId),
     check(
       "PurchaseTerm_base_term_check",
       sql`(${t.calcBase} = 'SINGLE_TERM') = (${t.baseTermId} IS NOT NULL)`,

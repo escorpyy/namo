@@ -196,6 +196,11 @@ const CFG: Record<string, ServerCfg> = {
         const [g] = await db.select({ c: S.generalLedger.companyId }).from(S.generalLedger).where(eq(S.generalLedger.id, data.generalLedgerId));
         if (g?.c !== companyId) throw new HttpError(400, "General Ledger not found in this company.", "generalLedgerId");
       }
+      if (data.defaultAgainstLedgerId != null) {
+        const [g] = await db.select({ c: S.generalLedger.companyId }).from(S.generalLedger).where(eq(S.generalLedger.id, data.defaultAgainstLedgerId));
+        if (g?.c !== companyId) throw new HttpError(400, "Default Against Ledger not found in this company.", "defaultAgainstLedgerId");
+        if (data.defaultAgainstLedgerId === data.generalLedgerId) throw new HttpError(400, "The against ledger must differ from the term's own ledger.", "defaultAgainstLedgerId");
+      }
       if (data.calcBase === "SINGLE_TERM") {
         if (data.baseTermId == null) throw new HttpError(400, "Base Term is required when Calc Base is SINGLE TERM.", "baseTermId");
         if (id != null && data.baseTermId === id) throw new HttpError(400, "A term cannot use itself as Base Term.", "baseTermId");

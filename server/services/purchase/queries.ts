@@ -283,6 +283,7 @@ export function getPurchaseBill(id: number, companyId: number) {
             customsDeclarationNo: d.customsDeclarationNo, customsDeclarationDate: iso(d.customsDeclarationDate), customsOffice: d.customsOffice, countryOfOrigin: d.countryOfOrigin,
             lcNo: d.lcNo, lcDate: iso(d.lcDate), lcBankName: d.lcBankName, transportMode: d.transportMode, blAwbNo: d.blAwbNo, blAwbDate: iso(d.blAwbDate),
             transporterName: d.transporterName, vehicleNo: d.vehicleNo, lrNo: d.lrNo, lrDate: iso(d.lrDate), importPermitNo: d.importPermitNo, importPermitDate: iso(d.importPermitDate),
+            currencyCode: d.currencyCode, exchangeRate: d.exchangeRate, foreignInvoiceAmount: d.foreignInvoiceAmount,
           }
         : null,
       additionalBills: additional.map(({ reversed: r, ...a }) => ({ ...a, totalAmount: amt(a.totalAmount), state: billState(a.isPosted, a.reversalOfId, r) })),
@@ -322,6 +323,9 @@ export function purchaseLookups(companyId: number) {
       tx.select({ id: S.fiscalYear.id, code: S.fiscalYear.code, startDate: S.fiscalYear.startDate, endDate: S.fiscalYear.endDate, isActive: S.fiscalYear.isActive, isClosed: S.fiscalYear.isClosed, isCurrent: S.fiscalYear.isCurrent }).from(S.fiscalYear).where(eq(S.fiscalYear.companyId, companyId)).orderBy(desc(S.fiscalYear.startDate)),
       tx.select({ id: S.productUnit.id, code: S.productUnit.code, name: S.productUnit.name, decimalPlaces: S.productUnit.decimalPlaces }).from(S.productUnit).where(eq(S.productUnit.companyId, companyId)).orderBy(asc(S.productUnit.code)),
     ]);
+    // The against ledger last used for each charge in an assessment, offered next time (a user-chosen value beats the master default).
+    const lastUsed = await tx.execute(sql`select distinct on ("termId") "termId" as term_id, "againstLedgerId" as ledger_id from "PurchaseImportAssessmentTerm" where "companyId" = ${companyId} and "againstLedgerId" is not null order by "termId", id desc`) as unknown as { term_id: number; ledger_id: number }[];
+    const lastAgainst = new Map(lastUsed.map((r) => [Number(r.term_id), Number(r.ledger_id)]));
     const altBy = new Map<number, { unitId: number; conversionFactor: string }[]>();
     for (const a of alts) altBy.set(a.stockDetailId, [...(altBy.get(a.stockDetailId) ?? []), { unitId: a.unitId, conversionFactor: a.conversionFactor }]);
     return {
@@ -330,6 +334,7 @@ export function purchaseLookups(companyId: number) {
       terms: terms.map((t) => ({
         id: t.id, code: t.code, name: t.name, category: t.category, nature: t.nature, isProductwise: t.isProductwise, isMandatory: t.isMandatory, sequence: t.sequence,
         defaultCalcType: t.defaultCalcType, defaultValue: t.defaultValue, calcBase: t.calcBase, baseTermId: t.baseTermId, distributeToLines: t.distributeToLines, isActive: t.isActive,
+        generalLedgerId: t.generalLedgerId, affectsStockValue: t.affectsStockValue, defaultAgainstLedgerId: t.defaultAgainstLedgerId, lastAgainstLedgerId: lastAgainst.get(t.id) ?? null, allocationBasis: t.allocationBasis,
       })),
       fiscalYears: years.map((y) => ({ ...y, startDate: iso(y.startDate), endDate: iso(y.endDate) })),
     };
