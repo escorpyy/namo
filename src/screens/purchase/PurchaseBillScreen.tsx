@@ -257,12 +257,12 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
             <TextField label="Due Days" name="dueDays" value={f.dueDays} onChange={(v) => /^\d{0,4}$/.test(v) && s.patch({ dueDays: v })} readOnly={ro} error={s.err("dueDays")} max={4} />
             <DateField label="Due Date" name="dueDate" value={f.dueDate} onChange={(v) => { s.patch({ dueDate: v }); s.clearError("dueDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("dueDate")} />
             <Field label="Additional to Bill" error={s.err("mainBillId")}>
-              <Combobox fieldName="mainBillId" placeholder="— (a normal bill)" value={f.mainBillId} hasError={!!s.err("mainBillId")} options={mainOpts} disabled={ro || !!doc || !!f.purchaseChallanId} onChange={(v) => void pickMain(v)} onCommit={(el, dir) => focusStep(el, dir)} />
+              <Combobox fieldName="mainBillId" placeholder="— (a normal bill)" value={f.mainBillId} hasError={!!s.err("mainBillId")} options={mainOpts} disabled={ro || !!doc || !!f.purchaseChallanId} allowClear onChange={(v) => void pickMain(v)} onCommit={(el, dir) => focusStep(el, dir)} />
             </Field>
             {!isAdditional && f.purchaseType.startsWith("SERVICE_PURCHASE_") && (
               <>
                 <Field label="Cost of goods bill" error={s.err("importCostForBillId")}>
-                  <Combobox fieldName="importCostForBillId" placeholder="— (not linked: stays an expense)" value={f.importCostForBillId} hasError={!!s.err("importCostForBillId")} options={sourceTargetOpts} disabled={ro} onChange={(value) => { const target = mains.find((x) => String(x.id) === value); s.patch({ importCostForBillId: value, ...(value && target && target.invoiceType !== "IMPORT" ? { importCostTreatment: "LANDED_ONLY" as const } : {}) }); s.clearError("importCostForBillId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
+                  <Combobox fieldName="importCostForBillId" placeholder="— (not linked: stays an expense)" value={f.importCostForBillId} hasError={!!s.err("importCostForBillId")} options={sourceTargetOpts} disabled={ro} allowClear onChange={(value) => { const target = mains.find((x) => String(x.id) === value); s.patch({ importCostForBillId: value, ...(value && target && target.invoiceType !== "IMPORT" ? { importCostTreatment: "LANDED_ONLY" as const } : {}) }); s.clearError("importCostForBillId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
                 </Field>
                 <Field label="Source allocation basis">
                   <select data-field="importCostAllocationBasis" disabled={ro || !f.importCostForBillId} value={f.importCostAllocationBasis} onChange={(e) => s.patch({ importCostAllocationBasis: e.target.value as BForm["importCostAllocationBasis"] })} className={`fld ${ro || !f.importCostForBillId ? "bg-slate-100 text-slate-600" : ""}`}>

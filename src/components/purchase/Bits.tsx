@@ -167,19 +167,21 @@ export function DocShell<F extends object>({ s, title, singular, branchName, fyC
 }
 
 export const COMMON_HELP: [string, string][] = [
-  ["Enter / Shift+Enter", "Next / previous field (last cell adds a line or term)"],
+  ["Enter / Shift+Enter", "Next / previous field (skips disabled controls; last cell adds a line or term)"],
+  ["Space / ↓ / F4", "Open a lookup or combobox list (Enter never opens it)"],
+  ["Backspace / Delete", "Clear an optional lookup or combobox value"],
   ["Tab / Shift+Tab", "Navigate every control, including row actions"],
   ["Ctrl+Enter / Ctrl+Shift+Enter", "Next / previous field from a multi-line field"],
   ["Ctrl+S", "Save / Update"],
   ["F3 / Ctrl+N", "New document"],
   ["F2", "Edit the open document"],
   ["Ctrl+Delete", "Delete the open document (confirmation)"],
-  ["Esc", "Cancel editing"],
-  ["F4 / /", "Search the list"],
+  ["Esc", "Close a list / cancel editing"],
+  ["F4 / /", "Search the document list"],
   ["Ctrl+↑ / Ctrl+↓", "Previous / next document"],
   ["Shift+Delete", "Remove the current line or term row"],
   ["Alt+1 / Alt+2 / Alt+3", "Sidebar / Form / List"],
   ["Alt+4", "Expand / collapse the purchase document list"],
   ["F1 / ?", "This help"],
 ];
-export const HINTS = ["Enter: Next", "Shift+Enter: Previous", "Ctrl+S: Save", "F3: New", "F2: Edit", "F4: Search", "Alt+4: Toggle list", "F1: Help"];
+export const HINTS = ["Enter: Next", "Shift+Enter: Previous", "Space/↓: Open list", "Ctrl+S: Save", "F3: New", "F2: Edit", "F4: Search", "F1: Help"];

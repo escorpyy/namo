@@ -26,6 +26,8 @@ interface Props {
   disabled?: boolean;
   scopeKey: string;
   contextKey?: string;
+  /** When true, offer a clear/none action and allow Backspace/Delete to empty the field. */
+  allowClear?: boolean;
 }
 
 const RECENT_LIMIT = 8;
@@ -49,7 +51,7 @@ const readHistory = (key: string): PickerHistory => {
   }
 };
 
-export function MasterReferencePicker({ fieldName, label, value, options, onChange, onCommit, onBlurField, placeholder, hasError, disabled, scopeKey, contextKey = "global" }: Props) {
+export function MasterReferencePicker({ fieldName, label, value, options, onChange, onCommit, onBlurField, placeholder, hasError, disabled, scopeKey, contextKey = "global", allowClear = false }: Props) {
   const uid = useId().replace(/:/g, "");
   const dialogId = `master-picker-${uid}`;
   const titleId = `master-picker-title-${uid}`;
@@ -132,6 +134,18 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
     });
   };
 
+  const clearValue = (direction: 1 | -1 | null = null) => {
+    if (!allowClear) return;
+    onChange("");
+    setOpen(false);
+    requestAnimationFrame(() => {
+      if (triggerRef.current) {
+        triggerRef.current.focus();
+        if (direction !== null) onCommit?.(triggerRef.current, direction);
+      }
+    });
+  };
+
   useEffect(() => {
     if (!open) return;
     const previousOverflow = document.body.style.overflow;
@@ -209,17 +223,29 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
           onClick={() => openDialog()}
           onBlur={() => onBlurField?.()}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && event.shiftKey) {
+            // Enter / Shift+Enter = next / previous field (keyboard-first form flow).
+            if (event.key === "Enter") {
               event.preventDefault();
               event.stopPropagation();
-              onCommit?.(event.currentTarget, -1);
+              onCommit?.(event.currentTarget, event.shiftKey ? -1 : 1);
               return;
             }
-            if (["Enter", " ", "ArrowDown"].includes(event.key) || ((event.altKey) && event.key === "ArrowDown")) {
+            // Open picker: Space, ArrowDown, Alt+ArrowDown, or F4.
+            if (event.key === " " || event.key === "ArrowDown" || event.key === "F4" || (event.altKey && event.key === "ArrowDown")) {
               event.preventDefault();
               event.stopPropagation();
               openDialog();
-            } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+              return;
+            }
+            // Optional fields: Backspace / Delete clears without opening the dialog.
+            if (allowClear && value && (event.key === "Backspace" || event.key === "Delete")) {
+              event.preventDefault();
+              event.stopPropagation();
+              clearValue();
+              return;
+            }
+            // Typing a character opens the dialog pre-filtered.
+            if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
               event.preventDefault();
               event.stopPropagation();
               openDialog(event.key);
@@ -244,9 +270,16 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
             <header className="flex items-center justify-between gap-3 border-b border-slate-300 bg-slate-100 px-4 py-3">
               <div className="min-w-0">
                 <h2 id={titleId} className="truncate text-base font-semibold">Choose {label}</h2>
-                <p className="text-xs text-slate-600">Search, use Find for specific fields, then choose a result.</p>
+                <p className="text-xs text-slate-600">Search, use Find for specific fields, then choose a result. Enter moves to the next field on the form; open this list with Space or ↓.</p>
               </div>
-              <button type="button" className="btn h-8 shrink-0" aria-label="Close picker" title="Close (Escape)" onClick={() => closeDialog()}><X size={15} /></button>
+              <div className="flex shrink-0 items-center gap-2">
+                {allowClear && (
+                  <button type="button" className="btn h-8" title="Clear selection" onClick={() => clearValue(1)}>
+                    None / Clear
+                  </button>
+                )}
+                <button type="button" className="btn h-8" aria-label="Close picker" title="Close (Escape)" onClick={() => closeDialog()}><X size={15} /></button>
+              </div>
             </header>
 
             <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-3">
