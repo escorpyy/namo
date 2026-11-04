@@ -5,6 +5,7 @@ import { Combobox, type ComboOption } from "../../components/Combobox";
 import { COMMON_HELP, DocShell, Field, FormSection, HINTS, Pill, focusStep, money } from "../../components/purchase/Bits";
 import { DateField, TextField, VendorFields } from "../../components/purchase/HeadFields";
 import { LinesGrid, TermsGrid } from "../../components/purchase/LinesGrid";
+import { PurchaseTabPanel, PurchaseTabs, type PurchaseTabId } from "../../components/purchase/PurchaseTabs";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
 import {
   blankLine, dateErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
@@ -98,11 +99,24 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
   }), [p.fyCode]);
   const lkRef = useMemo(() => ({ current: null as ReturnType<typeof useDocScreen>["lookups"] }), []);
   const s = useDocScreen<BForm>(cfg, { companyId: p.companyId, branchId: p.branchId, fyCode: p.fyCode, userId: p.userId, calendar: p.calendar }, { setStatus: p.setStatus, dirtyRef: p.dirtyRef, externalMessage: p.externalMessage, hints: HINTS });
+  const [activeTab, setActiveTab] = useState<PurchaseTabId>("header");
+  const shell = { ...s, newDoc: () => { setActiveTab("header"); s.newDoc(); }, select: (id: number) => { setActiveTab("header"); s.select(id); } };
   lkRef.current = s.lookups;
   const f = s.form, lk = s.lookups, doc = s.doc, ro = s.readOnly;
   const products = useMemo(() => new Map((lk?.products ?? []).map((x) => [String(x.id), x])), [lk]);
   const masters = useMemo(() => new Map((lk?.terms ?? []).map((x) => [String(x.id), x])), [lk]);
   const isAdditional = !!f?.mainBillId;
+  useEffect(() => {
+    const first = Object.keys(s.errors).find((key) => s.errors[key]);
+    if (!first) return;
+    const tab: PurchaseTabId = first === "terms" || first.startsWith("T.") ? "terms" : first === "lines" || first.startsWith("L.") ? "lines" : "header";
+    setActiveTab(tab);
+    requestAnimationFrame(() => {
+      const field = document.querySelector<HTMLElement>(`[data-zone=form] [data-field="${first}"]`)
+        ?? document.querySelector<HTMLElement>(`[data-zone=form] [data-field^="${first}"]`);
+      field?.focus();
+    });
+  }, [s.errors]);
   const invoicePreview = useMemo(() => {
     if (!f) return previewPurchase([], [], new Map(), true);
     const liveLines = f.lines.filter((line) => !isBlankLine(line));
@@ -247,7 +261,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
   );
 
   return (
-    <DocShell s={s} title="Purchase Bill" singular="Bill" branchName={p.branchName} fyCode={p.fyCode} statusOptions={OPTIONS}
+    <DocShell s={shell} title="Purchase Bill" singular="Bill" branchName={p.branchName} fyCode={p.fyCode} statusOptions={OPTIONS}
       pill={state && <Pill text={state} tone={STATE_TONE[state]} />} canEdit={!!doc && cfg.editable(doc)} canDelete={!!doc && cfg.deletable(doc)} actions={actions} help={HELP} notice={notice}
       listRow={(r) => (
         <>
@@ -284,6 +298,13 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
             </div>
           )}
 
+          <PurchaseTabs prefix="bill" active={activeTab} onChange={setActiveTab} tabs={[
+            { id: "header", label: "Header", detail: "Vendor, dates & links" },
+            { id: "lines", label: "Lines", detail: isAdditional ? "No product lines" : "Products & quantities", badge: isAdditional ? "—" : liveLines },
+            { id: "terms", label: "Terms", detail: isAdditional ? "Required charges" : "VAT & other charges", badge: liveTerms, alert: !!s.err("terms") },
+          ]} />
+
+          <PurchaseTabPanel prefix="bill" id="header" active={activeTab} className="space-y-3">
           <FormSection title="Identity" hint="What kind of bill this is">
             <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-x-3 gap-y-2">
               <Field label="Invoice No"><input disabled className="fld bg-slate-100 text-slate-600" value={doc?.invoiceNumber ?? ""} placeholder="(next number)" aria-label="Invoice number" /></Field>
@@ -357,7 +378,9 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
               )}
             </section>
           )}
+          </PurchaseTabPanel>
 
+          <PurchaseTabPanel prefix="bill" id="lines" active={activeTab} className="space-y-3">
           {!isAdditional && !!doc && String(doc.purchaseType ?? "").startsWith("GOODS_PURCHASE_") && (
             <section className="rounded-sm border border-sky-300 bg-sky-50/40">
               <button type="button" className="flex w-full items-center gap-2 border-b border-sky-200 bg-sky-50 px-3 py-1.5 text-left" onClick={() => setLandedOpen((v) => !v)} aria-expanded={landedOpen}>
@@ -399,10 +422,15 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
               <LinesGrid kind="bill" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts />
             </FormSection>
           )}
+          {isAdditional && <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-[13px] text-slate-600">This is an additional-charge bill linked to an existing goods bill, so it does not add product lines. Add the charges in the <button type="button" className="font-semibold text-blue-700 underline underline-offset-2" onClick={() => setActiveTab("terms")}>Terms tab</button>.</div>}
+          </PurchaseTabPanel>
+
+          <PurchaseTabPanel prefix="bill" id="terms" active={activeTab} className="space-y-3">
           <FormSection title={isAdditional ? "Additional charges" : "Billing terms"} hint={isAdditional ? "At least one charge term is required" : "VAT and other document terms"}>
             <TermsGrid terms={f.terms} onChange={(terms) => s.patch({ terms })} lookups={lk} masters={masters} lineCount={liveLines} readOnly={ro} errors={s.errors} clearError={s.clearError} contextKey={String(p.companyId)} calculationPreview={ro ? undefined : invoicePreview.terms} previewError={invoicePreview.message} category={isAdditional ? "ADDITIONAL" : undefined} />
             {s.err("terms") && <p className="mt-1 text-[12px] text-red-700">{s.err("terms")}</p>}
           </FormSection>
+          </PurchaseTabPanel>
           {ro && doc && !isAdditional && doc.lines.some((l) => Number(l.landedAmount) !== 0) && (
             <p className="text-[12px] text-slate-600">Landed cost per line: {doc.lines.map((l) => `${l.lineNumber}: ${money(l.landedAmount)}`).join(" · ")}</p>
           )}

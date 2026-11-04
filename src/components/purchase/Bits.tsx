@@ -42,7 +42,7 @@ export function FormSection({ title, hint, children, className = "" }: { title: 
 
 // Moves focus through non-destructive purchase controls in document order. Row deletion stays on native Tab/Shift+Tab and its explicit shortcut.
 export function focusStep(el: Element, dir: 1 | -1) {
-  const root = el.closest<HTMLElement>("[data-purchase-document]") ?? document;
+  const root = el.closest<HTMLElement>("[data-purchase-document], [data-assessment-document]") ?? document;
   const all = Array.from(root.querySelectorAll<HTMLElement>("[data-field], [data-nav]:not([data-nav='remove-line']):not([data-nav='remove-term'])"))
     .filter((x) => {
       const focusable = x.matches("input:not([type=hidden]), select, textarea, button, [tabindex]:not([tabindex='-1'])");

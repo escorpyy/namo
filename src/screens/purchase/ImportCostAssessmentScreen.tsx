@@ -2,7 +2,8 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { FileCheck2, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
 import { ApiError, importAssessmentApi, purchaseApi, type ImportAssessmentPreview, type ImportAssessmentTermInput, type PLookups } from "../../api";
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
-import { FormSection, Pill } from "../../components/purchase/Bits";
+import { focusStep, FormSection, Pill } from "../../components/purchase/Bits";
+import { PurchaseTabPanel, PurchaseTabs, type PurchaseTabId } from "../../components/purchase/PurchaseTabs";
 import { defaultDate } from "../../lib/purchaseForm";
 import { formatImportCost } from "../../../shared/import-costing";
 import { toMicro } from "../../../shared/purchase-calculation";
@@ -56,12 +57,24 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("Loading…");
   const [listSelection, setListSelection] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<PurchaseTabId>("header");
   const searchRef = useRef<HTMLInputElement>(null);
   const baseSig = useRef("");
   const seq = useRef(0);
   const statusKind = message === "Ready" ? "info" : "info";
   const dirty = !!form && editing && JSON.stringify(form) !== baseSig.current;
   p.dirtyRef.current = dirty;
+
+  const onFormKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const el = e.target as HTMLElement;
+    if (e.key !== "Enter" || !el.hasAttribute("data-field") || el.getAttribute("role") === "combobox") return;
+    if (el instanceof HTMLTextAreaElement) {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault(); focusStep(el, e.shiftKey ? -1 : 1); return;
+    }
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLSelectElement)) return;
+    e.preventDefault(); focusStep(el, e.shiftKey ? -1 : 1);
+  };
 
   const loadImports = useCallback(async (l: PLookups | null) => {
     const r = await importAssessmentApi.eligibleImports({ companyId: p.companyId, branchId: p.branchId, fiscalYear: p.fyCode });
@@ -139,12 +152,14 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
 
   const startNew = () => {
     if (dirty && !window.confirm("Discard unsaved assessment changes?")) return;
+    setActiveTab("header");
     const next: Form = { importBillId: "", assessmentDate: defaultDate(lookups?.fiscalYears.find((y) => y.code === p.fyCode)), referenceNo: "", remarks: "", terms: [blankTerm()] };
     setDoc(null); setForm(next); setEditing(true); setPreview(null); setErrors({}); baseSig.current = JSON.stringify(next); setMessage("New cost assessment");
     requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-assessment-field]")?.focus());
   };
   const openDoc = async (id: number) => {
     if (dirty && !window.confirm("Discard unsaved assessment changes?")) return;
+    setActiveTab("header");
     setBusy(true);
     try {
       const r = await importAssessmentApi.get(id, p.companyId);
@@ -180,7 +195,17 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
       if (!t.againstLedgerId) e.terms = "Each charge needs an against ledger (cash, bank, or party)";
     }
     setErrors(e);
-    if (Object.keys(e).length) { setMessage(Object.values(e)[0]); document.querySelector<HTMLElement>("[data-assessment-field] [aria-invalid=true]")?.focus(); return; }
+    if (Object.keys(e).length) {
+      setMessage(Object.values(e)[0]);
+      setActiveTab(Object.keys(e).some((key) => key === "terms" || key.startsWith("terms.")) ? "terms" : "header");
+      requestAnimationFrame(() => {
+        const invalid = document.querySelector<HTMLElement>("[data-assessment-field] [aria-invalid=true]")
+          ?? document.querySelector<HTMLElement>('[data-field^="terms."][aria-invalid="true"]')
+          ?? document.querySelector<HTMLElement>('[data-field^="terms."]');
+        invalid?.focus();
+      });
+      return;
+    }
     setBusy(true);
     const body = {
       companyId: p.companyId, branchId: p.branchId, userId: p.userId, fiscalYear: p.fyCode,
@@ -192,12 +217,20 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
       const d = r.document as Doc;
       setDoc(d); setForm(asForm(d)); setEditing(false); setPreview(d.preview ?? preview); baseSig.current = JSON.stringify(asForm(d));
       setMessage(`Saved draft ${d.assessmentNumber}`); await loadList(); await loadImports(lookups);
-    } catch (ex) { const err = ex as ApiError; if (err.field) setErrors({ [err.field]: err.message }); setMessage(err.message); }
+    } catch (ex) {
+      const err = ex as ApiError;
+      if (err.field) {
+        setErrors({ [err.field]: err.message });
+        setActiveTab(err.field.startsWith("terms") ? "terms" : "header");
+      }
+      setMessage(err.message);
+    }
     finally { setBusy(false); }
   };
   const beginEdit = () => { if (doc && !doc.isPosted && !doc.reversedAt) { setEditing(true); setMessage("Editing draft"); baseSig.current = JSON.stringify(form); } };
   const cancel = () => {
     if (dirty && !window.confirm("Discard unsaved assessment changes?")) return;
+    setActiveTab("header");
     if (doc) { setForm(asForm(doc)); setEditing(false); setPreview(doc.preview ?? null); }
     else { setForm({ importBillId: "", assessmentDate: defaultDate(lookups?.fiscalYears.find((y) => y.code === p.fyCode)), referenceNo: "", remarks: "", terms: [blankTerm()] }); setEditing(false); setPreview(null); }
     setErrors({}); setMessage("Changes discarded");
@@ -301,7 +334,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
           </p>
         </header>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-3 space-y-3">
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-3 space-y-3" onKeyDown={onFormKey}>
           {!lookups || !form ? <p className="text-slate-500 p-2">Loading…</p> : <>
             {/* Apply / readiness checklist */}
             <div className="flex flex-wrap items-center gap-1.5 border border-slate-300 bg-slate-50 px-2.5 py-1.5" role="status" aria-label="Assessment readiness">
@@ -313,6 +346,13 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
               {check(previewOk, "Preview")}
             </div>
 
+            <PurchaseTabs prefix="assessment" active={activeTab} onChange={setActiveTab} tabs={[
+              { id: "header", label: "Header", detail: "Goods bill & notes", badge: billOk ? "✓" : "1", alert: !billOk },
+              { id: "lines", label: "Lines", detail: "Allocation & impact", badge: lineRows.length || "—" },
+              { id: "terms", label: "Terms", detail: "Charges & ledgers", badge: activeTerms.length || "—", alert: !!errors.terms },
+            ]} />
+
+            <PurchaseTabPanel prefix="assessment" id="header" active={activeTab} className="space-y-3">
             <FormSection title="Header" hint="Link one posted goods bill — local or import">
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <label className="block text-[11px] font-semibold text-slate-600">Assessment date
@@ -335,6 +375,14 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
               {errors.importBillId && <p className="mt-1 text-xs text-red-700" role="alert">{errors.importBillId}</p>}
             </FormSection>
 
+            <FormSection title="Notes" hint="Optional context for the assessment">
+              <textarea data-assessment-field data-field="remarks" className={`${fieldClass} min-h-20`} maxLength={1024}
+                disabled={!editing || busy} value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })}
+                placeholder="Add a note for this assessment" />
+            </FormSection>
+            </PurchaseTabPanel>
+
+            <PurchaseTabPanel prefix="assessment" id="terms" active={activeTab} className="space-y-3">
             <FormSection title="Charges" hint="Each charge posts Dr own ledger / Cr against ledger. Uncheck stock value for tax or pure P&L items.">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <p className="text-[11px] text-slate-600">Percent terms use the CIF / running base from the shared purchase calculation engine.</p>
@@ -371,7 +419,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                                 contextKey={`${p.companyId}:${p.branchId}`} placeholder="Choose charge…" hasError={!!errors.terms && !t.termId} />
                             </td>
                             <td className="p-2">
-                              <select className={fieldClass} disabled={!editing || busy || !t.termId} aria-label={`Calculation type for charge ${i + 1}`}
+                              <select data-field={`terms.${i}.calcType`} className={fieldClass} disabled={!editing || busy || !t.termId} aria-label={`Calculation type for charge ${i + 1}`}
                                 value={t.calcType} onChange={(e) => updateTerm(i, { calcType: e.target.value as AssessmentTerm["calcType"] })}>
                                 <option value="PERCENT">Percent</option>
                                 <option value="AMOUNT">Fixed amount</option>
@@ -380,29 +428,29 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                             </td>
                             <td className="p-2">
                               <div className="flex gap-2">
-                                <input aria-label={t.calcType === "PERCENT" ? `Rate for charge ${i + 1}` : `Amount for charge ${i + 1}`}
+                                <input data-field={`terms.${i}.amount`} aria-label={t.calcType === "PERCENT" ? `Rate for charge ${i + 1}` : `Amount for charge ${i + 1}`}
                                   className={fieldClass} disabled={!editing || busy || !t.termId}
                                   value={t.calcType === "PERCENT" ? t.rate : t.inputAmount} inputMode="decimal"
                                   onChange={(e) => updateTerm(i, t.calcType === "PERCENT" ? { rate: e.target.value } : { inputAmount: e.target.value })}
                                   placeholder={t.calcType === "PERCENT" ? "Percent" : "Amount"} />
                                 {t.isOverridden && (
-                                  <input aria-label={`Override amount for charge ${i + 1}`} className={fieldClass} disabled={!editing || busy}
+                                  <input data-field={`terms.${i}.override`} aria-label={`Override amount for charge ${i + 1}`} className={fieldClass} disabled={!editing || busy}
                                     value={t.overrideAmount} inputMode="decimal" onChange={(e) => updateTerm(i, { overrideAmount: e.target.value })} placeholder="Final override" />
                                 )}
                               </div>
                               <label className="mt-1 inline-flex items-center gap-1 text-[10px] text-slate-600">
-                                <input type="checkbox" disabled={!editing || busy || !t.termId} checked={t.isOverridden} onChange={(e) => updateTerm(i, { isOverridden: e.target.checked })} />
+                                <input data-field={`terms.${i}.isOverridden`} type="checkbox" disabled={!editing || busy || !t.termId} checked={t.isOverridden} onChange={(e) => updateTerm(i, { isOverridden: e.target.checked })} />
                                 <span>Override calculated amount</span>
                               </label>
                             </td>
                             <td className="p-2">
-                              <select className={fieldClass} disabled={!editing || busy || !t.capitalizable} aria-label={`Allocation basis for charge ${i + 1}`}
+                              <select data-field={`terms.${i}.allocationBasis`} className={fieldClass} disabled={!editing || busy || !t.capitalizable} aria-label={`Allocation basis for charge ${i + 1}`}
                                 value={t.allocationBasis} onChange={(e) => updateTerm(i, { allocationBasis: e.target.value as Basis })}>
                                 <option value="VALUE">Product value</option>
                                 <option value="QUANTITY">Quantity</option>
                               </select>
                               {t.capitalizable && (
-                                <select className={`${fieldClass} mt-1`} disabled={!editing || busy} aria-label={`Allocation mode for charge ${i + 1}`}
+                                <select data-field={`terms.${i}.allocationMode`} className={`${fieldClass} mt-1`} disabled={!editing || busy} aria-label={`Allocation mode for charge ${i + 1}`}
                                   value={t.allocationMode} onChange={(e) => updateTerm(i, { allocationMode: e.target.value as "AUTO" | "MANUAL", manual: e.target.value === "MANUAL" ? t.manual : {} })}>
                                   <option value="AUTO">Auto split</option>
                                   <option value="MANUAL">Manual split</option>
@@ -410,7 +458,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                               )}
                             </td>
                             <td className="p-2 w-[200px]">
-                              <select className={fieldClass} disabled={!editing || busy || !t.termId} aria-label={`Against ledger for charge ${i + 1}`}
+                              <select data-field={`terms.${i}.againstLedgerId`} className={fieldClass} disabled={!editing || busy || !t.termId} aria-label={`Against ledger for charge ${i + 1}`}
                                 aria-invalid={!!errors.terms && !!t.termId && !t.againstLedgerId} value={t.againstLedgerId}
                                 onChange={(e) => updateTerm(i, { againstLedgerId: e.target.value, againstSubLedgerId: "" })}>
                                 <option value="">Choose…</option>
@@ -419,7 +467,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                                 ))}
                               </select>
                               {subs.length > 0 && (
-                                <select className={`${fieldClass} mt-1`} disabled={!editing || busy} aria-label={`Sub-ledger for charge ${i + 1}`}
+                                <select data-field={`terms.${i}.againstSubLedgerId`} className={`${fieldClass} mt-1`} disabled={!editing || busy} aria-label={`Sub-ledger for charge ${i + 1}`}
                                   value={t.againstSubLedgerId} onChange={(e) => updateTerm(i, { againstSubLedgerId: e.target.value })}>
                                   <option value="">Sub-ledger…</option>
                                   {subs.map((x) => <option key={x.id} value={x.id}>{x.code} — {x.name}</option>)}
@@ -429,7 +477,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                             </td>
                             <td className="p-2 text-center">
                               <label className="inline-flex items-center gap-1.5">
-                                <input aria-label={`Capitalize charge ${i + 1} into inventory`} type="checkbox" disabled={!editing || busy}
+                                <input data-field={`terms.${i}.capitalizable`} aria-label={`Capitalize charge ${i + 1} into inventory`} type="checkbox" disabled={!editing || busy}
                                   checked={t.capitalizable} onChange={(e) => updateTerm(i, { capitalizable: e.target.checked })} />
                                 <span className="sr-only">In stock value</span>
                               </label>
@@ -450,7 +498,12 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
               </div>
               {errors.terms && <p className="mt-2 text-xs text-red-700" role="alert">{errors.terms}</p>}
             </FormSection>
+            </PurchaseTabPanel>
 
+            <PurchaseTabPanel prefix="assessment" id="lines" active={activeTab} className="space-y-3">
+            {!form.importBillId && <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-6 text-[13px] text-slate-600">
+              Select a posted goods bill to unlock product allocation and landed-cost impact. <button type="button" className="ml-1 font-semibold text-blue-700 underline underline-offset-2" onClick={() => setActiveTab("header")}>Choose a goods bill</button>.
+            </div>}
             {/* Dedicated manual allocation panel */}
             {manualTerms.length > 0 && (
               <FormSection title="Manual allocation" hint="Each manual charge must sum exactly to its calculated amount before apply">
@@ -482,7 +535,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                               return (
                                 <label key={id} className="block text-[10px] font-semibold text-slate-600">
                                   {line.lineNumber}. {line.productCode ?? line.description ?? `Line ${n + 1}`}
-                                  <input className="fld w-full text-right tabular-nums" inputMode="decimal" disabled={!editing || busy}
+                                  <input data-field={`manual.${i}.${id}`} className="fld w-full text-right tabular-nums" inputMode="decimal" disabled={!editing || busy}
                                     aria-label={`Amount for line ${line.lineNumber}, charge ${i + 1}`}
                                     value={t.manual[id] ?? ""}
                                     onChange={(e) => updateTerm(i, { manual: { ...t.manual, [id]: e.target.value } })} />
@@ -497,12 +550,6 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                 </div>
               </FormSection>
             )}
-
-            <FormSection title="Notes">
-              <textarea data-assessment-field data-field="remarks" className={`${fieldClass} min-h-16`} maxLength={1024}
-                disabled={!editing || busy} value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })}
-                placeholder="Optional notes for this assessment" />
-            </FormSection>
 
             {form.importBillId && (
               <>
@@ -564,6 +611,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                 </FormSection>
               </>
             )}
+            </PurchaseTabPanel>
           </>}
         </div>
 
