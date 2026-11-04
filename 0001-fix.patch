@@ -1,0 +1,650 @@
+From 7da247a48f8ff155510c4b26277b11e308237a8c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 5 Nov 2026 02:19:48 +0545
+Subject: [PATCH] fix(ui): optional/required behaviour for Combobox and
+ MasterReferencePicker
+
+- Pickers are optional unless marked `required`; optional ones offer an empty row
+- List opens on focus/click; cleared fields bring the options back
+- Required fields block Enter while empty and flag the field
+- Enter picks the highlighted row once the user typed or moved
+- Mark mandatory call sites as required
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01UJ94HZyuDogdgkYHhHXKeD
+---
+ src/components/Combobox.tsx                   | 102 +++++++----
+ src/components/MasterForm.tsx                 |   4 +-
+ src/components/MasterReferencePicker.tsx      | 173 ++++++++++++------
+ src/components/purchase/HeadFields.tsx        |   5 +-
+ src/components/purchase/LinesGrid.tsx         |   8 +-
+ src/screens/StockOpeningScreen.tsx            |   2 +-
+ .../purchase/ImportCostAssessmentScreen.tsx   |   4 +-
+ 7 files changed, 196 insertions(+), 102 deletions(-)
+
+diff --git a/src/components/Combobox.tsx b/src/components/Combobox.tsx
+index 814a954..08dffb6 100644
+--- a/src/components/Combobox.tsx
++++ b/src/components/Combobox.tsx
+@@ -18,26 +18,38 @@ interface Props {
+   placeholder?: string;
+   hasError?: boolean;
+   disabled?: boolean;
+-  /** When true, an empty "(none)" row is offered and Backspace/Delete clears the value. */
++  /**
++   * Mandatory field: no empty row, Backspace/Delete cannot empty it, and Enter will not move on until a value is chosen.
++   * Every combobox is optional unless it says `required`.
++   */
++  required?: boolean;
++  /** Advanced override. By default the field is clearable exactly when it is not `required`. */
+   allowClear?: boolean;
+ }
+ 
+-// Type in the input; dropdown is an overlay. Enter always moves to the next/previous field.
+-// Open / navigate the list with ArrowDown / ArrowUp; confirm a highlighted row with Alt+Enter.
+-export function Combobox({ value, options, onChange, onCommit, onBlurField, fieldName, placeholder, hasError, disabled, allowClear }: Props) {
++// Type in the input; the list is an overlay and opens as soon as the field is focused or clicked.
++// Arrow keys move the highlight; Enter picks the highlighted row (once you typed or moved) and goes to the next field.
++// Optional fields start with an empty "(none)" row; mandatory fields keep you here until you choose.
++export function Combobox({ value, options, onChange, onCommit, onBlurField, fieldName, placeholder, hasError, disabled, required = false, allowClear }: Props) {
++  const clearable = allowClear ?? !required;
+   const [open, setOpen] = useState(false);
+   const [query, setQuery] = useState("");
+   const [active, setActive] = useState(0);
++  const [touched, setTouched] = useState(false);
++  // True once the user moved the highlight with the keyboard: only then does Enter mean "take that row".
++  const navigated = useRef(false);
+   const inputRef = useRef<HTMLInputElement>(null);
+ 
+   const list = useMemo(() => {
+-    if (!allowClear) return options;
++    if (!clearable) return options;
+     if (options.some((o) => o.value === "")) return options;
+     return [{ value: "", label: placeholder?.trim() || "— (none)" }, ...options];
+-  }, [options, allowClear, placeholder]);
++  }, [options, clearable, placeholder]);
+ 
+-  const selected = list.find((o) => o.value === value);
++  // An empty value shows as an empty box with the placeholder, never as the text of the "none" row.
++  const selected = value === "" ? options.find((o) => o.value === "") : list.find((o) => o.value === value);
+   const typed = query !== "";
++  const invalid = hasError || (required && touched && value === "");
+ 
+   const filtered = useMemo(() => {
+     const q = query.trim().toLowerCase();
+@@ -50,15 +62,14 @@ export function Combobox({ value, options, onChange, onCommit, onBlurField, fiel
+     return starts.length ? starts : list.filter((o) => o.label.toLowerCase().includes(q));
+   }, [query, list]);
+ 
+-  const pick = (o: ComboOption) => {
+-    onChange(o.value);
+-    setQuery("");
+-    setOpen(false);
++  const openList = () => {
++    navigated.current = false;
++    setActive(Math.max(0, list.findIndex((o) => o.value === value)));
++    setOpen(true);
+   };
+ 
+-  const clear = () => {
+-    if (!allowClear) return;
+-    onChange("");
++  const pick = (o: ComboOption) => {
++    if (o.value !== value) onChange(o.value);
+     setQuery("");
+     setOpen(false);
+   };
+@@ -67,26 +78,29 @@ export function Combobox({ value, options, onChange, onCommit, onBlurField, fiel
+     if (e.key === "ArrowDown") {
+       e.preventDefault();
+       e.stopPropagation();
+-      if (!open) {
+-        setOpen(true);
+-        setActive(Math.max(0, filtered.findIndex((o) => o.value === value)));
+-      } else {
+-        setActive((a) => Math.min(a + 1, Math.max(filtered.length - 1, 0)));
+-      }
++      navigated.current = true;
++      if (!open) openList();
++      else setActive((a) => Math.min(a + 1, Math.max(filtered.length - 1, 0)));
+     } else if (e.key === "ArrowUp") {
+       e.preventDefault();
+       e.stopPropagation();
+-      if (open) setActive((a) => Math.max(a - 1, 0));
++      navigated.current = true;
++      if (!open) openList();
++      else setActive((a) => Math.max(a - 1, 0));
+     } else if (e.key === "Enter") {
+-      // Enter / Shift+Enter = next / previous field (keyboard-first). Confirm a list row with Alt+Enter.
+       e.preventDefault();
+       e.stopPropagation();
+-      if (e.altKey && open) {
+-        const o = filtered[Math.min(active, filtered.length - 1)];
+-        if (o) pick(o);
+-      } else if (open) {
+-        setOpen(false);
++      // Take the highlighted row when the user chose it (typed, moved, or Alt+Enter); a bare Enter keeps the current value.
++      const row = open && (typed || navigated.current || e.altKey) ? filtered[Math.min(active, filtered.length - 1)] : undefined;
++      const next = row ? row.value : value;
++      if (row) pick(row);
++      else if (open) { setOpen(false); setQuery(""); }
++      // Mandatory and still empty: stay here and show the choices (Shift+Enter may still go back).
++      if (required && next === "" && !e.shiftKey) {
++        setTouched(true);
+         setQuery("");
++        openList();
++        return;
+       }
+       onCommit?.(e.currentTarget, e.shiftKey ? -1 : 1);
+     } else if (e.key === "Escape") {
+@@ -96,14 +110,17 @@ export function Combobox({ value, options, onChange, onCommit, onBlurField, fiel
+         setOpen(false);
+         setQuery("");
+       }
+-    } else if ((e.key === "Backspace" || e.key === "Delete") && allowClear && !typed && value) {
++    } else if ((e.key === "Backspace" || e.key === "Delete") && clearable && !typed && value) {
++      // Empty the field and keep the choices on screen, so it can be refilled straight away.
+       e.preventDefault();
+-      clear();
++      onChange("");
++      setQuery("");
++      setActive(0);
++      setOpen(true);
+     } else if ((e.altKey && e.key === "ArrowDown") || e.key === "F4") {
+       e.preventDefault();
+       e.stopPropagation();
+-      setOpen(true);
+-      setActive(Math.max(0, list.findIndex((o) => o.value === value)));
++      openList();
+     }
+   };
+ 
+@@ -113,12 +130,14 @@ export function Combobox({ value, options, onChange, onCommit, onBlurField, fiel
+         ref={inputRef}
+         data-nav
+         data-field={fieldName}
+-        className={`fld min-w-0 pr-7 ${hasError ? "fld-err" : ""} ${disabled ? "bg-slate-100 text-slate-600" : ""}`}
++        className={`fld min-w-0 pr-7 ${invalid ? "fld-err" : ""} ${disabled ? "bg-slate-100 text-slate-600" : ""}`}
+         autoComplete="off"
+         disabled={disabled}
+         role="combobox"
+         title={selected?.label ?? placeholder}
+         aria-expanded={open}
++        aria-required={required || undefined}
++        aria-invalid={invalid || undefined}
+         placeholder={placeholder}
+         value={typed ? query : (selected?.label ?? "")}
+         onChange={(e) => {
+@@ -126,23 +145,27 @@ export function Combobox({ value, options, onChange, onCommit, onBlurField, fiel
+           setQuery(next);
+           setOpen(true);
+           setActive(0);
+-          // Typing away the whole label with allowClear clears the bound value.
+-          if (allowClear && next === "" && value) onChange("");
++          navigated.current = false;
++          // Typing away the whole label on an optional field empties the bound value.
++          if (clearable && next === "" && value) onChange("");
+         }}
+         onFocus={(e) => {
+           e.currentTarget.select();
+-          setOpen(true);
+-          setActive(Math.max(0, list.findIndex((o) => o.value === value)));
++          if (!open) openList();
+         }}
++        // Focus is kept after picking or clearing, so a plain click must be able to bring the list back.
++        onClick={() => { if (!open && !disabled) openList(); }}
+         onBlur={() => {
+-          // Do not auto-pick on blur: optional fields must stay clearable.
+           if (typed) {
+-            const exact = filtered.find((o) => o.label.toLowerCase() === query.trim().toLowerCase());
++            const q = query.trim().toLowerCase();
++            const exact = list.find((o) => o.label.toLowerCase() === q);
++            // An exact label, or a single remaining match, is an unambiguous choice; anything else is dropped.
+             if (exact) pick(exact);
+-            else if (allowClear && query.trim() === "") clear();
++            else if (filtered.length === 1) pick(filtered[0]);
+             else setQuery("");
+           }
+           setOpen(false);
++          setTouched(true);
+           onBlurField?.();
+         }}
+         onKeyDown={onKeyDown}
+@@ -158,6 +181,7 @@ export function Combobox({ value, options, onChange, onCommit, onBlurField, fiel
+           {filtered.map((o, i) => (
+             <li
+               key={o.value === "" ? "__empty__" : o.value}
++              ref={i === active ? (el) => el?.scrollIntoView({ block: "nearest" }) : undefined}
+               role="option"
+               aria-selected={o.value === value}
+               onMouseEnter={() => setActive(i)}
+diff --git a/src/components/MasterForm.tsx b/src/components/MasterForm.tsx
+index 33915d4..43da415 100644
+--- a/src/components/MasterForm.tsx
++++ b/src/components/MasterForm.tsx
+@@ -84,7 +84,7 @@ export function MasterForm({ def, companyId, mode, form, setForm, errors, onBlur
+           fieldName={f.name} label={f.label} scopeKey={f.lookup!}
+           contextKey={`${companyId}${f.lookupScope === "record" ? `:${selected?.id ?? "new"}` : ""}`}
+           placeholder={f.placeholder ?? (isRequired(f, form) ? "Choose…" : "Optional")}
+-          value={String(form[f.name])} hasError={!!err} options={lookups[f.name] ?? []}
++          value={String(form[f.name])} hasError={!!err} options={lookups[f.name] ?? []} required={isRequired(f, form)}
+           onChange={(v) => set(f.name, v)} onCommit={(el) => moveFocus(el, 1)} onBlurField={() => onBlurField(f.name)} disabled={!editable || (f.lockOnEdit && mode === "edit")}
+         />
+       );
+@@ -92,7 +92,7 @@ export function MasterForm({ def, companyId, mode, form, setForm, errors, onBlur
+       return (
+         <Combobox
+           fieldName={f.name} placeholder={f.placeholder ?? (isRequired(f, form) ? "Type or pick…" : "Optional")}
+-          value={String(form[f.name])} hasError={!!err} options={optsOf(f)}
++          value={String(form[f.name])} hasError={!!err} options={optsOf(f)} required={isRequired(f, form)}
+           onChange={(v) => set(f.name, v)} onCommit={(el) => moveFocus(el, 1)} onBlurField={() => onBlurField(f.name)}
+         />
+       );
+diff --git a/src/components/MasterReferencePicker.tsx b/src/components/MasterReferencePicker.tsx
+index 4707941..8d16b76 100644
+--- a/src/components/MasterReferencePicker.tsx
++++ b/src/components/MasterReferencePicker.tsx
+@@ -26,10 +26,18 @@ interface Props {
+   disabled?: boolean;
+   scopeKey: string;
+   contextKey?: string;
+-  /** When true, offer a clear/none action and allow Backspace/Delete to empty the field. */
++  /**
++   * Mandatory field: no "None" row, Backspace/Delete cannot empty it, and Enter will not move on until something is chosen.
++   * Every picker is optional unless it says `required`.
++   */
++  required?: boolean;
++  /** Advanced override. By default the field is clearable exactly when it is not `required`. */
+   allowClear?: boolean;
+ }
+ 
++// The empty choice offered on optional fields.
++const NONE: ReferenceOption = { value: "", label: "None", code: "—", name: "None (leave empty)" };
++
+ const RECENT_LIMIT = 8;
+ const textOf = (value: unknown) => String(value ?? "").trim().toLocaleLowerCase();
+ interface PickerHistory { recent: string[]; counts: Record<string, number> }
+@@ -51,7 +59,8 @@ const readHistory = (key: string): PickerHistory => {
+   }
+ };
+ 
+-export function MasterReferencePicker({ fieldName, label, value, options, onChange, onCommit, onBlurField, placeholder, hasError, disabled, scopeKey, contextKey = "global", allowClear = false }: Props) {
++export function MasterReferencePicker({ fieldName, label, value, options, onChange, onCommit, onBlurField, placeholder, hasError, disabled, scopeKey, contextKey = "global", required = false, allowClear }: Props) {
++  const clearable = allowClear ?? !required;
+   const uid = useId().replace(/:/g, "");
+   const dialogId = `master-picker-${uid}`;
+   const titleId = `master-picker-title-${uid}`;
+@@ -71,7 +80,12 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+   const [usageCounts, setUsageCounts] = useState<Record<string, number>>({});
+   const [view, setView] = useState<"all" | "recent" | "frequent">("all");
+   const [activeIndex, setActiveIndex] = useState(0);
+-  const current = options.find((option) => option.value === value);
++  const [touched, setTouched] = useState(false);
++  // Focusing the field opens the list; our own programmatic re-focus (after choose / close) must not reopen it.
++  const suppressFocusOpen = useRef(false);
++  // Enter picks the highlighted row only after the user typed, moved or the row is the current value; a bare Enter never picks "the first one".
++  const navigated = useRef(false);
++  const current = value === "" ? undefined : options.find((option) => option.value === value);
+   const hasInactive = options.some((option) => option.isActive === false);
+ 
+   const filtered = useMemo(() => {
+@@ -96,8 +110,25 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+     });
+   }, [options, value, query, findCode, findName, includeInactive, recents, usageCounts, view]);
+ 
++  // Optional fields get an explicit "None" row on top of the unfiltered list.
++  const showNone = clearable && !query && !findCode && !findName && view === "all";
++  const rows = useMemo(() => (showNone ? [NONE, ...filtered] : filtered), [showNone, filtered]);
++
++  // Give focus back to the field without that focus reopening the list.
++  const refocusTrigger = (after?: (el: HTMLInputElement) => void) => {
++    requestAnimationFrame(() => {
++      const el = triggerRef.current;
++      if (!el) return;
++      suppressFocusOpen.current = true;
++      el.focus();
++      suppressFocusOpen.current = false;
++      after?.(el);
++    });
++  };
++
+   const openDialog = (initialQuery = "") => {
+     if (disabled) return;
++    navigated.current = false;
+     setQuery(initialQuery);
+     setFindOpen(false);
+     setFindCode("");
+@@ -113,37 +144,34 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+ 
+   const closeDialog = (restoreFocus = true) => {
+     setOpen(false);
+-    if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus());
++    if (restoreFocus) refocusTrigger();
+   };
+ 
+   const choose = (option: ReferenceOption, direction: 1 | -1 = 1) => {
+-    onChange(option.value);
+-    const history = readHistory(recentKey);
+-    const nextRecents = [option.value, ...history.recent.filter((id) => id !== option.value)].slice(0, RECENT_LIMIT);
+-    const updatedCounts = { ...history.counts, [option.value]: (history.counts[option.value] ?? 0) + 1 };
+-    const nextCounts = Object.fromEntries(Object.entries(updatedCounts).sort((a, b) => b[1] - a[1]).slice(0, 50));
+-    try { localStorage.setItem(recentKey, JSON.stringify({ recent: nextRecents, counts: nextCounts })); } catch { /* storage can be unavailable in private browsing */ }
+-    setRecents(nextRecents);
+-    setUsageCounts(nextCounts);
++    if (option.value === "") {
++      // "None": only offered on optional fields.
++      if (!clearable) return;
++      if (value !== "") onChange("");
++    } else {
++      if (option.value !== value) onChange(option.value);
++      const history = readHistory(recentKey);
++      const nextRecents = [option.value, ...history.recent.filter((id) => id !== option.value)].slice(0, RECENT_LIMIT);
++      const updatedCounts = { ...history.counts, [option.value]: (history.counts[option.value] ?? 0) + 1 };
++      const nextCounts = Object.fromEntries(Object.entries(updatedCounts).sort((a, b) => b[1] - a[1]).slice(0, 50));
++      try { localStorage.setItem(recentKey, JSON.stringify({ recent: nextRecents, counts: nextCounts })); } catch { /* storage can be unavailable in private browsing */ }
++      setRecents(nextRecents);
++      setUsageCounts(nextCounts);
++    }
+     setOpen(false);
+-    requestAnimationFrame(() => {
+-      if (triggerRef.current) {
+-        triggerRef.current.focus();
+-        onCommit?.(triggerRef.current, direction);
+-      }
+-    });
++    refocusTrigger((el) => onCommit?.(el, direction));
+   };
+ 
+-  const clearValue = (direction: 1 | -1 | null = null) => {
+-    if (!allowClear) return;
+-    onChange("");
++  // Clear and move on (the dialog's "None / Clear" button).
++  const clearValue = (direction: 1 | -1) => {
++    if (!clearable) return;
++    if (value !== "") onChange("");
+     setOpen(false);
+-    requestAnimationFrame(() => {
+-      if (triggerRef.current) {
+-        triggerRef.current.focus();
+-        if (direction !== null) onCommit?.(triggerRef.current, direction);
+-      }
+-    });
++    refocusTrigger((el) => onCommit?.(el, direction));
+   };
+ 
+   useEffect(() => {
+@@ -157,18 +185,28 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+     };
+   }, [open]);
+ 
++  // On open, start on the current value (or "None" for an empty optional field), not blindly on row 0.
++  useEffect(() => {
++    if (!open) return;
++    setActiveIndex(query ? 0 : Math.max(0, rows.findIndex((row) => row.value === value)));
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [open]);
++
+   useEffect(() => {
+-    setActiveIndex((index) => filtered.length ? Math.min(index, filtered.length - 1) : 0);
+-  }, [filtered.length]);
++    setActiveIndex((index) => rows.length ? Math.min(index, rows.length - 1) : 0);
++  }, [rows.length]);
+ 
+   useEffect(() => {
+-    if (!open || !filtered[activeIndex]) return;
++    if (!open || !rows[activeIndex]) return;
+     resultsRef.current?.querySelector<HTMLElement>("[data-active]")?.scrollIntoView({ block: "nearest" });
+-  }, [activeIndex, filtered, open]);
++  }, [activeIndex, rows, open]);
+ 
+   const selectActive = (direction: 1 | -1 = 1) => {
+-    const option = filtered[activeIndex];
+-    if (option) choose(option, direction);
++    const option = rows[activeIndex];
++    if (!option) return;
++    // Mandatory + still empty: Enter must not silently pick whatever is first. The user has to type, move or click.
++    if (required && value === "" && !query && !findCode && !findName && !navigated.current) return;
++    choose(option, direction);
+   };
+ 
+   const onDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+@@ -196,8 +234,9 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+     }
+   };
+ 
+-  const activeOption = filtered[activeIndex];
++  const activeOption = rows[activeIndex];
+   const currentLabel = current?.label ?? "";
++  const invalid = hasError || (required && touched && value === "");
+   const clearFilters = () => { setQuery(""); setFindCode(""); setFindName(""); setIncludeInactive(false); setView("all"); searchRef.current?.focus(); };
+ 
+   return (
+@@ -215,18 +254,31 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+           aria-haspopup="dialog"
+           aria-expanded={open}
+           aria-controls={open ? dialogId : undefined}
+-          aria-invalid={hasError || undefined}
++          aria-invalid={invalid || undefined}
++          aria-required={required || undefined}
+           title={currentLabel || placeholder}
+           placeholder={placeholder}
+           disabled={disabled}
+           value={currentLabel}
+-          onClick={() => openDialog()}
+-          onBlur={() => onBlurField?.()}
++          onFocus={() => {
++            // Landing on the field shows the choices straight away.
++            if (suppressFocusOpen.current || disabled || open) return;
++            openDialog();
++          }}
++          onClick={() => { if (!open) openDialog(); }}
++          onBlur={() => {
++            // The list taking focus is not "leaving the field".
++            if (open) return;
++            setTouched(true);
++            onBlurField?.();
++          }}
+           onKeyDown={(event) => {
+             // Enter / Shift+Enter = next / previous field (keyboard-first form flow).
+             if (event.key === "Enter") {
+               event.preventDefault();
+               event.stopPropagation();
++              // Mandatory and still empty: do not move forward, show the choices instead.
++              if (required && value === "" && !event.shiftKey) { setTouched(true); openDialog(); return; }
+               onCommit?.(event.currentTarget, event.shiftKey ? -1 : 1);
+               return;
+             }
+@@ -237,11 +289,12 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+               openDialog();
+               return;
+             }
+-            // Optional fields: Backspace / Delete clears without opening the dialog.
+-            if (allowClear && value && (event.key === "Backspace" || event.key === "Delete")) {
++            // Optional fields: Backspace / Delete empties the value, and the choices come straight back up.
++            if (clearable && value && (event.key === "Backspace" || event.key === "Delete")) {
+               event.preventDefault();
+               event.stopPropagation();
+-              clearValue();
++              onChange("");
++              openDialog();
+               return;
+             }
+             // Typing a character opens the dialog pre-filtered.
+@@ -251,7 +304,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+               openDialog(event.key);
+             }
+           }}
+-          className={`fld min-w-0 pr-8 text-left ${hasError ? "fld-err" : ""} ${disabled ? "bg-slate-100 text-slate-600" : "cursor-pointer"}`}
++          className={`fld min-w-0 pr-8 text-left ${invalid ? "fld-err" : ""} ${disabled ? "bg-slate-100 text-slate-600" : "cursor-pointer"}`}
+         />
+         <ChevronDown size={14} aria-hidden="true" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+       </div>
+@@ -273,7 +326,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+                 <p className="text-xs text-slate-600">Search, use Find for specific fields, then choose a result. Enter moves to the next field on the form; open this list with Space or ↓.</p>
+               </div>
+               <div className="flex shrink-0 items-center gap-2">
+-                {allowClear && (
++                {clearable && (
+                   <button type="button" className="btn h-8" title="Clear selection" onClick={() => clearValue(1)}>
+                     None / Clear
+                   </button>
+@@ -294,16 +347,16 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+                   aria-autocomplete="list"
+                   aria-expanded="true"
+                   aria-controls={listId}
+-                  aria-activedescendant={activeOption ? `${listId}-option-${activeOption.value}` : undefined}
++                  aria-activedescendant={activeOption ? `${listId}-option-${activeOption.value || "none"}` : undefined}
+                   autoComplete="off"
+                   value={query}
+                   onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
+                   onKeyDown={(event) => {
+-                    if (event.key === "ArrowDown") { event.preventDefault(); setActiveIndex((index) => Math.min(index + 1, filtered.length - 1)); }
+-                    else if (event.key === "ArrowUp") { event.preventDefault(); setActiveIndex((index) => Math.max(index - 1, 0)); }
++                    if (event.key === "ArrowDown") { event.preventDefault(); navigated.current = true; setActiveIndex((index) => Math.min(index + 1, rows.length - 1)); }
++                    else if (event.key === "ArrowUp") { event.preventDefault(); navigated.current = true; setActiveIndex((index) => Math.max(index - 1, 0)); }
+                     else if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); selectActive(event.shiftKey ? -1 : 1); }
+-                    else if (event.key === "Home" && event.ctrlKey) { event.preventDefault(); setActiveIndex(0); }
+-                    else if (event.key === "End" && event.ctrlKey) { event.preventDefault(); setActiveIndex(Math.max(0, filtered.length - 1)); }
++                    else if (event.key === "Home" && event.ctrlKey) { event.preventDefault(); navigated.current = true; setActiveIndex(0); }
++                    else if (event.key === "End" && event.ctrlKey) { event.preventDefault(); navigated.current = true; setActiveIndex(Math.max(0, rows.length - 1)); }
+                   }}
+                   placeholder={`Search ${label} by code or name…`}
+                   className="fld h-10 w-full pl-8"
+@@ -346,13 +399,31 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+               <div className="sticky top-0 z-10 grid grid-cols-[minmax(70px,0.7fr)_minmax(120px,1.5fr)_64px] gap-2 border-b border-slate-300 bg-slate-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600 sm:grid-cols-[minmax(90px,0.8fr)_minmax(150px,1.5fr)_minmax(100px,1fr)_76px]">
+                 <span>Code</span><span>Name / description</span><span className="hidden sm:block">Details</span><span>Status</span>
+               </div>
+-              <div id={listId} role="listbox" aria-label={`${label} results`} aria-activedescendant={activeOption ? `${listId}-option-${activeOption.value}` : undefined}>
+-                {filtered.map((option, index) => {
++              <div id={listId} role="listbox" aria-label={`${label} results`} aria-activedescendant={activeOption ? `${listId}-option-${activeOption.value || "none"}` : undefined}>
++                {rows.map((option, index) => {
++                    const isNone = option.value === "";
+                     const isCurrent = option.value === value;
+-                    const isRecent = !query && !findCode && !findName && recents.includes(option.value);
+-                    const isFrequent = (usageCounts[option.value] ?? 0) >= 2;
++                    const isRecent = !isNone && !query && !findCode && !findName && recents.includes(option.value);
++                    const isFrequent = !isNone && (usageCounts[option.value] ?? 0) >= 2;
+                     const code = option.code ?? option.short ?? "—";
+                     const name = option.name ?? option.label;
++                    if (isNone) {
++                      return (
++                        <div
++                          id={`${listId}-option-none`}
++                          key="__none__"
++                          role="option"
++                          aria-selected={isCurrent}
++                          data-active={index === activeIndex || undefined}
++                          onMouseEnter={() => setActiveIndex(index)}
++                          onMouseDown={(event) => event.preventDefault()}
++                          onClick={() => choose(option)}
++                          className={`cursor-pointer border-b border-slate-200 px-3 py-3 text-sm italic text-slate-600 hover:bg-blue-50 ${index === activeIndex ? "bg-blue-100 outline outline-2 -outline-offset-2 outline-blue-600" : ""} ${isCurrent ? "font-semibold" : ""}`}
++                        >
++                          — None (leave empty){isCurrent ? " · Current" : ""}
++                        </div>
++                      );
++                    }
+                     return (
+                       <div
+                         id={`${listId}-option-${option.value}`}
+diff --git a/src/components/purchase/HeadFields.tsx b/src/components/purchase/HeadFields.tsx
+index 0a3dc98..8e31ede 100644
+--- a/src/components/purchase/HeadFields.tsx
++++ b/src/components/purchase/HeadFields.tsx
+@@ -18,17 +18,16 @@ export function VendorFields({ lookups, vendorGLId, subLedgerId, agentId, onChan
+   return (
+     <>
+       <Field label="Vendor" required error={errors.vendorGLId} className="col-span-1 sm:col-span-2">
+-        <MasterReferencePicker fieldName="vendorGLId" label="Vendor ledger" scopeKey="vendor-ledgers" contextKey={contextKey} placeholder="Choose vendor ledger…" value={vendorGLId} hasError={!!errors.vendorGLId} options={vendors} disabled={readOnly || lockVendor}
++        <MasterReferencePicker fieldName="vendorGLId" label="Vendor ledger" scopeKey="vendor-ledgers" contextKey={contextKey} placeholder="Choose vendor ledger…" required value={vendorGLId} hasError={!!errors.vendorGLId} options={vendors} disabled={readOnly || lockVendor}
+           onChange={(v) => onChange({ vendorGLId: v, subLedgerId: "" })} onCommit={(el, dir) => focusStep(el, dir)} />
+       </Field>
+       <Field label={vendor?.requiresSubLedger ? "Sub Ledger" : "Sub Ledger (not needed)"} required={!!vendor?.requiresSubLedger} error={errors.subLedgerId}>
+         <MasterReferencePicker fieldName="subLedgerId" label="Sub Ledger" scopeKey="sub-ledger" contextKey={`${contextKey}:${vendorGLId || "none"}`} placeholder={subs.length ? "Choose sub ledger…" : "—"} value={subLedgerId} hasError={!!errors.subLedgerId} options={subs} disabled={readOnly || subs.length === 0}
+-          allowClear={!vendor?.requiresSubLedger}
++          required={!!vendor?.requiresSubLedger}
+           onChange={(v) => onChange({ subLedgerId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
+       </Field>
+       <Field label="Agent" error={errors.agentId}>
+         <MasterReferencePicker fieldName="agentId" label="Agent" scopeKey="agents" contextKey={contextKey} placeholder="Agent (optional)" value={agentId} hasError={!!errors.agentId} options={agents} disabled={readOnly}
+-          allowClear
+           onChange={(v) => onChange({ agentId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
+       </Field>
+     </>
+diff --git a/src/components/purchase/LinesGrid.tsx b/src/components/purchase/LinesGrid.tsx
+index 1ea8686..dbe12e8 100644
+--- a/src/components/purchase/LinesGrid.tsx
++++ b/src/components/purchase/LinesGrid.tsx
+@@ -149,7 +149,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly,
+               <div key={l.key} className={`border-b border-slate-200 ${errMsgs.length ? "bg-red-50" : ""}`}>
+                 <div style={{ gridTemplateColumns: layout.template }} className="grid gap-x-1 px-2 py-1 items-center">
+                   <span className="text-slate-500 tabular-nums">{i + 1}</span>
+-                  <MasterReferencePicker fieldName={`L.${i}.p`} label="Product" scopeKey="products" contextKey={contextKey} placeholder="Choose product…" value={l.productId} hasError={bad("p")} options={productOpts} disabled={off || (lockProducts && !!l.link)} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
++                  <MasterReferencePicker fieldName={`L.${i}.p`} label="Product" required scopeKey="products" contextKey={contextKey} placeholder="Choose product…" value={l.productId} hasError={bad("p")} options={productOpts} disabled={off || (lockProducts && !!l.link)} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
+                   {layout.showAlt && (
+                     <>
+                       <input data-field={`L.${i}.aq`} disabled={off || !p || altOpts.length === 0} inputMode="decimal" autoComplete="off" value={l.altQty} placeholder={altOpts.length ? "" : "—"} onChange={decOnly(QTY, (v) => patch(i, { altQty: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("aq", "text-right tabular-nums")} aria-label="Alternate quantity" />
+@@ -158,7 +158,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly,
+                   )}
+                   <input data-field={`L.${i}.q`} disabled={off || !p || useAlt} inputMode="decimal" autoComplete="off" value={useAlt ? trimDec(qtyShown) : l.qty} onChange={decOnly(QTY, (v) => patch(i, { qty: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("q", `text-right tabular-nums ${useAlt ? "bg-slate-100" : ""}`)} aria-label="Quantity" />
+                   {p && !p.baseUnitId
+-                    ? <MasterReferencePicker fieldName={`L.${i}.u`} label="Unit" scopeKey="product-units" contextKey={contextKey} placeholder="Choose unit" value={l.unitId} hasError={bad("u")} options={unitOpts} disabled={off} onChange={(v) => patch(i, { unitId: v })} onCommit={afterCombo} />
++                    ? <MasterReferencePicker fieldName={`L.${i}.u`} label="Unit" required scopeKey="product-units" contextKey={contextKey} placeholder="Choose unit" value={l.unitId} hasError={bad("u")} options={unitOpts} disabled={off} onChange={(v) => patch(i, { unitId: v })} onCommit={afterCombo} />
+                     : <span className="text-[12px] text-slate-600 pl-1">{p?.baseUnitId ? unitCode.get(p.baseUnitId) : ""}</span>}
+                   <input data-field={`L.${i}.r`} disabled={off || !p} inputMode="decimal" autoComplete="off" value={l.rate} placeholder="0.00" onChange={decOnly(RATE, (v) => patch(i, { rate: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("r", "text-right tabular-nums")} aria-label="Rate" />
+                   <span className="text-right pr-2 tabular-nums font-medium">{money(lineAmount(l, p))}</span>
+@@ -166,7 +166,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly,
+                     ? <input disabled className="fld h-8 bg-slate-100 text-slate-600" value={l.expectedDate} aria-label="Expected date" />
+                     : <DateInput fieldName={`L.${i}.xd`} value={l.expectedDate} onChange={(v) => patch(i, { expectedDate: v })} calendar={calendar} hasError={bad("xd")} onBlurField={() => {}} compact />)}
+                   {layout.showLoc && (
+-                    <MasterReferencePicker fieldName={`L.${i}.lc`} label="Location" scopeKey="locations" contextKey={contextKey} placeholder={p?.type === "STOCK" ? "Choose location" : "—"} value={l.locationId} hasError={bad("lc")} options={locOpts} disabled={off || p?.type !== "STOCK"} onChange={(v) => patch(i, { locationId: v })} onCommit={afterCombo} />
++                    <MasterReferencePicker fieldName={`L.${i}.lc`} label="Location" required={p?.type === "STOCK"} scopeKey="locations" contextKey={contextKey} placeholder={p?.type === "STOCK" ? "Choose location" : "—"} value={l.locationId} hasError={bad("lc")} options={locOpts} disabled={off || p?.type !== "STOCK"} onChange={(v) => patch(i, { locationId: v })} onCommit={afterCombo} />
+                   )}
+                   {layout.showBatch && (
+                     <input data-field={`L.${i}.b`} disabled={off || !p?.tracksBatch} maxLength={50} placeholder={p?.tracksBatch ? "Batch" : "—"} value={l.batchNo} onChange={(e) => patch(i, { batchNo: e.target.value })} onFocus={(e) => e.currentTarget.select()} className={cls("b", !p?.tracksBatch ? "bg-slate-100" : "")} aria-label="Batch no" />
+@@ -271,7 +271,7 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
+               <div key={t.key} className={`border-b border-slate-200 ${msg ? "bg-red-50" : ""}`}>
+                 <div style={{ gridTemplateColumns: TCOLS }} className="grid gap-x-1 px-2 py-1 items-center">
+                   <span className="text-slate-500 tabular-nums">{i + 1}</span>
+-                  <MasterReferencePicker fieldName={`T.${i}.t`} label="Billing term" scopeKey="purchase-terms" contextKey={contextKey} placeholder="Choose term…" value={t.termId} hasError={bad("t")} options={opts} disabled={off} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
++                  <MasterReferencePicker fieldName={`T.${i}.t`} label="Billing term" required scopeKey="purchase-terms" contextKey={contextKey} placeholder="Choose term…" value={t.termId} hasError={bad("t")} options={opts} disabled={off} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
+                   <input data-field={`T.${i}.l`} disabled={off || !m?.isProductwise} inputMode="numeric" value={t.lineNumber} placeholder={m?.isProductwise ? "Line" : "—"} onChange={decOnly(INT, (v) => patch(i, { lineNumber: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("l", "text-right tabular-nums")} aria-label={`Line number (1-${lineCount})`} />
+                   <select data-field={`T.${i}.c`} disabled={off || !m} value={t.calcType} onChange={(e) => patch(i, { calcType: e.target.value as TermRow["calcType"] })} className={cls("c")} aria-label="Calculated as">
+                     <option value="PERCENT">Percent (%)</option><option value="AMOUNT">Fixed amount</option>
+diff --git a/src/screens/StockOpeningScreen.tsx b/src/screens/StockOpeningScreen.tsx
+index 1a8fadb..10a2c26 100644
+--- a/src/screens/StockOpeningScreen.tsx
++++ b/src/screens/StockOpeningScreen.tsx
+@@ -265,7 +265,7 @@ export default function StockOpeningScreen({ companyId, branchId, fyId, branchNa
+               return (
+                 <div key={r.key} className={`border-b border-slate-200 ${er ? "bg-red-50" : upserts.includes(r) ? "bg-yellow-50" : ""}`}>
+                   <div style={{ gridTemplateColumns: COLS }} className="grid gap-x-1 px-2 py-1 items-center">
+-                    <MasterReferencePicker fieldName={`L.${i}.p`} label="Stock product" scopeKey="stock-detail-products" contextKey={String(companyId)} placeholder="Choose product…" value={r.sd} hasError={er?.col === "p"} options={productOpts} disabled={off} onChange={(v) => pickProduct(r, v)} onCommit={(el) => step(el, 1)} />
++                    <MasterReferencePicker fieldName={`L.${i}.p`} label="Stock product" required scopeKey="stock-detail-products" contextKey={String(companyId)} placeholder="Choose product…" value={r.sd} hasError={er?.col === "p"} options={productOpts} disabled={off} onChange={(v) => pickProduct(r, v)} onCommit={(el) => step(el, 1)} />
+                     <MasterReferencePicker fieldName={`L.${i}.l`} label="Location" scopeKey="locations" contextKey={String(companyId)} placeholder="Location (optional)" value={r.loc} hasError={false} options={locOpts} disabled={off} onChange={(v) => patch(r.key, { loc: v })} onCommit={(el) => step(el, 1)} />
+                     <input data-field={`L.${i}.b`} disabled={off || !p?.tracksBatch} placeholder={p && !p.tracksBatch ? "—" : "Batch"} value={r.batch} maxLength={50} autoComplete="off"
+                       onChange={(e) => patch(r.key, { batch: e.target.value })} onFocus={(e) => e.currentTarget.select()} className={cls("b", !p?.tracksBatch ? "bg-slate-100" : "")} />
+diff --git a/src/screens/purchase/ImportCostAssessmentScreen.tsx b/src/screens/purchase/ImportCostAssessmentScreen.tsx
+index 35249b3..2c79aa2 100644
+--- a/src/screens/purchase/ImportCostAssessmentScreen.tsx
++++ b/src/screens/purchase/ImportCostAssessmentScreen.tsx
+@@ -320,7 +320,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
+                 </label>
+                 <div data-assessment-field>
+                   <MasterReferencePicker
+-                    fieldName="importBillId" label="Posted goods bill (local or import)" value={form.importBillId} options={importOptions}
++                    fieldName="importBillId" required label="Posted goods bill (local or import)" value={form.importBillId} options={importOptions}
+                     onChange={(v) => setForm({ ...form, importBillId: v })} disabled={!editing || busy || !!doc} hasError={!!errors.importBillId}
+                     scopeKey="purchase-bills" contextKey={`${p.companyId}:${p.branchId}`} placeholder="Choose a goods bill…"
+                   />
+@@ -366,7 +366,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
+                         <Fragment key={t.key}>
+                           <tr className="border-t border-slate-200 align-top">
+                             <td className="p-2 w-[240px]">
+-                              <MasterReferencePicker fieldName={`terms.${i}.termId`} label={`Charge ${i + 1}`} value={t.termId} options={termOptions}
++                              <MasterReferencePicker fieldName={`terms.${i}.termId`} label={`Charge ${i + 1}`} required value={t.termId} options={termOptions}
+                                 onChange={(v) => selectTerm(i, v)} disabled={!editing || busy} scopeKey="purchase-terms"
+                                 contextKey={`${p.companyId}:${p.branchId}`} placeholder="Choose charge…" hasError={!!errors.terms && !t.termId} />
+                             </td>
+-- 
+2.43.0
+
