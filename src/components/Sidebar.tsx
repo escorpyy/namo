@@ -52,7 +52,7 @@ const sections: Section[] = [
       { id: "purchase-orders", label: "Purchase Order", icon: ClipboardList },
       { id: "purchase-challans", label: "Purchase Challan", icon: Package },
       { id: "purchase-bills", label: "Purchase Bill", icon: Receipt },
-      { id: "purchase-import-assessments", label: "Import Cost Assessment", icon: FileText },
+      { id: "purchase-import-assessments", label: "Cost Assessment", icon: FileText },
     ],
   },
   {
