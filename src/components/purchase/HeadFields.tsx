@@ -18,17 +18,16 @@ export function VendorFields({ lookups, vendorGLId, subLedgerId, agentId, onChan
   return (
     <>
       <Field label="Vendor" required error={errors.vendorGLId} className="col-span-1 sm:col-span-2">
-        <MasterReferencePicker fieldName="vendorGLId" label="Vendor ledger" scopeKey="vendor-ledgers" contextKey={contextKey} placeholder="Choose vendor ledger…" value={vendorGLId} hasError={!!errors.vendorGLId} options={vendors} disabled={readOnly || lockVendor}
+        <MasterReferencePicker fieldName="vendorGLId" label="Vendor ledger" scopeKey="vendor-ledgers" contextKey={contextKey} placeholder="Choose vendor ledger…" required value={vendorGLId} hasError={!!errors.vendorGLId} options={vendors} disabled={readOnly || lockVendor}
           onChange={(v) => onChange({ vendorGLId: v, subLedgerId: "" })} onCommit={(el, dir) => focusStep(el, dir)} />
       </Field>
       <Field label={vendor?.requiresSubLedger ? "Sub Ledger" : "Sub Ledger (not needed)"} required={!!vendor?.requiresSubLedger} error={errors.subLedgerId}>
         <MasterReferencePicker fieldName="subLedgerId" label="Sub Ledger" scopeKey="sub-ledger" contextKey={`${contextKey}:${vendorGLId || "none"}`} placeholder={subs.length ? "Choose sub ledger…" : "—"} value={subLedgerId} hasError={!!errors.subLedgerId} options={subs} disabled={readOnly || subs.length === 0}
-          allowClear={!vendor?.requiresSubLedger}
+          required={!!vendor?.requiresSubLedger}
           onChange={(v) => onChange({ subLedgerId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
       </Field>
       <Field label="Agent" error={errors.agentId}>
         <MasterReferencePicker fieldName="agentId" label="Agent" scopeKey="agents" contextKey={contextKey} placeholder="Agent (optional)" value={agentId} hasError={!!errors.agentId} options={agents} disabled={readOnly}
-          allowClear
           onChange={(v) => onChange({ agentId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
       </Field>
     </>

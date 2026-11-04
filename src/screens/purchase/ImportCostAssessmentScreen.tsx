@@ -320,7 +320,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                 </label>
                 <div data-assessment-field>
                   <MasterReferencePicker
-                    fieldName="importBillId" label="Posted goods bill (local or import)" value={form.importBillId} options={importOptions}
+                    fieldName="importBillId" required label="Posted goods bill (local or import)" value={form.importBillId} options={importOptions}
                     onChange={(v) => setForm({ ...form, importBillId: v })} disabled={!editing || busy || !!doc} hasError={!!errors.importBillId}
                     scopeKey="purchase-bills" contextKey={`${p.companyId}:${p.branchId}`} placeholder="Choose a goods bill…"
                   />
@@ -366,7 +366,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                         <Fragment key={t.key}>
                           <tr className="border-t border-slate-200 align-top">
                             <td className="p-2 w-[240px]">
-                              <MasterReferencePicker fieldName={`terms.${i}.termId`} label={`Charge ${i + 1}`} value={t.termId} options={termOptions}
+                              <MasterReferencePicker fieldName={`terms.${i}.termId`} label={`Charge ${i + 1}`} required value={t.termId} options={termOptions}
                                 onChange={(v) => selectTerm(i, v)} disabled={!editing || busy} scopeKey="purchase-terms"
                                 contextKey={`${p.companyId}:${p.branchId}`} placeholder="Choose charge…" hasError={!!errors.terms && !t.termId} />
                             </td>

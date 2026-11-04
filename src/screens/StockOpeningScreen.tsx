@@ -265,7 +265,7 @@ export default function StockOpeningScreen({ companyId, branchId, fyId, branchNa
               return (
                 <div key={r.key} className={`border-b border-slate-200 ${er ? "bg-red-50" : upserts.includes(r) ? "bg-yellow-50" : ""}`}>
                   <div style={{ gridTemplateColumns: COLS }} className="grid gap-x-1 px-2 py-1 items-center">
-                    <MasterReferencePicker fieldName={`L.${i}.p`} label="Stock product" scopeKey="stock-detail-products" contextKey={String(companyId)} placeholder="Choose product…" value={r.sd} hasError={er?.col === "p"} options={productOpts} disabled={off} onChange={(v) => pickProduct(r, v)} onCommit={(el) => step(el, 1)} />
+                    <MasterReferencePicker fieldName={`L.${i}.p`} label="Stock product" required scopeKey="stock-detail-products" contextKey={String(companyId)} placeholder="Choose product…" value={r.sd} hasError={er?.col === "p"} options={productOpts} disabled={off} onChange={(v) => pickProduct(r, v)} onCommit={(el) => step(el, 1)} />
                     <MasterReferencePicker fieldName={`L.${i}.l`} label="Location" scopeKey="locations" contextKey={String(companyId)} placeholder="Location (optional)" value={r.loc} hasError={false} options={locOpts} disabled={off} onChange={(v) => patch(r.key, { loc: v })} onCommit={(el) => step(el, 1)} />
                     <input data-field={`L.${i}.b`} disabled={off || !p?.tracksBatch} placeholder={p && !p.tracksBatch ? "—" : "Batch"} value={r.batch} maxLength={50} autoComplete="off"
                       onChange={(e) => patch(r.key, { batch: e.target.value })} onFocus={(e) => e.currentTarget.select()} className={cls("b", !p?.tracksBatch ? "bg-slate-100" : "")} />

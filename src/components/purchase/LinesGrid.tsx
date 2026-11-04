@@ -149,7 +149,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
               <div key={l.key} className={`border-b border-slate-200 ${errMsgs.length ? "bg-red-50" : ""}`}>
                 <div style={{ gridTemplateColumns: layout.template }} className="grid gap-x-1 px-2 py-1 items-center">
                   <span className="text-slate-500 tabular-nums">{i + 1}</span>
-                  <MasterReferencePicker fieldName={`L.${i}.p`} label="Product" scopeKey="products" contextKey={contextKey} placeholder="Choose product…" value={l.productId} hasError={bad("p")} options={productOpts} disabled={off || (lockProducts && !!l.link)} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
+                  <MasterReferencePicker fieldName={`L.${i}.p`} label="Product" required scopeKey="products" contextKey={contextKey} placeholder="Choose product…" value={l.productId} hasError={bad("p")} options={productOpts} disabled={off || (lockProducts && !!l.link)} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
                   {layout.showAlt && (
                     <>
                       <input data-field={`L.${i}.aq`} disabled={off || !p || altOpts.length === 0} inputMode="decimal" autoComplete="off" value={l.altQty} placeholder={altOpts.length ? "" : "—"} onChange={decOnly(QTY, (v) => patch(i, { altQty: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("aq", "text-right tabular-nums")} aria-label="Alternate quantity" />
@@ -158,7 +158,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                   )}
                   <input data-field={`L.${i}.q`} disabled={off || !p || useAlt} inputMode="decimal" autoComplete="off" value={useAlt ? trimDec(qtyShown) : l.qty} onChange={decOnly(QTY, (v) => patch(i, { qty: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("q", `text-right tabular-nums ${useAlt ? "bg-slate-100" : ""}`)} aria-label="Quantity" />
                   {p && !p.baseUnitId
-                    ? <MasterReferencePicker fieldName={`L.${i}.u`} label="Unit" scopeKey="product-units" contextKey={contextKey} placeholder="Choose unit" value={l.unitId} hasError={bad("u")} options={unitOpts} disabled={off} onChange={(v) => patch(i, { unitId: v })} onCommit={afterCombo} />
+                    ? <MasterReferencePicker fieldName={`L.${i}.u`} label="Unit" required scopeKey="product-units" contextKey={contextKey} placeholder="Choose unit" value={l.unitId} hasError={bad("u")} options={unitOpts} disabled={off} onChange={(v) => patch(i, { unitId: v })} onCommit={afterCombo} />
                     : <span className="text-[12px] text-slate-600 pl-1">{p?.baseUnitId ? unitCode.get(p.baseUnitId) : ""}</span>}
                   <input data-field={`L.${i}.r`} disabled={off || !p} inputMode="decimal" autoComplete="off" value={l.rate} placeholder="0.00" onChange={decOnly(RATE, (v) => patch(i, { rate: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("r", "text-right tabular-nums")} aria-label="Rate" />
                   <span className="text-right pr-2 tabular-nums font-medium">{money(lineAmount(l, p))}</span>
@@ -166,7 +166,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                     ? <input disabled className="fld h-8 bg-slate-100 text-slate-600" value={l.expectedDate} aria-label="Expected date" />
                     : <DateInput fieldName={`L.${i}.xd`} value={l.expectedDate} onChange={(v) => patch(i, { expectedDate: v })} calendar={calendar} hasError={bad("xd")} onBlurField={() => {}} compact />)}
                   {layout.showLoc && (
-                    <MasterReferencePicker fieldName={`L.${i}.lc`} label="Location" scopeKey="locations" contextKey={contextKey} placeholder={p?.type === "STOCK" ? "Choose location" : "—"} value={l.locationId} hasError={bad("lc")} options={locOpts} disabled={off || p?.type !== "STOCK"} onChange={(v) => patch(i, { locationId: v })} onCommit={afterCombo} />
+                    <MasterReferencePicker fieldName={`L.${i}.lc`} label="Location" required={p?.type === "STOCK"} scopeKey="locations" contextKey={contextKey} placeholder={p?.type === "STOCK" ? "Choose location" : "—"} value={l.locationId} hasError={bad("lc")} options={locOpts} disabled={off || p?.type !== "STOCK"} onChange={(v) => patch(i, { locationId: v })} onCommit={afterCombo} />
                   )}
                   {layout.showBatch && (
                     <input data-field={`L.${i}.b`} disabled={off || !p?.tracksBatch} maxLength={50} placeholder={p?.tracksBatch ? "Batch" : "—"} value={l.batchNo} onChange={(e) => patch(i, { batchNo: e.target.value })} onFocus={(e) => e.currentTarget.select()} className={cls("b", !p?.tracksBatch ? "bg-slate-100" : "")} aria-label="Batch no" />
@@ -271,7 +271,7 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
               <div key={t.key} className={`border-b border-slate-200 ${msg ? "bg-red-50" : ""}`}>
                 <div style={{ gridTemplateColumns: TCOLS }} className="grid gap-x-1 px-2 py-1 items-center">
                   <span className="text-slate-500 tabular-nums">{i + 1}</span>
-                  <MasterReferencePicker fieldName={`T.${i}.t`} label="Billing term" scopeKey="purchase-terms" contextKey={contextKey} placeholder="Choose term…" value={t.termId} hasError={bad("t")} options={opts} disabled={off} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
+                  <MasterReferencePicker fieldName={`T.${i}.t`} label="Billing term" required scopeKey="purchase-terms" contextKey={contextKey} placeholder="Choose term…" value={t.termId} hasError={bad("t")} options={opts} disabled={off} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
                   <input data-field={`T.${i}.l`} disabled={off || !m?.isProductwise} inputMode="numeric" value={t.lineNumber} placeholder={m?.isProductwise ? "Line" : "—"} onChange={decOnly(INT, (v) => patch(i, { lineNumber: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("l", "text-right tabular-nums")} aria-label={`Line number (1-${lineCount})`} />
                   <select data-field={`T.${i}.c`} disabled={off || !m} value={t.calcType} onChange={(e) => patch(i, { calcType: e.target.value as TermRow["calcType"] })} className={cls("c")} aria-label="Calculated as">
                     <option value="PERCENT">Percent (%)</option><option value="AMOUNT">Fixed amount</option>

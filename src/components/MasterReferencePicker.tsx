@@ -26,9 +26,17 @@ interface Props {
   disabled?: boolean;
   scopeKey: string;
   contextKey?: string;
-  /** When true, offer a clear/none action and allow Backspace/Delete to empty the field. */
+  /**
+   * Mandatory field: no "None" row, Backspace/Delete cannot empty it, and Enter will not move on until something is chosen.
+   * Every picker is optional unless it says `required`.
+   */
+  required?: boolean;
+  /** Advanced override. By default the field is clearable exactly when it is not `required`. */
   allowClear?: boolean;
 }
+
+// The empty choice offered on optional fields.
+const NONE: ReferenceOption = { value: "", label: "None", code: "—", name: "None (leave empty)" };
 
 const RECENT_LIMIT = 8;
 const textOf = (value: unknown) => String(value ?? "").trim().toLocaleLowerCase();
@@ -51,7 +59,8 @@ const readHistory = (key: string): PickerHistory => {
   }
 };
 
-export function MasterReferencePicker({ fieldName, label, value, options, onChange, onCommit, onBlurField, placeholder, hasError, disabled, scopeKey, contextKey = "global", allowClear = false }: Props) {
+export function MasterReferencePicker({ fieldName, label, value, options, onChange, onCommit, onBlurField, placeholder, hasError, disabled, scopeKey, contextKey = "global", required = false, allowClear }: Props) {
+  const clearable = allowClear ?? !required;
   const uid = useId().replace(/:/g, "");
   const dialogId = `master-picker-${uid}`;
   const titleId = `master-picker-title-${uid}`;
@@ -71,7 +80,12 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
   const [usageCounts, setUsageCounts] = useState<Record<string, number>>({});
   const [view, setView] = useState<"all" | "recent" | "frequent">("all");
   const [activeIndex, setActiveIndex] = useState(0);
-  const current = options.find((option) => option.value === value);
+  const [touched, setTouched] = useState(false);
+  // Focusing the field opens the list; our own programmatic re-focus (after choose / close) must not reopen it.
+  const suppressFocusOpen = useRef(false);
+  // Enter picks the highlighted row only after the user typed, moved or the row is the current value; a bare Enter never picks "the first one".
+  const navigated = useRef(false);
+  const current = value === "" ? undefined : options.find((option) => option.value === value);
   const hasInactive = options.some((option) => option.isActive === false);
 
   const filtered = useMemo(() => {
@@ -96,8 +110,25 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
     });
   }, [options, value, query, findCode, findName, includeInactive, recents, usageCounts, view]);
 
+  // Optional fields get an explicit "None" row on top of the unfiltered list.
+  const showNone = clearable && !query && !findCode && !findName && view === "all";
+  const rows = useMemo(() => (showNone ? [NONE, ...filtered] : filtered), [showNone, filtered]);
+
+  // Give focus back to the field without that focus reopening the list.
+  const refocusTrigger = (after?: (el: HTMLInputElement) => void) => {
+    requestAnimationFrame(() => {
+      const el = triggerRef.current;
+      if (!el) return;
+      suppressFocusOpen.current = true;
+      el.focus();
+      suppressFocusOpen.current = false;
+      after?.(el);
+    });
+  };
+
   const openDialog = (initialQuery = "") => {
     if (disabled) return;
+    navigated.current = false;
     setQuery(initialQuery);
     setFindOpen(false);
     setFindCode("");
@@ -113,37 +144,34 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
 
   const closeDialog = (restoreFocus = true) => {
     setOpen(false);
-    if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus());
+    if (restoreFocus) refocusTrigger();
   };
 
   const choose = (option: ReferenceOption, direction: 1 | -1 = 1) => {
-    onChange(option.value);
-    const history = readHistory(recentKey);
-    const nextRecents = [option.value, ...history.recent.filter((id) => id !== option.value)].slice(0, RECENT_LIMIT);
-    const updatedCounts = { ...history.counts, [option.value]: (history.counts[option.value] ?? 0) + 1 };
-    const nextCounts = Object.fromEntries(Object.entries(updatedCounts).sort((a, b) => b[1] - a[1]).slice(0, 50));
-    try { localStorage.setItem(recentKey, JSON.stringify({ recent: nextRecents, counts: nextCounts })); } catch { /* storage can be unavailable in private browsing */ }
-    setRecents(nextRecents);
-    setUsageCounts(nextCounts);
+    if (option.value === "") {
+      // "None": only offered on optional fields.
+      if (!clearable) return;
+      if (value !== "") onChange("");
+    } else {
+      if (option.value !== value) onChange(option.value);
+      const history = readHistory(recentKey);
+      const nextRecents = [option.value, ...history.recent.filter((id) => id !== option.value)].slice(0, RECENT_LIMIT);
+      const updatedCounts = { ...history.counts, [option.value]: (history.counts[option.value] ?? 0) + 1 };
+      const nextCounts = Object.fromEntries(Object.entries(updatedCounts).sort((a, b) => b[1] - a[1]).slice(0, 50));
+      try { localStorage.setItem(recentKey, JSON.stringify({ recent: nextRecents, counts: nextCounts })); } catch { /* storage can be unavailable in private browsing */ }
+      setRecents(nextRecents);
+      setUsageCounts(nextCounts);
+    }
     setOpen(false);
-    requestAnimationFrame(() => {
-      if (triggerRef.current) {
-        triggerRef.current.focus();
-        onCommit?.(triggerRef.current, direction);
-      }
-    });
+    refocusTrigger((el) => onCommit?.(el, direction));
   };
 
-  const clearValue = (direction: 1 | -1 | null = null) => {
-    if (!allowClear) return;
-    onChange("");
+  // Clear and move on (the dialog's "None / Clear" button).
+  const clearValue = (direction: 1 | -1) => {
+    if (!clearable) return;
+    if (value !== "") onChange("");
     setOpen(false);
-    requestAnimationFrame(() => {
-      if (triggerRef.current) {
-        triggerRef.current.focus();
-        if (direction !== null) onCommit?.(triggerRef.current, direction);
-      }
-    });
+    refocusTrigger((el) => onCommit?.(el, direction));
   };
 
   useEffect(() => {
@@ -157,18 +185,28 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
     };
   }, [open]);
 
+  // On open, start on the current value (or "None" for an empty optional field), not blindly on row 0.
   useEffect(() => {
-    setActiveIndex((index) => filtered.length ? Math.min(index, filtered.length - 1) : 0);
-  }, [filtered.length]);
+    if (!open) return;
+    setActiveIndex(query ? 0 : Math.max(0, rows.findIndex((row) => row.value === value)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   useEffect(() => {
-    if (!open || !filtered[activeIndex]) return;
+    setActiveIndex((index) => rows.length ? Math.min(index, rows.length - 1) : 0);
+  }, [rows.length]);
+
+  useEffect(() => {
+    if (!open || !rows[activeIndex]) return;
     resultsRef.current?.querySelector<HTMLElement>("[data-active]")?.scrollIntoView({ block: "nearest" });
-  }, [activeIndex, filtered, open]);
+  }, [activeIndex, rows, open]);
 
   const selectActive = (direction: 1 | -1 = 1) => {
-    const option = filtered[activeIndex];
-    if (option) choose(option, direction);
+    const option = rows[activeIndex];
+    if (!option) return;
+    // Mandatory + still empty: Enter must not silently pick whatever is first. The user has to type, move or click.
+    if (required && value === "" && !query && !findCode && !findName && !navigated.current) return;
+    choose(option, direction);
   };
 
   const onDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -196,8 +234,9 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
     }
   };
 
-  const activeOption = filtered[activeIndex];
+  const activeOption = rows[activeIndex];
   const currentLabel = current?.label ?? "";
+  const invalid = hasError || (required && touched && value === "");
   const clearFilters = () => { setQuery(""); setFindCode(""); setFindName(""); setIncludeInactive(false); setView("all"); searchRef.current?.focus(); };
 
   return (
@@ -215,18 +254,31 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
           aria-haspopup="dialog"
           aria-expanded={open}
           aria-controls={open ? dialogId : undefined}
-          aria-invalid={hasError || undefined}
+          aria-invalid={invalid || undefined}
+          aria-required={required || undefined}
           title={currentLabel || placeholder}
           placeholder={placeholder}
           disabled={disabled}
           value={currentLabel}
-          onClick={() => openDialog()}
-          onBlur={() => onBlurField?.()}
+          onFocus={() => {
+            // Landing on the field shows the choices straight away.
+            if (suppressFocusOpen.current || disabled || open) return;
+            openDialog();
+          }}
+          onClick={() => { if (!open) openDialog(); }}
+          onBlur={() => {
+            // The list taking focus is not "leaving the field".
+            if (open) return;
+            setTouched(true);
+            onBlurField?.();
+          }}
           onKeyDown={(event) => {
             // Enter / Shift+Enter = next / previous field (keyboard-first form flow).
             if (event.key === "Enter") {
               event.preventDefault();
               event.stopPropagation();
+              // Mandatory and still empty: do not move forward, show the choices instead.
+              if (required && value === "" && !event.shiftKey) { setTouched(true); openDialog(); return; }
               onCommit?.(event.currentTarget, event.shiftKey ? -1 : 1);
               return;
             }
@@ -237,11 +289,12 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
               openDialog();
               return;
             }
-            // Optional fields: Backspace / Delete clears without opening the dialog.
-            if (allowClear && value && (event.key === "Backspace" || event.key === "Delete")) {
+            // Optional fields: Backspace / Delete empties the value, and the choices come straight back up.
+            if (clearable && value && (event.key === "Backspace" || event.key === "Delete")) {
               event.preventDefault();
               event.stopPropagation();
-              clearValue();
+              onChange("");
+              openDialog();
               return;
             }
             // Typing a character opens the dialog pre-filtered.
@@ -251,7 +304,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
               openDialog(event.key);
             }
           }}
-          className={`fld min-w-0 pr-8 text-left ${hasError ? "fld-err" : ""} ${disabled ? "bg-slate-100 text-slate-600" : "cursor-pointer"}`}
+          className={`fld min-w-0 pr-8 text-left ${invalid ? "fld-err" : ""} ${disabled ? "bg-slate-100 text-slate-600" : "cursor-pointer"}`}
         />
         <ChevronDown size={14} aria-hidden="true" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
       </div>
@@ -273,7 +326,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
                 <p className="text-xs text-slate-600">Search, use Find for specific fields, then choose a result. Enter moves to the next field on the form; open this list with Space or ↓.</p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                {allowClear && (
+                {clearable && (
                   <button type="button" className="btn h-8" title="Clear selection" onClick={() => clearValue(1)}>
                     None / Clear
                   </button>
@@ -294,16 +347,16 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
                   aria-autocomplete="list"
                   aria-expanded="true"
                   aria-controls={listId}
-                  aria-activedescendant={activeOption ? `${listId}-option-${activeOption.value}` : undefined}
+                  aria-activedescendant={activeOption ? `${listId}-option-${activeOption.value || "none"}` : undefined}
                   autoComplete="off"
                   value={query}
                   onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
                   onKeyDown={(event) => {
-                    if (event.key === "ArrowDown") { event.preventDefault(); setActiveIndex((index) => Math.min(index + 1, filtered.length - 1)); }
-                    else if (event.key === "ArrowUp") { event.preventDefault(); setActiveIndex((index) => Math.max(index - 1, 0)); }
+                    if (event.key === "ArrowDown") { event.preventDefault(); navigated.current = true; setActiveIndex((index) => Math.min(index + 1, rows.length - 1)); }
+                    else if (event.key === "ArrowUp") { event.preventDefault(); navigated.current = true; setActiveIndex((index) => Math.max(index - 1, 0)); }
                     else if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); selectActive(event.shiftKey ? -1 : 1); }
-                    else if (event.key === "Home" && event.ctrlKey) { event.preventDefault(); setActiveIndex(0); }
-                    else if (event.key === "End" && event.ctrlKey) { event.preventDefault(); setActiveIndex(Math.max(0, filtered.length - 1)); }
+                    else if (event.key === "Home" && event.ctrlKey) { event.preventDefault(); navigated.current = true; setActiveIndex(0); }
+                    else if (event.key === "End" && event.ctrlKey) { event.preventDefault(); navigated.current = true; setActiveIndex(Math.max(0, rows.length - 1)); }
                   }}
                   placeholder={`Search ${label} by code or name…`}
                   className="fld h-10 w-full pl-8"
@@ -346,13 +399,31 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
               <div className="sticky top-0 z-10 grid grid-cols-[minmax(70px,0.7fr)_minmax(120px,1.5fr)_64px] gap-2 border-b border-slate-300 bg-slate-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600 sm:grid-cols-[minmax(90px,0.8fr)_minmax(150px,1.5fr)_minmax(100px,1fr)_76px]">
                 <span>Code</span><span>Name / description</span><span className="hidden sm:block">Details</span><span>Status</span>
               </div>
-              <div id={listId} role="listbox" aria-label={`${label} results`} aria-activedescendant={activeOption ? `${listId}-option-${activeOption.value}` : undefined}>
-                {filtered.map((option, index) => {
+              <div id={listId} role="listbox" aria-label={`${label} results`} aria-activedescendant={activeOption ? `${listId}-option-${activeOption.value || "none"}` : undefined}>
+                {rows.map((option, index) => {
+                    const isNone = option.value === "";
                     const isCurrent = option.value === value;
-                    const isRecent = !query && !findCode && !findName && recents.includes(option.value);
-                    const isFrequent = (usageCounts[option.value] ?? 0) >= 2;
+                    const isRecent = !isNone && !query && !findCode && !findName && recents.includes(option.value);
+                    const isFrequent = !isNone && (usageCounts[option.value] ?? 0) >= 2;
                     const code = option.code ?? option.short ?? "—";
                     const name = option.name ?? option.label;
+                    if (isNone) {
+                      return (
+                        <div
+                          id={`${listId}-option-none`}
+                          key="__none__"
+                          role="option"
+                          aria-selected={isCurrent}
+                          data-active={index === activeIndex || undefined}
+                          onMouseEnter={() => setActiveIndex(index)}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => choose(option)}
+                          className={`cursor-pointer border-b border-slate-200 px-3 py-3 text-sm italic text-slate-600 hover:bg-blue-50 ${index === activeIndex ? "bg-blue-100 outline outline-2 -outline-offset-2 outline-blue-600" : ""} ${isCurrent ? "font-semibold" : ""}`}
+                        >
+                          — None (leave empty){isCurrent ? " · Current" : ""}
+                        </div>
+                      );
+                    }
                     return (
                       <div
                         id={`${listId}-option-${option.value}`}

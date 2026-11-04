@@ -84,7 +84,7 @@ export function MasterForm({ def, companyId, mode, form, setForm, errors, onBlur
           fieldName={f.name} label={f.label} scopeKey={f.lookup!}
           contextKey={`${companyId}${f.lookupScope === "record" ? `:${selected?.id ?? "new"}` : ""}`}
           placeholder={f.placeholder ?? (isRequired(f, form) ? "Choose…" : "Optional")}
-          value={String(form[f.name])} hasError={!!err} options={lookups[f.name] ?? []}
+          value={String(form[f.name])} hasError={!!err} options={lookups[f.name] ?? []} required={isRequired(f, form)}
           onChange={(v) => set(f.name, v)} onCommit={(el) => moveFocus(el, 1)} onBlurField={() => onBlurField(f.name)} disabled={!editable || (f.lockOnEdit && mode === "edit")}
         />
       );
@@ -92,7 +92,7 @@ export function MasterForm({ def, companyId, mode, form, setForm, errors, onBlur
       return (
         <Combobox
           fieldName={f.name} placeholder={f.placeholder ?? (isRequired(f, form) ? "Type or pick…" : "Optional")}
-          value={String(form[f.name])} hasError={!!err} options={optsOf(f)}
+          value={String(form[f.name])} hasError={!!err} options={optsOf(f)} required={isRequired(f, form)}
           onChange={(v) => set(f.name, v)} onCommit={(el) => moveFocus(el, 1)} onBlurField={() => onBlurField(f.name)}
         />
       );
