@@ -19,6 +19,10 @@ interface Props {
 }
 
 const safeMoney = (value: unknown) => money(value == null ? "0" : String(value)) || "0.00";
+const signedMoney = (value: unknown) => {
+  const text = value == null ? "0" : String(value);
+  return text.startsWith("-") ? `− ${money(text.slice(1))}` : money(text);
+};
 
 export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, isAdditional, hasLines, hasTerms }: Props) {
   const showSaved = readOnly && !!savedDoc;
@@ -46,8 +50,8 @@ export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, isAdditiona
     { label: "Basic amount", value: showSaved ? safeMoney(savedDoc?.basicAmount) : money(preview.basicAmount) },
     { label: "Additions", value: showSaved ? savedAdditions : awaitingAdditionalTerm || preview.additions === null ? "—" : money(preview.additions) },
     { label: "Deductions", value: showSaved ? savedDeductions : awaitingAdditionalTerm || preview.deductions === null ? "—" : money(preview.deductions) },
-    { label: "Net terms", value: showSaved ? safeMoney(savedDoc?.termAmount) : awaitingAdditionalTerm || preview.termAmount === null ? "—" : money(preview.termAmount) },
-    { label: "Net amount", value: showSaved ? safeMoney(savedDoc?.totalAmount) : awaitingAdditionalTerm || preview.netAmount === null ? "—" : money(preview.netAmount), total: true },
+    { label: "Net terms", value: showSaved ? signedMoney(savedDoc?.termAmount) : awaitingAdditionalTerm || preview.termAmount === null ? "—" : signedMoney(preview.termAmount) },
+    { label: "Net amount", value: showSaved ? signedMoney(savedDoc?.totalAmount) : awaitingAdditionalTerm || preview.netAmount === null ? "—" : signedMoney(preview.netAmount), total: true },
   ];
   const calculationAlert = savedBreakdownMismatch || (!showSaved && preview.status === "error");
 

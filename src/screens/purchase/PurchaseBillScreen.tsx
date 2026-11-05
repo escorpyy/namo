@@ -5,7 +5,6 @@ import { Combobox, type ComboOption } from "../../components/Combobox";
 import { COMMON_HELP, DocShell, Field, FormSection, HINTS, Pill, focusStep, money } from "../../components/purchase/Bits";
 import { DateField, TextField, VendorFields } from "../../components/purchase/HeadFields";
 import { LinesGrid, TermsGrid } from "../../components/purchase/LinesGrid";
-import { PurchaseTabPanel, PurchaseTabs, type PurchaseTabId } from "../../components/purchase/PurchaseTabs";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
 import {
   blankLine, dateErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
@@ -41,6 +40,7 @@ interface BForm {
   dueDays: string; dueDate: string; remarks: string; purchaseChallanId: string; purchaseOrderId: string; mainBillId: string; importCostForBillId: string; importCostAllocationBasis: "VALUE" | "QUANTITY"; importCostTreatment: "CIF" | "LANDED_ONLY"; challanNo: string; orderNo: string;
   lines: LineRow[]; terms: TermRow[]; imp: Record<string, string>;
 }
+type TermDialog = { scope: "header" } | { scope: "line"; lineNumber: number; lineIndex: number };
 const iso10 = (v: unknown) => (v ? String(v).slice(0, 10) : "");
 
 export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChallan: { id: number; n: number } | null }) {
@@ -49,7 +49,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
     emptyForm: (lk) => ({
       invoiceDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), invoiceType: "LOCAL", purchaseType: "GOODS_PURCHASE_OTHERS", vendorGLId: "", subLedgerId: "", agentId: "",
       vendorInvoiceNo: "", vendorInvoiceDate: "", dueDays: "", dueDate: "", remarks: "", purchaseChallanId: "", purchaseOrderId: "", mainBillId: "", importCostForBillId: "", importCostAllocationBasis: "VALUE", importCostTreatment: "CIF", challanNo: "", orderNo: "",
-      lines: [blankLine()], terms: [], imp: {},
+      lines: Array.from({ length: 10 }, () => blankLine()), terms: [], imp: {},
     }),
     toForm: (d: PDoc, lk) => {
       const prods = new Map(lk.products.map((x) => [String(x.id), x]));
@@ -99,24 +99,13 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
   }), [p.fyCode]);
   const lkRef = useMemo(() => ({ current: null as ReturnType<typeof useDocScreen>["lookups"] }), []);
   const s = useDocScreen<BForm>(cfg, { companyId: p.companyId, branchId: p.branchId, fyCode: p.fyCode, userId: p.userId, calendar: p.calendar }, { setStatus: p.setStatus, dirtyRef: p.dirtyRef, externalMessage: p.externalMessage, hints: HINTS });
-  const [activeTab, setActiveTab] = useState<PurchaseTabId>("header");
-  const shell = { ...s, newDoc: () => { setActiveTab("header"); s.newDoc(); }, select: (id: number) => { setActiveTab("header"); s.select(id); } };
+  const [termDialog, setTermDialog] = useState<TermDialog | null>(null);
+  const [termDraft, setTermDraft] = useState<TermRow[]>([]);
   lkRef.current = s.lookups;
   const f = s.form, lk = s.lookups, doc = s.doc, ro = s.readOnly;
   const products = useMemo(() => new Map((lk?.products ?? []).map((x) => [String(x.id), x])), [lk]);
   const masters = useMemo(() => new Map((lk?.terms ?? []).map((x) => [String(x.id), x])), [lk]);
   const isAdditional = !!f?.mainBillId;
-  useEffect(() => {
-    const first = Object.keys(s.errors).find((key) => s.errors[key]);
-    if (!first) return;
-    const tab: PurchaseTabId = first === "terms" || first.startsWith("T.") ? "terms" : first === "lines" || first.startsWith("L.") ? "lines" : "header";
-    setActiveTab(tab);
-    requestAnimationFrame(() => {
-      const field = document.querySelector<HTMLElement>(`[data-zone=form] [data-field="${first}"]`)
-        ?? document.querySelector<HTMLElement>(`[data-zone=form] [data-field^="${first}"]`);
-      field?.focus();
-    });
-  }, [s.errors]);
   const invoicePreview = useMemo(() => {
     if (!f) return previewPurchase([], [], new Map(), true);
     const liveLines = f.lines.filter((line) => !isBlankLine(line));
@@ -145,6 +134,116 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
     const termMasters = new Map((lk?.terms ?? []).map((term) => [term.id, term]));
     return previewPurchase(pricedLines, terms, termMasters, incompleteLines);
   }, [f, isAdditional, lk?.terms, products]);
+
+  const isScopedTerm = (term: TermRow, scope: TermDialog) => {
+    if (isBlankTerm(term)) return false;
+    const master = masters.get(term.termId);
+    const productwise = master?.isProductwise ?? !!term.lineNumber;
+    if (scope.scope === "header") return !productwise;
+    return productwise && Number(term.lineNumber) === scope.lineNumber;
+  };
+  const openTerms = (scope: TermDialog) => {
+    if (!f) return;
+    setTermDraft(f.terms.filter((term) => isScopedTerm(term, scope)).map((term) => ({ ...term })));
+    setTermDialog(scope);
+    window.setTimeout(() => (document.querySelector<HTMLElement>('[data-term-dialog] [data-field^="T."]:not(:disabled)')
+      ?? document.querySelector<HTMLElement>("[data-term-dialog] button"))?.focus(), 40);
+  };
+  const closeTermDialog = () => {
+    const previous = termDialog;
+    setTermDialog(null);
+    window.requestAnimationFrame(() => {
+      const target = previous?.scope === "line"
+        ? document.querySelector<HTMLElement>(`[data-nav="line-terms-${previous.lineIndex}"]`)
+        : document.querySelector<HTMLElement>('[data-nav="header-terms"]');
+      target?.focus();
+    });
+  };
+  const applyTermDialog = () => {
+    if (!f || !termDialog) return;
+    const preserved = f.terms.filter((term) => !isBlankTerm(term) && !isScopedTerm(term, termDialog));
+    const changed = termDraft.filter((term) => !isBlankTerm(term));
+    s.patch({ terms: [...preserved, ...changed] });
+    s.clearError(...Object.keys(s.errors).filter((key) => key === "terms" || key.startsWith("T.")));
+    closeTermDialog();
+  };
+  const lineNumberAt = (index: number) => f
+    ? f.lines.slice(0, index).filter((line) => !isBlankLine(line)).length + 1
+    : index + 1;
+  const updateBillLines = (nextLines: LineRow[]) => {
+    if (!f) return;
+    const oldLive = f.lines.filter((line) => !isBlankLine(line));
+    const nextLive = nextLines.filter((line) => !isBlankLine(line));
+    const nextNumber = new Map(nextLive.map((line, index) => [line.key, index + 1]));
+    let termsChanged = false;
+    const terms = f.terms.flatMap((term) => {
+      const master = masters.get(term.termId);
+      if (!master?.isProductwise) return [term];
+      const oldLineNumber = Number(term.lineNumber);
+      if (!Number.isInteger(oldLineNumber) || oldLineNumber < 1) return [term];
+      const oldLine = oldLive[oldLineNumber - 1];
+      if (!oldLine) return [term];
+      const newLineNumber = oldLine ? nextNumber.get(oldLine.key) : undefined;
+      if (!newLineNumber) { termsChanged = true; return []; }
+      if (newLineNumber === Number(term.lineNumber)) return [term];
+      termsChanged = true;
+      return [{ ...term, lineNumber: String(newLineNumber) }];
+    });
+    s.patch(termsChanged ? { lines: nextLines, terms } : { lines: nextLines });
+  };
+  const lineTermsSummary = (index: number) => {
+    if (!f || isBlankLine(f.lines[index])) return { amount: "0.00", count: 0 };
+    const lineNumber = lineNumberAt(index);
+    let total = 0n;
+    let count = 0;
+    for (const term of f.terms) {
+      const master = masters.get(term.termId);
+      if (!master?.isProductwise || Number(term.lineNumber) !== lineNumber) continue;
+      count += 1;
+      const live = invoicePreview.terms.get(term.key)?.signedAmount;
+      const stored = term.finalAmount && (ro || !!doc) ? `${term.nature === "DEDUCTIVE" || master.nature === "DEDUCTIVE" ? "-" : ""}${term.finalAmount}` : "0";
+      try { total += toMicro(live ?? stored); } catch { /* keep the last valid displayed total */ }
+    }
+    return { amount: formatImportCost(total, 2), count };
+  };
+  const headerTermsTotal = (() => {
+    let total = 0n;
+    for (const term of f?.terms ?? []) {
+      const master = masters.get(term.termId);
+      if (master?.isProductwise) continue;
+      const live = invoicePreview.terms.get(term.key)?.signedAmount;
+      const stored = term.finalAmount && (ro || !!doc) ? `${term.nature === "DEDUCTIVE" || master?.nature === "DEDUCTIVE" ? "-" : ""}${term.finalAmount}` : "0";
+      try { total += toMicro(live ?? stored); } catch { /* ignore malformed legacy data in the preview label */ }
+    }
+    return formatImportCost(total, 2);
+  })();
+  useEffect(() => {
+    if (termDialog) return;
+    const key = Object.keys(s.errors).find((name) => /^T\.\d+\./.test(name) && s.errors[name]);
+    if ((!key && !s.errors.terms) || !f) return;
+    if (!key) { openTerms({ scope: "header" }); return; }
+    const index = Number(/^T\.(\d+)\./.exec(key)?.[1]);
+    const term = f.terms[index];
+    if (!term) return;
+    const master = masters.get(term.termId);
+    if (master?.isProductwise) {
+      const lineNumber = Number(term.lineNumber) || 1;
+      openTerms({ scope: "line", lineNumber, lineIndex: Math.max(0, lineNumber - 1) });
+    } else openTerms({ scope: "header" });
+    // The dialog opens only in response to a new validation error object.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.errors]);
+  useEffect(() => {
+    const onShortcut = (event: KeyboardEvent) => {
+      if (event.key !== "F6" || termDialog || !f || ro) return;
+      event.preventDefault();
+      if (isAdditional) openTerms({ scope: "header" });
+      else document.querySelector<HTMLElement>('[data-grid="lines"] [data-nav="add-line"]')?.click();
+    };
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [termDialog, f, ro]);
 
   // start from a confirmed challan (the "Create Bill" button on the challan screen)
   const started = useRef(0);
@@ -261,7 +360,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
   );
 
   return (
-    <DocShell s={shell} title="Purchase Bill" singular="Bill" branchName={p.branchName} fyCode={p.fyCode} statusOptions={OPTIONS}
+    <DocShell s={s} title="Purchase Bill" singular="Bill" branchName={p.branchName} fyCode={p.fyCode} statusOptions={OPTIONS}
       pill={state && <Pill text={state} tone={STATE_TONE[state]} />} canEdit={!!doc && cfg.editable(doc)} canDelete={!!doc && cfg.deletable(doc)} actions={actions} help={HELP} notice={notice}
       listRow={(r) => (
         <>
@@ -271,42 +370,67 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
         </>
       )}>
       {f && lk && (() => {
+        const dialogErrors: Errors = {};
+        if (termDialog) {
+          for (const [key, value] of Object.entries(s.errors)) {
+            if (key === "terms") { dialogErrors.terms = value; continue; }
+            const match = /^T\.(\d+)\.(.+)$/.exec(key);
+            if (!match) continue;
+            const localIndex = termDraft.findIndex((term) => term.key === f.terms[Number(match[1])]?.key);
+            if (localIndex >= 0) dialogErrors[`T.${localIndex}.${match[2]}`] = value;
+          }
+        }
+        const clearDialogError = (...keys: string[]) => {
+          const mapped = keys.map((key) => {
+            const match = /^T\.(\d+)\.(.+)$/.exec(key);
+            if (!match) return key;
+            const globalIndex = f.terms.findIndex((term) => term.key === termDraft[Number(match[1])]?.key);
+            return globalIndex < 0 ? key : `T.${globalIndex}.${match[2]}`;
+          });
+          s.clearError(...mapped);
+        };
         const liveLines = f.lines.filter((line) => !isBlankLine(line)).length;
         const liveTerms = f.terms.filter((term) => !isBlankTerm(term)).length;
-        const vendorOk = !!f.vendorGLId;
-        const dateOk = !!f.invoiceDate && !s.err("invoiceDate");
-        const linesOk = isAdditional ? liveTerms > 0 : liveLines > 0;
-        const totalsOk = invoicePreview.status === "ready" || (ro && !!doc);
-        const check = (ok: boolean, label: string) => (
-          <span className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[11px] font-medium ${ok ? "border-green-300 bg-green-50 text-green-800" : "border-slate-300 bg-slate-50 text-slate-600"}`}>
-            <span aria-hidden="true">{ok ? "✓" : "○"}</span>{label}
-          </span>
-        );
         const impFilled = Object.values(f.imp).filter((v) => String(v ?? "").trim() !== "").length;
+        const dialogPreview = termDialog && !ro ? (() => {
+          let incompleteLines = !isAdditional && liveLines === 0;
+          const pricedLines = f.lines.filter((line) => !isBlankLine(line)).flatMap((line, index) => {
+            const product = products.get(line.productId);
+            const qty = effectiveQty(line, product);
+            const validQty = !!qty && !!parseDec(qty) && parseDec(qty)!.n > 0n;
+            const validRate = !!line.rate && !!parseDec(line.rate);
+            if (!product || !validQty || !validRate || (!!line.altQty !== !!line.altUnitId)) { incompleteLines = true; return []; }
+            const amount = lineAmount(line, product);
+            return amount ? [{ lineNumber: index + 1, basicAmount: amount }] : (incompleteLines = true, []);
+          });
+          const rows = [...f.terms.filter((term) => !isBlankTerm(term) && !isScopedTerm(term, termDialog)), ...termDraft.filter((term) => !isBlankTerm(term))].map((term) => ({
+            rowKey: term.key, termId: Number(term.termId), lineNumber: term.lineNumber, calcType: term.calcType,
+            rate: term.rate, inputAmount: term.inputAmount, isOverridden: term.isOverridden, overrideAmount: term.overrideAmount,
+          }));
+          const termMasters = new Map(lk.terms.map((term) => [term.id, term]));
+          return previewPurchase(pricedLines, rows, termMasters, incompleteLines);
+        })() : undefined;
+        let dialogTotalMicro = 0n;
+        let dialogTotalComplete = !!ro;
+        if (termDialog && ro) {
+          for (const term of termDraft) {
+            const master = masters.get(term.termId);
+            if (!term.finalAmount) continue;
+            const sign = term.nature === "DEDUCTIVE" || master?.nature === "DEDUCTIVE" ? "-" : "";
+            try { dialogTotalMicro += toMicro(`${sign}${term.finalAmount}`); } catch { /* Ignore a legacy malformed term in the display total. */ }
+          }
+        } else if (dialogPreview?.status === "ready") {
+          dialogTotalComplete = true;
+          for (const term of termDraft) {
+            const amount = dialogPreview.terms.get(term.key)?.signedAmount;
+            if (amount) dialogTotalMicro += toMicro(amount);
+          }
+        }
+        const dialogTotalText = dialogTotalComplete ? formatImportCost(dialogTotalMicro, 2) : "—";
         return (
-        <div className="space-y-3 pt-2">
-          <PurchaseInvoiceTotals preview={invoicePreview} savedDoc={doc} readOnly={ro} isAdditional={isAdditional} hasLines={liveLines > 0} hasTerms={liveTerms > 0} />
-
-          {!ro && (
-            <div className="flex flex-wrap items-center gap-1.5 border border-slate-300 bg-slate-50 px-2.5 py-1.5" role="status" aria-label="Post checklist">
-              <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Before post</span>
-              {check(vendorOk, "Vendor")}
-              {check(dateOk, "Date")}
-              {check(linesOk, isAdditional ? "Charges" : "Lines")}
-              {check(totalsOk, "Totals")}
-              {f.invoiceType === "IMPORT" && check(!!String(f.imp.customsDeclarationNo ?? "").trim(), "Customs no")}
-            </div>
-          )}
-
-          <PurchaseTabs prefix="bill" active={activeTab} onChange={setActiveTab} tabs={[
-            { id: "header", label: "Header", detail: "Vendor, dates & links" },
-            { id: "lines", label: "Lines", detail: isAdditional ? "No product lines" : "Products & quantities", badge: isAdditional ? "—" : liveLines },
-            { id: "terms", label: "Terms", detail: isAdditional ? "Required charges" : "VAT & other charges", badge: liveTerms, alert: !!s.err("terms") },
-          ]} />
-
-          <PurchaseTabPanel prefix="bill" id="header" active={activeTab} className="space-y-3">
-          <FormSection title="Identity" hint="What kind of bill this is">
-            <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-x-3 gap-y-2">
+        <div className="space-y-2 pt-1">
+          <FormSection title="Bill Header" hint="Invoice, supplier, payment and document links">
+            <div className="grid min-w-0 grid-cols-2 md:grid-cols-4 2xl:grid-cols-6 gap-x-2 gap-y-1">
               <Field label="Invoice No"><input disabled className="fld bg-slate-100 text-slate-600" value={doc?.invoiceNumber ?? ""} placeholder="(next number)" aria-label="Invoice number" /></Field>
               <DateField label="Invoice Date" name="invoiceDate" value={f.invoiceDate} onChange={(v) => { s.patch({ invoiceDate: v }); s.clearError("invoiceDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("invoiceDate")} required />
               <Field label="Invoice Type">
@@ -315,23 +439,12 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
               <Field label="Purchase Type">
                 <select data-field="purchaseType" disabled={ro || isAdditional} value={f.purchaseType} onChange={(e) => { const purchaseType = e.target.value; s.patch({ purchaseType, importCostForBillId: purchaseType.startsWith("SERVICE_PURCHASE_") ? f.importCostForBillId : "" }); s.clearError("importCostForBillId"); }} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}>{PURCHASE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select>
               </Field>
-            </div>
-          </FormSection>
-
-          <FormSection title="Vendor & payment" hint="Who is owed and when">
-            <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-x-3 gap-y-2">
               <VendorFields lookups={lk} contextKey={String(p.companyId)} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors} lockVendor={!!f.purchaseChallanId || isAdditional}
                 onChange={(c) => { s.patch(c); s.clearError("vendorGLId", "subLedgerId"); }} />
               <TextField label="Vendor Invoice No" name="vendorInvoiceNo" value={f.vendorInvoiceNo} onChange={(v) => s.patch({ vendorInvoiceNo: v })} readOnly={ro} error={s.err("vendorInvoiceNo")} />
               <DateField label="Vendor Invoice Date" name="vendorInvoiceDate" value={f.vendorInvoiceDate} onChange={(v) => { s.patch({ vendorInvoiceDate: v }); s.clearError("vendorInvoiceDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("vendorInvoiceDate")} />
               <TextField label="Due Days" name="dueDays" value={f.dueDays} onChange={(v) => /^\d{0,4}$/.test(v) && s.patch({ dueDays: v })} readOnly={ro} error={s.err("dueDays")} max={4} />
               <DateField label="Due Date" name="dueDate" value={f.dueDate} onChange={(v) => { s.patch({ dueDate: v }); s.clearError("dueDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("dueDate")} />
-              <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} className="col-span-1 sm:col-span-2" error={s.err("remarks")} />
-            </div>
-          </FormSection>
-
-          <FormSection title="Links" hint="Optional links to other documents — leave blank when not needed">
-            <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-3 gap-y-2">
               <Field label="Additional to Bill" error={s.err("mainBillId")}>
                 <Combobox fieldName="mainBillId" placeholder="— (a normal bill)" value={f.mainBillId} hasError={!!s.err("mainBillId")} options={mainOpts} disabled={ro || !!doc || !!f.purchaseChallanId} allowClear onChange={(v) => void pickMain(v)} onCommit={(el, dir) => focusStep(el, dir)} />
               </Field>
@@ -378,9 +491,6 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
               )}
             </section>
           )}
-          </PurchaseTabPanel>
-
-          <PurchaseTabPanel prefix="bill" id="lines" active={activeTab} className="space-y-3">
           {!isAdditional && !!doc && String(doc.purchaseType ?? "").startsWith("GOODS_PURCHASE_") && (
             <section className="rounded-sm border border-sky-300 bg-sky-50/40">
               <button type="button" className="flex w-full items-center gap-2 border-b border-sky-200 bg-sky-50 px-3 py-1.5 text-left" onClick={() => setLandedOpen((v) => !v)} aria-expanded={landedOpen}>
@@ -419,22 +529,70 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
 
           {!isAdditional && (
             <FormSection title="Lines" hint="Product, quantity and rate — stock columns appear only when a product needs them">
-              <LinesGrid kind="bill" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts />
+              <LinesGrid kind="bill" lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
+                onOpenTerms={(index) => openTerms({ scope: "line", lineNumber: lineNumberAt(index), lineIndex: index })} termSummary={lineTermsSummary} />
             </FormSection>
           )}
-          {isAdditional && <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-[13px] text-slate-600">This is an additional-charge bill linked to an existing goods bill, so it does not add product lines. Add the charges in the <button type="button" className="font-semibold text-blue-700 underline underline-offset-2" onClick={() => setActiveTab("terms")}>Terms tab</button>.</div>}
-          </PurchaseTabPanel>
-
-          <PurchaseTabPanel prefix="bill" id="terms" active={activeTab} className="space-y-3">
-          <FormSection title={isAdditional ? "Additional charges" : "Billing terms"} hint={isAdditional ? "At least one charge term is required" : "VAT and other document terms"}>
-            <TermsGrid terms={f.terms} onChange={(terms) => s.patch({ terms })} lookups={lk} masters={masters} lineCount={liveLines} readOnly={ro} errors={s.errors} clearError={s.clearError} contextKey={String(p.companyId)} calculationPreview={ro ? undefined : invoicePreview.terms} previewError={invoicePreview.message} category={isAdditional ? "ADDITIONAL" : undefined} />
-            {s.err("terms") && <p className="mt-1 text-[12px] text-red-700">{s.err("terms")}</p>}
-          </FormSection>
-          </PurchaseTabPanel>
+          {isAdditional && <div className="border border-slate-300 bg-slate-50 px-3 py-2 text-[12px] text-slate-600">This is an additional-charge bill linked to an existing goods bill. <button type="button" className="font-semibold text-blue-700 underline underline-offset-2" onClick={() => openTerms({ scope: "header" })}>Open charge terms</button>.</div>}
+          <PurchaseInvoiceTotals preview={invoicePreview} savedDoc={doc} readOnly={ro} isAdditional={isAdditional} hasLines={liveLines > 0} hasTerms={liveTerms > 0} />
+          <section className="flex flex-wrap items-center gap-2 border border-slate-400 bg-white px-3 py-2" aria-label="Header terms and conditions">
+            <div className="min-w-0 flex-1">
+              <h2 className="text-[12px] font-semibold text-slate-800">Header Terms &amp; Conditions</h2>
+              <p className="text-[11px] text-slate-600">Document-level charges, discounts and taxes. Product-specific charges are available from each line.</p>
+            </div>
+            <span className="text-[12px] text-slate-600">{f.terms.filter((term) => !isBlankTerm(term) && !masters.get(term.termId)?.isProductwise).length} terms</span>
+            <b className="min-w-[92px] text-right text-[13px] tabular-nums">{headerTermsTotal.startsWith("-") ? `− ${money(headerTermsTotal.slice(1))}` : (money(headerTermsTotal) || "0.00")}</b>
+            <button type="button" data-nav="header-terms" className="btn" onClick={() => openTerms({ scope: "header" })}>
+              {ro ? "View terms" : "Assess terms"}
+            </button>
+            {s.err("terms") && <p className="w-full text-[12px] text-red-700" role="alert">{s.err("terms")}</p>}
+          </section>
           {ro && doc && !isAdditional && doc.lines.some((l) => Number(l.landedAmount) !== 0) && (
             <p className="text-[12px] text-slate-600">Landed cost per line: {doc.lines.map((l) => `${l.lineNumber}: ${money(l.landedAmount)}`).join(" · ")}</p>
           )}
           {doc && doc.additionalBills?.length > 0 && <p className="text-[12px] text-slate-600">Additional bills: {doc.additionalBills.map((a: any) => `${a.invoiceNumber} (${money(a.totalAmount)}, ${a.state.toLowerCase()})`).join(", ")}</p>}
+          <FormSection title="Remarks" hint="Optional note for this bill" className="w-full">
+            <textarea data-field="remarks" maxLength={1024} disabled={ro} value={f.remarks} onChange={(e) => s.patch({ remarks: e.target.value })}
+              placeholder="Add remarks…" className={`fld h-20 min-h-20 resize-y py-2 ${s.err("remarks") ? "fld-err" : ""}`} aria-label="Remarks" />
+            {s.err("remarks") && <span className="block text-[12px] text-red-700 mt-0.5">{s.err("remarks")}</span>}
+          </FormSection>
+
+          {termDialog && (
+            <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-3" onMouseDown={(e) => { if (e.target === e.currentTarget) closeTermDialog(); }}>
+              <div data-term-dialog role="dialog" aria-modal="true" aria-labelledby="purchase-term-dialog-title" className="flex max-h-[92vh] w-[min(1120px,96vw)] flex-col border border-slate-500 bg-white shadow-xl" onKeyDown={(e) => {
+                if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeTermDialog(); return; }
+                if (e.key === "Tab") {
+                  const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])')).filter((item) => item.getClientRects().length > 0);
+                  const first = items[0], last = items[items.length - 1];
+                  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+                  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+                }
+              }}>
+                <div className="flex items-center justify-between gap-3 border-b border-slate-300 bg-slate-100 px-3 py-2">
+                  <div>
+                    <h2 id="purchase-term-dialog-title" className="text-[14px] font-semibold text-slate-800">
+                      {termDialog.scope === "header" ? (isAdditional ? "Additional bill charges" : "Header terms & conditions") : `Line ${termDialog.lineNumber} terms`}
+                    </h2>
+                    <p className="text-[11px] text-slate-600">
+                      {termDialog.scope === "header" ? "Assess document-level terms; line-specific terms are managed from the item grid." : products.get(f.lines[termDialog.lineIndex]?.productId)?.description ?? "Product line terms and amount"}
+                    </p>
+                  </div>
+                  <button type="button" className="btn" onClick={closeTermDialog} aria-label="Close terms dialog">Close <span className="kbd">Esc</span></button>
+                </div>
+                <div className="min-h-0 flex-1 overflow-auto p-3">
+                  <TermsGrid terms={termDraft} onChange={setTermDraft} lookups={lk} masters={masters} lineCount={liveLines} readOnly={ro} errors={dialogErrors} clearError={clearDialogError} contextKey={String(p.companyId)} calculationPreview={ro ? undefined : dialogPreview?.terms} previewError={dialogPreview?.message}
+                    category={isAdditional ? "ADDITIONAL" : undefined} productwiseOnly={termDialog.scope === "line"} fixedLineNumber={termDialog.scope === "line" ? termDialog.lineNumber : undefined} />
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-300 bg-slate-50 px-3 py-2">
+                  <span className="text-[12px] text-slate-600">{termDraft.filter((term) => !isBlankTerm(term)).length} term(s) · Dialog net <b className="tabular-nums">{dialogTotalText}</b></span>
+                  <div className="flex gap-2">
+                    <button type="button" className="btn" onClick={closeTermDialog}>Cancel</button>
+                    {!ro && <button type="button" className="btn btn-primary" onClick={applyTermDialog}>Apply to bill</button>}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
         );
       })()}

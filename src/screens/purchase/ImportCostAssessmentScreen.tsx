@@ -3,7 +3,6 @@ import { FileCheck2, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-rea
 import { ApiError, importAssessmentApi, purchaseApi, type ImportAssessmentPreview, type ImportAssessmentTermInput, type PLookups } from "../../api";
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
 import { focusStep, FormSection, Pill } from "../../components/purchase/Bits";
-import { PurchaseTabPanel, PurchaseTabs, type PurchaseTabId } from "../../components/purchase/PurchaseTabs";
 import { defaultDate } from "../../lib/purchaseForm";
 import { formatImportCost } from "../../../shared/import-costing";
 import { toMicro } from "../../../shared/purchase-calculation";
@@ -19,7 +18,7 @@ type Form = { importBillId: string; assessmentDate: string; referenceNo: string;
 type Doc = Record<string, any> & { id: number; isPosted: boolean; state: string; terms: Record<string, any>[] };
 type ImportOption = Record<string, any> & { id: number; invoiceNumber: string; invoiceDate: string };
 
-const fieldClass = "fld min-w-0";
+const fieldClass = "fld min-w-0 h-7";
 const blankTerm = (): AssessmentTerm => ({
   key: Math.random().toString(36).slice(2), termId: "", calcType: "AMOUNT", rate: "", inputAmount: "", allocationBasis: "VALUE",
   capitalizable: true, isOverridden: false, overrideAmount: "", againstLedgerId: "", againstSubLedgerId: "", allocationMode: "AUTO", manual: {},
@@ -57,11 +56,10 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("Loading…");
   const [listSelection, setListSelection] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<PurchaseTabId>("header");
   const searchRef = useRef<HTMLInputElement>(null);
   const baseSig = useRef("");
   const seq = useRef(0);
-  const statusKind = message === "Ready" ? "info" : "info";
+  const statusKind = "info";
   const dirty = !!form && editing && JSON.stringify(form) !== baseSig.current;
   p.dirtyRef.current = dirty;
 
@@ -103,7 +101,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
   useEffect(() => {
     p.setStatus({
       mode: editing ? doc ? "edit" : "new" : "view", count: total, shown: rows.length, message, kind: statusKind,
-      hints: ["Ctrl+S Save", "F3 New", "F2 Edit", "Enter: next field on form", "Arrow keys: document list"],
+      hints: ["Ctrl+S Save", "F3 New", "F2 Edit", "F6 Add charge", "Enter: next field on form", "Arrow keys: document list"],
     });
   }, [editing, doc, total, rows.length, message, statusKind, p.setStatus]);
   useEffect(() => { if (p.externalMessage) setMessage(p.externalMessage.text); }, [p.externalMessage]);
@@ -152,14 +150,12 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
 
   const startNew = () => {
     if (dirty && !window.confirm("Discard unsaved assessment changes?")) return;
-    setActiveTab("header");
     const next: Form = { importBillId: "", assessmentDate: defaultDate(lookups?.fiscalYears.find((y) => y.code === p.fyCode)), referenceNo: "", remarks: "", terms: [blankTerm()] };
     setDoc(null); setForm(next); setEditing(true); setPreview(null); setErrors({}); baseSig.current = JSON.stringify(next); setMessage("New cost assessment");
     requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-assessment-field]")?.focus());
   };
   const openDoc = async (id: number) => {
     if (dirty && !window.confirm("Discard unsaved assessment changes?")) return;
-    setActiveTab("header");
     setBusy(true);
     try {
       const r = await importAssessmentApi.get(id, p.companyId);
@@ -170,6 +166,12 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
     finally { setBusy(false); }
   };
   const updateTerm = (index: number, patch: Partial<AssessmentTerm>) => setForm((f) => f ? ({ ...f, terms: f.terms.map((t, i) => i === index ? { ...t, ...patch } : t) }) : f);
+  const addCharge = () => {
+    if (!form || !editing || busy) return;
+    const index = form.terms.length;
+    setForm({ ...form, terms: [...form.terms, blankTerm()] });
+    requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-field="terms.${index}.termId"]`)?.focus());
+  };
   const selectTerm = (i: number, id: string) => {
     const m: any = termById.get(id);
     updateTerm(i, {
@@ -197,9 +199,9 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
     setErrors(e);
     if (Object.keys(e).length) {
       setMessage(Object.values(e)[0]);
-      setActiveTab(Object.keys(e).some((key) => key === "terms" || key.startsWith("terms.")) ? "terms" : "header");
       requestAnimationFrame(() => {
-        const invalid = document.querySelector<HTMLElement>("[data-assessment-field] [aria-invalid=true]")
+        const invalid = document.querySelector<HTMLElement>("[data-assessment-field][aria-invalid=true]")
+          ?? document.querySelector<HTMLElement>("[data-assessment-field] [aria-invalid=true]")
           ?? document.querySelector<HTMLElement>('[data-field^="terms."][aria-invalid="true"]')
           ?? document.querySelector<HTMLElement>('[data-field^="terms."]');
         invalid?.focus();
@@ -221,7 +223,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
       const err = ex as ApiError;
       if (err.field) {
         setErrors({ [err.field]: err.message });
-        setActiveTab(err.field.startsWith("terms") ? "terms" : "header");
+        requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-field="${err.field}"]`)?.focus());
       }
       setMessage(err.message);
     }
@@ -230,7 +232,6 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
   const beginEdit = () => { if (doc && !doc.isPosted && !doc.reversedAt) { setEditing(true); setMessage("Editing draft"); baseSig.current = JSON.stringify(form); } };
   const cancel = () => {
     if (dirty && !window.confirm("Discard unsaved assessment changes?")) return;
-    setActiveTab("header");
     if (doc) { setForm(asForm(doc)); setEditing(false); setPreview(doc.preview ?? null); }
     else { setForm({ importBillId: "", assessmentDate: defaultDate(lookups?.fiscalYears.find((y) => y.code === p.fyCode)), referenceNo: "", remarks: "", terms: [blankTerm()] }); setEditing(false); setPreview(null); }
     setErrors({}); setMessage("Changes discarded");
@@ -279,6 +280,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && editing) { e.preventDefault(); void save(); }
       else if (e.key === "F3") { e.preventDefault(); startNew(); }
       else if (e.key === "F2" && doc && !editing) { e.preventDefault(); beginEdit(); }
+      else if (e.key === "F6" && editing && !busy && !target.closest('[role="dialog"]')) { e.preventDefault(); addCharge(); }
       else if ((e.ctrlKey || e.metaKey) && e.key === "ArrowDown") {
         e.preventDefault();
         const i = rows.findIndex((r) => r.id === listSelection);
@@ -309,14 +311,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
     return termGap(t, result) === 0;
   });
   const ledgersOk = activeTerms.length > 0 && activeTerms.every((t) => !!t.againstLedgerId);
-  const billOk = !!form?.importBillId;
-  const termsOk = activeTerms.length > 0;
   const previewOk = !!preview && !previewError;
-  const check = (ok: boolean, label: string) => (
-    <span className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[11px] font-medium ${ok ? "border-green-300 bg-green-50 text-green-800" : "border-slate-300 bg-slate-50 text-slate-600"}`}>
-      <span aria-hidden="true">{ok ? "✓" : "○"}</span>{label}
-    </span>
-  );
 
   return (
     <main className="flex-1 min-w-0 flex min-h-0" data-assessment-document>
@@ -329,32 +324,15 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
             {dirty && <span className="pb-1 text-[11px] text-amber-700">• unsaved changes</span>}
           </div>
           <div className="double-rule mt-1" />
-          <p className="mt-2 text-[12px] text-slate-700" role="status">
-            {message}. Assess landed costs on a posted <b>local or import</b> goods bill. Apply posts each charge to its own ledger against the ledger you choose, and updates stock value only for charges marked “in stock value”.
+          <p className="mt-1 text-[11px] text-slate-700" role="status">
+            {message}. Posted goods bill → assess service charges → review product-wise landed costs.
           </p>
         </header>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-3 space-y-3" onKeyDown={onFormKey}>
+          <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-2 space-y-1.5" onKeyDown={onFormKey}>
           {!lookups || !form ? <p className="text-slate-500 p-2">Loading…</p> : <>
-            {/* Apply / readiness checklist */}
-            <div className="flex flex-wrap items-center gap-1.5 border border-slate-300 bg-slate-50 px-2.5 py-1.5" role="status" aria-label="Assessment readiness">
-              <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{editing || !doc ? "Before save" : "Before apply"}</span>
-              {check(billOk, "Goods bill")}
-              {check(termsOk, "Charges")}
-              {check(ledgersOk, "Against ledgers")}
-              {check(manualTerms.length === 0 || manualsBalanced, "Manual splits")}
-              {check(previewOk, "Preview")}
-            </div>
-
-            <PurchaseTabs prefix="assessment" active={activeTab} onChange={setActiveTab} tabs={[
-              { id: "header", label: "Header", detail: "Goods bill & notes", badge: billOk ? "✓" : "1", alert: !billOk },
-              { id: "lines", label: "Lines", detail: "Allocation & impact", badge: lineRows.length || "—" },
-              { id: "terms", label: "Terms", detail: "Charges & ledgers", badge: activeTerms.length || "—", alert: !!errors.terms },
-            ]} />
-
-            <PurchaseTabPanel prefix="assessment" id="header" active={activeTab} className="space-y-3">
             <FormSection title="Header" hint="Link one posted goods bill — local or import">
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-x-2 gap-y-1 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-5">
                 <label className="block text-[11px] font-semibold text-slate-600">Assessment date
                   <input data-assessment-field data-field="assessmentDate" type="date" className={fieldClass} disabled={!editing || busy} value={form.assessmentDate} aria-invalid={!!errors.assessmentDate} onChange={(e) => setForm({ ...form, assessmentDate: e.target.value })} />
                 </label>
@@ -368,6 +346,9 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                 <label className="block text-[11px] font-semibold text-slate-600">Customs / reference no
                   <input data-assessment-field data-field="referenceNo" className={fieldClass} maxLength={60} disabled={!editing || busy} value={form.referenceNo} onChange={(e) => setForm({ ...form, referenceNo: e.target.value })} />
                 </label>
+                <label className="block text-[11px] font-semibold text-slate-600">Assessment no.
+                  <input className={`${fieldClass} bg-slate-100`} readOnly aria-readonly="true" value={doc?.assessmentNumber ?? "(assigned on save)"} />
+                </label>
                 <label className="block text-[11px] font-semibold text-slate-600">Linked goods invoice
                   <input className={`${fieldClass} bg-slate-100`} readOnly aria-readonly="true" value={source ? `${source.invoiceNumber}${source.invoiceDate ? ` · ${source.invoiceDate}` : ""}` : "Choose a posted goods bill"} />
                 </label>
@@ -375,33 +356,25 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
               {errors.importBillId && <p className="mt-1 text-xs text-red-700" role="alert">{errors.importBillId}</p>}
             </FormSection>
 
-            <FormSection title="Notes" hint="Optional context for the assessment">
-              <textarea data-assessment-field data-field="remarks" className={`${fieldClass} min-h-20`} maxLength={1024}
-                disabled={!editing || busy} value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })}
-                placeholder="Add a note for this assessment" />
-            </FormSection>
-            </PurchaseTabPanel>
-
-            <PurchaseTabPanel prefix="assessment" id="terms" active={activeTab} className="space-y-3">
             <FormSection title="Charges" hint="Each charge posts Dr own ledger / Cr against ledger. Uncheck stock value for tax or pure P&L items.">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="text-[11px] text-slate-600">Percent terms use the CIF / running base from the shared purchase calculation engine.</p>
-                <button type="button" className="btn" disabled={!editing || busy} onClick={() => setForm({ ...form, terms: [...form.terms, blankTerm()] })}>
-                  <Plus size={14} /> Add charge
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <p className="text-[10px] text-slate-600">Percent terms use the CIF / running base.</p>
+                <button type="button" data-nav="add-charge" className="btn h-7" disabled={!editing || busy} onClick={addCharge}>
+                  <Plus size={13} /> Add charge <span className="kbd">F6</span>
                 </button>
               </div>
               <div className="overflow-x-auto border border-slate-200">
-                <table className="w-full min-w-[720px] text-xs">
+                <table className="w-full min-w-[1000px] table-fixed text-[11px]">
                   <thead className="bg-slate-50 text-slate-600">
                     <tr>
-                      <th className="p-2 text-left">Charge term</th>
-                      <th className="p-2 text-left">Calculation</th>
-                      <th className="p-2 text-left">Rate / amount</th>
-                      <th className="p-2 text-left">Allocate by</th>
-                      <th className="p-2 text-left">Against ledger</th>
-                      <th className="p-2 text-center">In stock value</th>
-                      <th className="p-2 text-right">Calculated</th>
-                      <th className="p-2" aria-label="Remove" />
+                      <th className="w-[210px] p-1 text-left">Charge term</th>
+                      <th className="w-[108px] p-1 text-left">Calculation</th>
+                      <th className="w-[170px] p-1 text-left">Rate / amount</th>
+                      <th className="w-[150px] p-1 text-left">Allocate by</th>
+                      <th className="w-[190px] p-1 text-left">Against ledger</th>
+                      <th className="w-[72px] p-1 text-center">In stock value</th>
+                      <th className="w-[82px] p-1 text-right">Calculated</th>
+                      <th className="w-[36px] p-1" aria-label="Remove" />
                     </tr>
                   </thead>
                   <tbody>
@@ -413,20 +386,20 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                       return (
                         <Fragment key={t.key}>
                           <tr className="border-t border-slate-200 align-top">
-                            <td className="p-2 w-[240px]">
+                            <td className="p-1">
                               <MasterReferencePicker fieldName={`terms.${i}.termId`} label={`Charge ${i + 1}`} required value={t.termId} options={termOptions}
                                 onChange={(v) => selectTerm(i, v)} disabled={!editing || busy} scopeKey="purchase-terms"
                                 contextKey={`${p.companyId}:${p.branchId}`} placeholder="Choose charge…" hasError={!!errors.terms && !t.termId} />
                             </td>
-                            <td className="p-2">
+                            <td className="p-1">
                               <select data-field={`terms.${i}.calcType`} className={fieldClass} disabled={!editing || busy || !t.termId} aria-label={`Calculation type for charge ${i + 1}`}
                                 value={t.calcType} onChange={(e) => updateTerm(i, { calcType: e.target.value as AssessmentTerm["calcType"] })}>
                                 <option value="PERCENT">Percent</option>
                                 <option value="AMOUNT">Fixed amount</option>
                               </select>
-                              <div className="mt-1 text-[10px] text-slate-500">{m?.nature ?? "Charge"} · {m?.calcBase ?? "CIF / running total"}</div>
+                              <div className="mt-0.5 truncate text-[9px] text-slate-500" title={`${m?.nature ?? "Charge"} · ${m?.calcBase ?? "CIF / running total"}`}>{m?.nature ?? "Charge"} · {m?.calcBase ?? "CIF / running total"}</div>
                             </td>
-                            <td className="p-2">
+                            <td className="p-1">
                               <div className="flex gap-2">
                                 <input data-field={`terms.${i}.amount`} aria-label={t.calcType === "PERCENT" ? `Rate for charge ${i + 1}` : `Amount for charge ${i + 1}`}
                                   className={fieldClass} disabled={!editing || busy || !t.termId}
@@ -438,26 +411,26 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                                     value={t.overrideAmount} inputMode="decimal" onChange={(e) => updateTerm(i, { overrideAmount: e.target.value })} placeholder="Final override" />
                                 )}
                               </div>
-                              <label className="mt-1 inline-flex items-center gap-1 text-[10px] text-slate-600">
+                              <label className="mt-0.5 inline-flex items-center gap-1 text-[9px] text-slate-600">
                                 <input data-field={`terms.${i}.isOverridden`} type="checkbox" disabled={!editing || busy || !t.termId} checked={t.isOverridden} onChange={(e) => updateTerm(i, { isOverridden: e.target.checked })} />
                                 <span>Override calculated amount</span>
                               </label>
                             </td>
-                            <td className="p-2">
+                            <td className="p-1">
                               <select data-field={`terms.${i}.allocationBasis`} className={fieldClass} disabled={!editing || busy || !t.capitalizable} aria-label={`Allocation basis for charge ${i + 1}`}
                                 value={t.allocationBasis} onChange={(e) => updateTerm(i, { allocationBasis: e.target.value as Basis })}>
                                 <option value="VALUE">Product value</option>
                                 <option value="QUANTITY">Quantity</option>
                               </select>
                               {t.capitalizable && (
-                                <select data-field={`terms.${i}.allocationMode`} className={`${fieldClass} mt-1`} disabled={!editing || busy} aria-label={`Allocation mode for charge ${i + 1}`}
+                                <select data-field={`terms.${i}.allocationMode`} className={`${fieldClass} mt-0.5`} disabled={!editing || busy} aria-label={`Allocation mode for charge ${i + 1}`}
                                   value={t.allocationMode} onChange={(e) => updateTerm(i, { allocationMode: e.target.value as "AUTO" | "MANUAL", manual: e.target.value === "MANUAL" ? t.manual : {} })}>
                                   <option value="AUTO">Auto split</option>
                                   <option value="MANUAL">Manual split</option>
                                 </select>
                               )}
                             </td>
-                            <td className="p-2 w-[200px]">
+                            <td className="p-1">
                               <select data-field={`terms.${i}.againstLedgerId`} className={fieldClass} disabled={!editing || busy || !t.termId} aria-label={`Against ledger for charge ${i + 1}`}
                                 aria-invalid={!!errors.terms && !!t.termId && !t.againstLedgerId} value={t.againstLedgerId}
                                 onChange={(e) => updateTerm(i, { againstLedgerId: e.target.value, againstSubLedgerId: "" })}>
@@ -467,23 +440,23 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                                 ))}
                               </select>
                               {subs.length > 0 && (
-                                <select data-field={`terms.${i}.againstSubLedgerId`} className={`${fieldClass} mt-1`} disabled={!editing || busy} aria-label={`Sub-ledger for charge ${i + 1}`}
+                                <select data-field={`terms.${i}.againstSubLedgerId`} className={`${fieldClass} mt-0.5`} disabled={!editing || busy} aria-label={`Sub-ledger for charge ${i + 1}`}
                                   value={t.againstSubLedgerId} onChange={(e) => updateTerm(i, { againstSubLedgerId: e.target.value })}>
                                   <option value="">Sub-ledger…</option>
                                   {subs.map((x) => <option key={x.id} value={x.id}>{x.code} — {x.name}</option>)}
                                 </select>
                               )}
-                              <div className="mt-1 text-[10px] text-slate-500">Own ledger: {m ? ((lookups?.vendors ?? []).find((l) => l.id === m.generalLedgerId)?.name ?? "—") : "—"}</div>
+                              <div className="mt-0.5 truncate text-[9px] text-slate-500" title={`Own ledger: ${m ? ((lookups?.vendors ?? []).find((l) => l.id === m.generalLedgerId)?.name ?? "—") : "—"}`}>Own ledger: {m ? ((lookups?.vendors ?? []).find((l) => l.id === m.generalLedgerId)?.name ?? "—") : "—"}</div>
                             </td>
-                            <td className="p-2 text-center">
+                            <td className="p-1 text-center">
                               <label className="inline-flex items-center gap-1.5">
                                 <input data-field={`terms.${i}.capitalizable`} aria-label={`Capitalize charge ${i + 1} into inventory`} type="checkbox" disabled={!editing || busy}
                                   checked={t.capitalizable} onChange={(e) => updateTerm(i, { capitalizable: e.target.checked })} />
                                 <span className="sr-only">In stock value</span>
                               </label>
                             </td>
-                            <td className="p-2 text-right tabular-nums">{result ? safeMoney(result.finalAmount ?? result.amount) : "—"}</td>
-                            <td className="p-2 text-right">
+                            <td className="p-1 text-right tabular-nums">{result ? safeMoney(result.finalAmount ?? result.amount) : "—"}</td>
+                            <td className="p-1 text-right">
                               <button type="button" className="btn btn-compact" disabled={!editing || busy || form.terms.length === 1}
                                 aria-label={`Remove charge ${i + 1}`} onClick={() => setForm({ ...form, terms: form.terms.filter((_, n) => n !== i) })}>
                                 <Trash2 size={13} />
@@ -498,16 +471,11 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
               </div>
               {errors.terms && <p className="mt-2 text-xs text-red-700" role="alert">{errors.terms}</p>}
             </FormSection>
-            </PurchaseTabPanel>
-
-            <PurchaseTabPanel prefix="assessment" id="lines" active={activeTab} className="space-y-3">
-            {!form.importBillId && <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-6 text-[13px] text-slate-600">
-              Select a posted goods bill to unlock product allocation and landed-cost impact. <button type="button" className="ml-1 font-semibold text-blue-700 underline underline-offset-2" onClick={() => setActiveTab("header")}>Choose a goods bill</button>.
-            </div>}
+            <div className={form.importBillId && manualTerms.length > 0 ? "grid grid-cols-1 2xl:grid-cols-12 gap-1.5" : "space-y-1.5"}>
             {/* Dedicated manual allocation panel */}
             {manualTerms.length > 0 && (
-              <FormSection title="Manual allocation" hint="Each manual charge must sum exactly to its calculated amount before apply">
-                <div className="space-y-3">
+              <FormSection title="Manual allocation" hint="Each manual charge must sum exactly to its calculated amount before apply" className={form.importBillId ? "2xl:col-span-5" : ""}>
+                <div className="space-y-1.5">
                   {form.terms.map((t, i) => {
                     if (!(t.capitalizable && t.allocationMode === "MANUAL" && t.termId)) return null;
                     const m: any = termById.get(t.termId);
@@ -516,8 +484,8 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                     const gap = termGap(t, result);
                     const target = Number(result?.finalAmount ?? result?.amount ?? 0);
                     return (
-                      <div key={t.key} className="rounded-sm border border-slate-200 bg-slate-50/50 p-2.5">
-                        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                      <div key={t.key} className="rounded-sm border border-slate-200 bg-slate-50/50 p-1.5">
+                        <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
                           <h3 className="text-[12px] font-semibold text-slate-800">{m ? `${m.code} — ${m.name}` : `Charge ${i + 1}`}</h3>
                           <p className="text-[11px] text-slate-600">Target <b className="tabular-nums">{target ? target.toFixed(2) : "—"}</b>
                             {" · "}
@@ -529,13 +497,13 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                         {!lineRows.length ? (
                           <p className="text-[11px] text-slate-600">Choose a goods bill to allocate across product lines.</p>
                         ) : (
-                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                          <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-7 2xl:grid-cols-5">
                             {lineRows.map((line, n) => {
                               const id = String(line.key ?? line.id);
                               return (
                                 <label key={id} className="block text-[10px] font-semibold text-slate-600">
                                   {line.lineNumber}. {line.productCode ?? line.description ?? `Line ${n + 1}`}
-                                  <input data-field={`manual.${i}.${id}`} className="fld w-full text-right tabular-nums" inputMode="decimal" disabled={!editing || busy}
+                                  <input data-field={`manual.${i}.${id}`} className="fld h-7 w-full text-right tabular-nums" inputMode="decimal" disabled={!editing || busy}
                                     aria-label={`Amount for line ${line.lineNumber}, charge ${i + 1}`}
                                     value={t.manual[id] ?? ""}
                                     onChange={(e) => updateTerm(i, { manual: { ...t.manual, [id]: e.target.value } })} />
@@ -551,8 +519,8 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
               </FormSection>
             )}
 
-            {form.importBillId && (
-              <>
+            {form.importBillId ? (
+              <div className={`space-y-1.5 ${manualTerms.length > 0 ? "2xl:col-span-7" : ""}`}>
                 <section className="sticky top-0 z-10 border border-blue-300 bg-blue-50 shadow-sm" aria-label="Cost assessment summary" aria-live="polite">
                   <div className="grid grid-cols-2 divide-x divide-y divide-blue-200 sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
                     {([
@@ -563,9 +531,9 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                       ["Assessed net", preview?.assessedNet],
                       ["Final landed value", preview?.totalLandedValue],
                     ] as const).map(([label, value]) => (
-                      <div key={label} className="min-w-0 px-2.5 py-1.5">
-                        <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">{label}</div>
-                        <div className="text-right text-sm font-semibold tabular-nums">{value == null ? "—" : safeMoney(value)}</div>
+                      <div key={label} className="min-w-0 px-2 py-1">
+                        <div className="truncate text-[9px] font-semibold uppercase tracking-wide text-slate-600">{label}</div>
+                        <div className="text-right text-[13px] font-semibold tabular-nums">{value == null ? "—" : safeMoney(value)}</div>
                       </div>
                     ))}
                   </div>
@@ -578,30 +546,30 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
 
                 <FormSection title="Impact on products" hint="How assessed costs land on each bill line">
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[720px] text-xs">
+                    <table className="w-full min-w-[760px] table-fixed text-[10px]">
                       <thead className="bg-slate-50 text-slate-600">
                         <tr>
-                          <th className="p-2 text-left">Line</th>
-                          <th className="p-2 text-right">Goods value</th>
-                          <th className="p-2 text-right">Customs value</th>
-                          <th className="p-2 text-right">Service costs</th>
-                          <th className="p-2 text-right">Existing bill terms</th>
-                          <th className="p-2 text-right">Assessed costs</th>
-                          <th className="p-2 text-right">Landed value</th>
-                          <th className="p-2 text-right">Landed unit cost</th>
+                          <th className="w-[140px] p-1 text-left">Line</th>
+                          <th className="w-[80px] p-1 text-right">Goods value</th>
+                          <th className="w-[80px] p-1 text-right">Customs value</th>
+                          <th className="w-[80px] p-1 text-right">Service costs</th>
+                          <th className="w-[95px] p-1 text-right">Existing bill terms</th>
+                          <th className="w-[90px] p-1 text-right">Assessed costs</th>
+                          <th className="w-[90px] p-1 text-right">Landed value</th>
+                          <th className="w-[105px] p-1 text-right">Landed unit cost</th>
                         </tr>
                       </thead>
                       <tbody>
                         {lineRows.map((line, i) => (
                           <tr key={line.key ?? line.id ?? i} className="border-t border-slate-200">
-                            <td className="p-2">{line.lineNumber}. {line.productCode ?? line.description ?? `Product line ${line.lineNumber}`}</td>
-                            <td className="p-2 text-right tabular-nums">{safeMoney(line.goodsValue)}</td>
-                            <td className="p-2 text-right tabular-nums">{safeMoney(line.customsValue)}</td>
-                            <td className="p-2 text-right tabular-nums">{safeMoney(line.capitalizedSources)}</td>
-                            <td className="p-2 text-right tabular-nums">{safeMoney(line.existingPurchaseTermCosts)}</td>
-                            <td className="p-2 text-right tabular-nums">{safeMoney(line.capitalizedAssessments)}</td>
-                            <td className="p-2 text-right tabular-nums font-semibold">{safeMoney(line.landedValue)}</td>
-                            <td className="p-2 text-right tabular-nums font-semibold">{safeMoney(line.landedRate)}</td>
+                            <td className="p-1">{line.lineNumber}. {line.productCode ?? line.description ?? `Product line ${line.lineNumber}`}</td>
+                            <td className="p-1 text-right tabular-nums">{safeMoney(line.goodsValue)}</td>
+                            <td className="p-1 text-right tabular-nums">{safeMoney(line.customsValue)}</td>
+                            <td className="p-1 text-right tabular-nums">{safeMoney(line.capitalizedSources)}</td>
+                            <td className="p-1 text-right tabular-nums">{safeMoney(line.existingPurchaseTermCosts)}</td>
+                            <td className="p-1 text-right tabular-nums">{safeMoney(line.capitalizedAssessments)}</td>
+                            <td className="p-1 text-right tabular-nums font-semibold">{safeMoney(line.landedValue)}</td>
+                            <td className="p-1 text-right tabular-nums font-semibold">{safeMoney(line.landedRate)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -609,9 +577,18 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                     {!lineRows.length && <p className="p-3 text-xs text-slate-600">Choose a goods bill to see product-wise cost allocation.</p>}
                   </div>
                 </FormSection>
-              </>
+              </div>
+            ) : (
+              <div className={`rounded-sm border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-[12px] text-slate-600 ${manualTerms.length > 0 ? "2xl:col-span-7" : ""}`}>
+                Select a posted goods bill to unlock product allocation and landed-cost impact. <button type="button" className="ml-1 font-semibold text-blue-700 underline underline-offset-2" onClick={() => document.querySelector<HTMLElement>('[data-field="importBillId"]')?.focus()}>Choose a goods bill</button>.
+              </div>
             )}
-            </PurchaseTabPanel>
+            </div>
+            <FormSection title="Remarks" hint="Optional note for this assessment" className="w-full">
+              <textarea data-assessment-field data-field="remarks" className="fld min-w-0 w-full h-14 min-h-14 resize-y" maxLength={1024}
+                disabled={!editing || busy} value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })}
+                placeholder="Add a note for this assessment" />
+            </FormSection>
           </>}
         </div>
 

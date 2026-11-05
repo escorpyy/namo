@@ -12,21 +12,28 @@ type Errs = Record<string, string | undefined>;
 const decOnly = (re: RegExp, set: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => { if (re.test(e.target.value)) set(e.target.value); };
 const QTY = /^\d{0,12}(\.\d{0,6})?$/, RATE = /^\d{0,12}(\.\d{0,6})?$/, INT = /^\d{0,9}$/;
 
-type ColKey = "n" | "p" | "aq" | "au" | "q" | "u" | "r" | "amt" | "xd" | "lc" | "b" | "mf" | "ex" | "link" | "rm";
+type ColKey = "n" | "p" | "aq" | "au" | "q" | "u" | "r" | "amt" | "terms" | "net" | "xd" | "lc" | "b" | "mf" | "ex" | "link" | "rm";
 const COL_SIZE: Record<ColKey, string> = {
   n: "36px", p: "minmax(230px,1.6fr)", aq: "84px", au: "100px", q: "96px", u: "72px", r: "100px", amt: "124px",
+  terms: "112px", net: "124px",
   xd: "140px", lc: "130px", b: "130px", mf: "150px", ex: "150px", link: "minmax(140px,1fr)", rm: "32px",
 };
 const COL_HEAD: Record<ColKey, string> = {
   n: "#", p: "Product", aq: "Alt Qty", au: "Alt Unit", q: "Quantity", u: "Unit", r: "Rate", amt: "Amount",
+  terms: "Term Amount", net: "Net Amount",
   xd: "Expected", lc: "Location", b: "Batch", mf: "Mfg Date", ex: "Expiry", link: "Linked to", rm: "",
 };
-const RIGHT_HEAD = new Set(["Alt Qty", "Quantity", "Rate", "Amount"]);
+const RIGHT_HEAD = new Set(["Alt Qty", "Quantity", "Rate", "Amount", "Term Amount", "Net Amount"]);
+const lineNet = (basic: string, terms: string) => {
+  const signedTerms = terms.startsWith("-") ? -toPaise(terms.slice(1)) : toPaise(terms);
+  return new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format((toPaise(basic || "0") + signedTerms) / 100);
+};
 
-function lineColumns(kind: LineKind, showAlt: boolean, showLoc: boolean, showBatch: boolean, showExpiry: boolean, showLink: boolean): ColKey[] {
+function lineColumns(kind: LineKind, showAlt: boolean, showLoc: boolean, showBatch: boolean, showExpiry: boolean, showLink: boolean, showTerms: boolean): ColKey[] {
   const cols: ColKey[] = ["n", "p"];
   if (showAlt) cols.push("aq", "au");
   cols.push("q", "u", "r", "amt");
+  if (showTerms) cols.push("terms", "net");
   if (kind === "order") cols.push("xd");
   if (kind !== "order") {
     if (showLoc) cols.push("lc");
@@ -51,9 +58,11 @@ interface Props {
   contextKey: string;
   lockProducts?: boolean; // lines that came from a challan / order keep their product
   rateLabel?: string;
+  onOpenTerms?: (index: number) => void;
+  termSummary?: (index: number) => { amount: string; count: number };
 }
 
-export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, errors, calendar, clearError, contextKey, lockProducts }: Props) {
+export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, errors, calendar, clearError, contextKey, lockProducts, onOpenTerms, termSummary }: Props) {
   const unitCode = useMemo(() => new Map(lookups.units.map((u) => [u.id, u.code])), [lookups.units]);
   const productOpts = useMemo<ReferenceOption[]>(() => lookups.products.map((p) => ({ value: String(p.id), label: `${p.code} — ${p.description}`, code: p.code, name: p.description, detail: p.type.replaceAll("_", " "), searchText: `${p.type} ${p.tracksBatch ? "batch" : ""} ${p.tracksExpiry ? "expiry" : ""}`, isActive: p.isActive, badge: p.type === "STOCK" ? undefined : p.type.replace("_", " ").toLowerCase() })), [lookups.products]);
   const locOpts = useMemo<ReferenceOption[]>(() => lookups.locations.map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, isActive: l.isActive })), [lookups.locations]);
@@ -70,14 +79,14 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
       if (kind !== "order" && row.link) showLink = true;
     }
     if (kind !== "order" && lines.some((row) => row.link)) showLink = true;
-    const cols = lineColumns(kind, showAlt, showLoc, showBatch, showExpiry, showLink);
+    const cols = lineColumns(kind, showAlt, showLoc, showBatch, showExpiry, showLink, kind === "bill" && !!onOpenTerms);
     return {
       cols,
       showAlt, showLoc, showBatch, showExpiry, showLink,
       template: cols.map((c) => COL_SIZE[c]).join(" "),
       heads: cols.map((c) => COL_HEAD[c]),
     };
-  }, [kind, lines, products]);
+  }, [kind, lines, products, onOpenTerms]);
 
   const patch = (i: number, p: Partial<LineRow>) => { onChange(lines.map((l, k) => (k === i ? { ...l, ...p } : l))); clearError(...Object.keys(errors).filter((k) => k.startsWith(`L.${i}.`)), "lines"); };
   const pick = (i: number, id: string) => {
@@ -140,14 +149,14 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
             const useAlt = !!(l.altQty && l.altUnitId);
             const off = readOnly;
             const bad = (c: string) => !!errors[`L.${i}.${c}`];
-            const cls = (c: string, extra = "") => `fld h-8 ${extra} ${bad(c) ? "fld-err" : ""} ${off ? "bg-slate-100 text-slate-600" : ""}`;
+            const cls = (c: string, extra = "") => `fld ${kind === "bill" ? "h-7" : "h-8"} ${extra} ${bad(c) ? "fld-err" : ""} ${off ? "bg-slate-100 text-slate-600" : ""}`;
             const altOpts: ReferenceOption[] = p ? p.alternateUnits.map((a) => ({ value: String(a.unitId), label: unitCode.get(a.unitId) ?? String(a.unitId), code: unitCode.get(a.unitId) ?? String(a.unitId), detail: `Alternate unit · factor ${a.conversionFactor}`, isActive: true })) : [];
             const unitOpts: ReferenceOption[] = lookups.units.map((u) => ({ value: String(u.id), label: `${u.code} — ${u.name}`, code: u.code, name: u.name, detail: `${u.decimalPlaces} decimal place${u.decimalPlaces === 1 ? "" : "s"}`, isActive: true }));
             const errMsgs = Object.entries(errors).filter(([k, v]) => k.startsWith(`L.${i}.`) && v).map(([, v]) => v!);
             const qtyShown = useAlt ? derivedQty(l, p) : l.qty;
             return (
               <div key={l.key} className={`border-b border-slate-200 ${errMsgs.length ? "bg-red-50" : ""}`}>
-                <div style={{ gridTemplateColumns: layout.template }} className="grid gap-x-1 px-2 py-1 items-center">
+                <div style={{ gridTemplateColumns: layout.template }} className={`grid gap-x-1 px-2 ${kind === "bill" ? "py-0.5" : "py-1"} items-center`}>
                   <span className="text-slate-500 tabular-nums">{i + 1}</span>
                   <MasterReferencePicker fieldName={`L.${i}.p`} label="Product" required scopeKey="products" contextKey={contextKey} placeholder="Choose product…" value={l.productId} hasError={bad("p")} options={productOpts} disabled={off || (lockProducts && !!l.link)} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
                   {layout.showAlt && (
@@ -162,6 +171,17 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                     : <span className="text-[12px] text-slate-600 pl-1">{p?.baseUnitId ? unitCode.get(p.baseUnitId) : ""}</span>}
                   <input data-field={`L.${i}.r`} disabled={off || !p} inputMode="decimal" autoComplete="off" value={l.rate} placeholder="0.00" onChange={decOnly(RATE, (v) => patch(i, { rate: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("r", "text-right tabular-nums")} aria-label="Rate" />
                   <span className="text-right pr-2 tabular-nums font-medium">{money(lineAmount(l, p))}</span>
+                  {kind === "bill" && onOpenTerms && (() => {
+                    const summary = termSummary?.(i) ?? { amount: "0.00", count: 0 };
+                    return <>
+                      <button type="button" data-nav={`line-terms-${i}`} disabled={!l.productId}
+                        onClick={() => onOpenTerms(i)} title={`Edit terms for line ${i + 1}${summary.count ? ` · ${summary.count} term${summary.count === 1 ? "" : "s"}` : ""}`}
+                        className={`${kind === "bill" ? "h-7" : "h-8"} w-full px-1 text-right tabular-nums text-blue-700 underline underline-offset-2 hover:bg-blue-50 disabled:text-slate-500 disabled:no-underline`}>
+                        {summary.amount.startsWith("-") ? `− ${money(summary.amount.slice(1))}` : money(summary.amount || "0")}{summary.count > 0 && <span className="ml-1 text-[10px] text-slate-500 no-underline">({summary.count})</span>}
+                      </button>
+                      <span className="text-right pr-2 tabular-nums font-medium">{lineNet(lineAmount(l, p), summary.amount)}</span>
+                    </>;
+                  })()}
                   {kind === "order" && (off
                     ? <input disabled className="fld h-8 bg-slate-100 text-slate-600" value={l.expectedDate} aria-label="Expected date" />
                     : <DateInput fieldName={`L.${i}.xd`} value={l.expectedDate} onChange={(v) => patch(i, { expectedDate: v })} calendar={calendar} hasError={bad("xd")} onBlurField={() => {}} compact />)}
@@ -178,7 +198,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                     </>
                   )}
                   {layout.showLink && <span className="text-[11px] text-slate-600 break-words leading-tight" title={l.link}>{l.link || "—"}</span>}
-                  <button type="button" data-nav="remove-line" disabled={off} onClick={() => remove(i)} title="Remove line (Shift+Delete)" aria-label="Remove line" className="h-8 w-8 grid place-items-center text-slate-500 hover:text-red-700 focus-visible:outline-2 focus-visible:outline-blue-700 disabled:opacity-30"><X size={14} /></button>
+                  <button type="button" data-nav="remove-line" disabled={off} onClick={() => remove(i)} title="Remove line (Shift+Delete)" aria-label="Remove line" className={`${kind === "bill" ? "h-7 w-7" : "h-8 w-8"} grid place-items-center text-slate-500 hover:text-red-700 focus-visible:outline-2 focus-visible:outline-blue-700 disabled:opacity-30`}><X size={14} /></button>
                 </div>
                 {errMsgs.length > 0 && <p className="px-3 pb-1 text-[12px] text-red-700">{errMsgs[0]}</p>}
               </div>
@@ -188,7 +208,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
       </div>
       {errors.lines && <p className="px-3 py-1 text-[12px] text-red-700">{errors.lines}</p>}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 py-1.5 bg-slate-50 border-t border-slate-300">
-        {!readOnly && <button type="button" data-nav="add-line" className="btn h-7" onClick={() => addRow()}><Plus size={13} /> Add line</button>}
+        {!readOnly && <button type="button" data-nav="add-line" className="btn h-7" onClick={() => addRow()}><Plus size={13} /> Add line {kind === "bill" && <span className="kbd">F6</span>}</button>}
         <span className="flex-1" />
         <span className="text-[12px]">Lines <b className="tabular-nums">{live}</b></span>
         <span className="text-[12px]">Basic Amount <b className="tabular-nums ml-1">{fmtPaise(total)}</b></span>
@@ -213,15 +233,17 @@ interface TProps {
   calculationPreview?: Map<string, PreviewTermResult>;
   previewError?: string;
   category?: "GENERAL" | "ADDITIONAL";
+  productwiseOnly?: boolean;
+  fixedLineNumber?: number;
 }
 
 // Billing terms: discount, VAT, freight ... The active preview is calculated by the same shared exact engine as the server.
-export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOnly, errors, clearError, contextKey, calculationPreview, previewError, category }: TProps) {
-  const opts = useMemo<ReferenceOption[]>(() => lookups.terms.filter((t) => !category || t.category === category).map((t) => ({ value: String(t.id), label: `${t.code} — ${t.name}`, code: t.code, name: t.name, detail: `${t.category} · ${t.nature} · ${t.calcBase.replaceAll("_", " ")} · seq ${t.sequence}`, searchText: `${t.sequence} ${t.isProductwise ? "productwise" : "document"}`, isActive: t.isActive, badge: t.nature === "DEDUCTIVE" ? "less" : undefined })), [lookups.terms, category]);
+export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOnly, errors, clearError, contextKey, calculationPreview, previewError, category, productwiseOnly, fixedLineNumber }: TProps) {
+  const opts = useMemo<ReferenceOption[]>(() => lookups.terms.filter((t) => (!category || t.category === category) && (productwiseOnly === undefined || t.isProductwise === productwiseOnly)).map((t) => ({ value: String(t.id), label: `${t.code} — ${t.name}`, code: t.code, name: t.name, detail: `${t.category} · ${t.nature} · ${t.calcBase.replaceAll("_", " ")} · seq ${t.sequence}`, searchText: `${t.sequence} ${t.isProductwise ? "productwise" : "document"}`, isActive: t.isActive, badge: t.nature === "DEDUCTIVE" ? "less" : undefined })), [lookups.terms, category, productwiseOnly]);
   const patch = (i: number, p: Partial<TermRow>) => { onChange(terms.map((t, k) => (k === i ? { ...t, ...p } : t))); clearError(...Object.keys(errors).filter((k) => k.startsWith(`T.${i}.`))); };
   const pick = (i: number, id: string) => {
     const m = masters.get(id);
-        patch(i, m ? { termId: id, nature: undefined, calcType: m.defaultCalcType, rate: m.defaultCalcType === "PERCENT" ? trimDec(m.defaultValue) : "", inputAmount: m.defaultCalcType === "AMOUNT" ? trimDec(m.defaultValue) : "", lineNumber: m.isProductwise ? "1" : "", finalAmount: "" } : { termId: id, nature: undefined });
+    patch(i, m ? { termId: id, nature: undefined, calcType: m.defaultCalcType, rate: m.defaultCalcType === "PERCENT" ? trimDec(m.defaultValue) : "", inputAmount: m.defaultCalcType === "AMOUNT" ? trimDec(m.defaultValue) : "", lineNumber: m.isProductwise ? String(fixedLineNumber ?? 1) : "", finalAmount: "" } : { termId: id, nature: undefined });
   };
   const remove = (i: number) => {
     const nextTerms = terms.filter((_, k) => k !== i);
@@ -272,7 +294,7 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
                 <div style={{ gridTemplateColumns: TCOLS }} className="grid gap-x-1 px-2 py-1 items-center">
                   <span className="text-slate-500 tabular-nums">{i + 1}</span>
                   <MasterReferencePicker fieldName={`T.${i}.t`} label="Billing term" required scopeKey="purchase-terms" contextKey={contextKey} placeholder="Choose term…" value={t.termId} hasError={bad("t")} options={opts} disabled={off} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
-                  <input data-field={`T.${i}.l`} disabled={off || !m?.isProductwise} inputMode="numeric" value={t.lineNumber} placeholder={m?.isProductwise ? "Line" : "—"} onChange={decOnly(INT, (v) => patch(i, { lineNumber: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("l", "text-right tabular-nums")} aria-label={`Line number (1-${lineCount})`} />
+                  <input data-field={`T.${i}.l`} disabled={off || !m?.isProductwise || fixedLineNumber !== undefined} inputMode="numeric" value={fixedLineNumber === undefined ? t.lineNumber : String(fixedLineNumber)} placeholder={m?.isProductwise ? "Line" : "—"} onChange={decOnly(INT, (v) => patch(i, { lineNumber: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("l", "text-right tabular-nums")} aria-label={fixedLineNumber === undefined ? `Line number (1-${lineCount})` : `Line ${fixedLineNumber}`} />
                   <select data-field={`T.${i}.c`} disabled={off || !m} value={t.calcType} onChange={(e) => patch(i, { calcType: e.target.value as TermRow["calcType"] })} className={cls("c")} aria-label="Calculated as">
                     <option value="PERCENT">Percent (%)</option><option value="AMOUNT">Fixed amount</option>
                   </select>
