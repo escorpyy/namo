@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { FileCheck2, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
 import { ApiError, importAssessmentApi, purchaseApi, type ImportAssessmentPreview, type ImportAssessmentTermInput, type PLookups } from "../../api";
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
+import { AssessmentAllocationGrid, type AssessmentAllocationCellUpdate } from "../../components/purchase/AssessmentAllocationGrid";
 import { focusStep, FormSection, Pill } from "../../components/purchase/Bits";
 import { defaultDate } from "../../lib/purchaseForm";
 import { formatImportCost } from "../../../shared/import-costing";
@@ -52,6 +53,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
   const [editing, setEditing] = useState(false);
   const [preview, setPreview] = useState<ImportAssessmentPreview | null>(null);
   const [previewError, setPreviewError] = useState("");
+  const [previewPending, setPreviewPending] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("Loading…");
@@ -101,7 +103,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
   useEffect(() => {
     p.setStatus({
       mode: editing ? doc ? "edit" : "new" : "view", count: total, shown: rows.length, message, kind: statusKind,
-      hints: ["Ctrl+S Save", "F3 New", "F2 Edit", "F6 Add charge", "Enter: next field on form", "Arrow keys: document list"],
+      hints: ["Ctrl+S Save", "F3 New", "F2 Edit", "F6 Add charge", "Ctrl+V paste allocation block", "Enter: next field"],
     });
   }, [editing, doc, total, rows.length, message, statusKind, p.setStatus]);
   useEffect(() => { if (p.externalMessage) setMessage(p.externalMessage.text); }, [p.externalMessage]);
@@ -137,13 +139,19 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
   }));
 
   useEffect(() => {
-    if (!editing || !form?.importBillId) { if (!editing && doc?.preview) setPreview(doc.preview); return; }
     const ticket = ++seq.current;
+    if (!editing || !form?.importBillId) {
+      setPreviewPending(false);
+      if (!editing && doc?.preview) setPreview(doc.preview);
+      else if (editing) { setPreview(null); setPreviewError(""); }
+      return;
+    }
+    setPreviewPending(true);
     const timer = window.setTimeout(async () => {
       try {
         const r = await importAssessmentApi.preview({ companyId: p.companyId, branchId: p.branchId, importBillId: Number(form.importBillId), terms: requestTerms(form) });
-        if (ticket === seq.current) { setPreview(r.preview); setPreviewError(""); }
-      } catch (e) { if (ticket === seq.current) { setPreview(null); setPreviewError((e as Error).message); } }
+        if (ticket === seq.current) { setPreview(r.preview); setPreviewError(""); setPreviewPending(false); }
+      } catch (e) { if (ticket === seq.current) { setPreview(null); setPreviewError((e as Error).message); setPreviewPending(false); } }
     }, 180);
     return () => { clearTimeout(timer); };
   }, [editing, form, p.companyId, p.branchId, doc]);
@@ -305,6 +313,16 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
   const lineRows = (preview?.lines ?? doc?.preview?.lines ?? []) as ImportAssessmentPreview["lines"];
   const activeTerms = form?.terms.filter((t) => t.termId) ?? [];
   const manualTerms = activeTerms.filter((t) => t.capitalizable && t.allocationMode === "MANUAL");
+  const manualColumns = (form?.terms ?? []).flatMap((term, formIndex) => {
+    if (!term.termId || !term.capitalizable || term.allocationMode !== "MANUAL") return [];
+    const master: any = termById.get(term.termId);
+    const result = preview?.termResults?.find?.((x: any) => x.termId === Number(term.termId) || x.termId === term.termId)
+      ?? preview?.terms?.find?.((x: any) => x.termId === Number(term.termId));
+    return [{
+      key: term.key, formIndex, termId: term.termId, allocationBasis: term.allocationBasis, manual: term.manual,
+      code: String(master?.code ?? `Charge ${formIndex + 1}`), name: String(master?.name ?? `Charge ${formIndex + 1}`), result,
+    }];
+  });
   const manualsBalanced = manualTerms.every((t) => {
     const result = preview?.termResults?.find?.((x: any) => x.termId === Number(t.termId) || x.termId === t.termId)
       ?? preview?.terms?.find?.((x: any) => x.termId === Number(t.termId));
@@ -312,6 +330,22 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
   });
   const ledgersOk = activeTerms.length > 0 && activeTerms.every((t) => !!t.againstLedgerId);
   const previewOk = !!preview && !previewError;
+  const updateManualCells = (updates: AssessmentAllocationCellUpdate[]) => setForm((current) => {
+    if (!current) return current;
+    const byTerm = new Map<string, Map<string, string>>();
+    for (const update of updates) {
+      const lineChanges = byTerm.get(update.termKey) ?? new Map<string, string>();
+      lineChanges.set(update.lineKey, update.value);
+      byTerm.set(update.termKey, lineChanges);
+    }
+    return {
+      ...current,
+      terms: current.terms.map((term) => {
+        const changes = byTerm.get(term.key);
+        return changes ? { ...term, manual: { ...term.manual, ...Object.fromEntries(changes) } } : term;
+      }),
+    };
+  });
 
   return (
     <main className="flex-1 min-w-0 flex min-h-0" data-assessment-document>
@@ -320,34 +354,38 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
           <div className="flex items-end gap-3 flex-wrap">
             <h1 className="text-[22px] font-semibold">Cost Assessment</h1>
             <span className="pb-1 text-slate-600">Branch: <b>{p.branchName}</b> · FY <b>{p.fyCode}</b></span>
+            {doc && <span className="pb-1 font-mono text-[12px] font-semibold text-slate-700">{doc.assessmentNumber}</span>}
             {doc && <span className="mb-1"><Pill text={doc.state} tone={stateTone(doc.state)} /></span>}
             {dirty && <span className="pb-1 text-[11px] text-amber-700">• unsaved changes</span>}
           </div>
           <div className="double-rule mt-1" />
-          <p className="mt-1 text-[11px] text-slate-700" role="status">
-            {message}. Posted goods bill → assess service charges → review product-wise landed costs.
+          <p className="mt-1 truncate text-[11px] text-slate-700" role="status" title={message}>
+            {message}
           </p>
         </header>
 
           <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-2 space-y-1.5" onKeyDown={onFormKey}>
           {!lookups || !form ? <p className="text-slate-500 p-2">Loading…</p> : <>
-            <FormSection title="Header" hint="Link one posted goods bill — local or import">
-              <div className="grid gap-x-2 gap-y-1 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-5">
+            <div className="grid grid-cols-1 2xl:grid-cols-12 gap-1.5">
+            <FormSection title="Header" hint="Source bill and assessment details" className="2xl:col-span-4">
+              <div className="grid grid-cols-2 gap-x-2 gap-y-1">
                 <label className="block text-[11px] font-semibold text-slate-600">Assessment date
                   <input data-assessment-field data-field="assessmentDate" type="date" className={fieldClass} disabled={!editing || busy} value={form.assessmentDate} aria-invalid={!!errors.assessmentDate} onChange={(e) => setForm({ ...form, assessmentDate: e.target.value })} />
                 </label>
                 <div data-assessment-field>
                   <MasterReferencePicker
                     fieldName="importBillId" required label="Posted goods bill (local or import)" value={form.importBillId} options={importOptions}
-                    onChange={(v) => setForm({ ...form, importBillId: v })} disabled={!editing || busy || !!doc} hasError={!!errors.importBillId}
+                    onChange={(v) => {
+                      if (v === form.importBillId) return;
+                      const hadManualAmounts = form.terms.some((term) => Object.values(term.manual).some((amount) => amount.trim() !== ""));
+                      setForm({ ...form, importBillId: v, terms: form.terms.map((term) => ({ ...term, manual: {} })) });
+                      if (hadManualAmounts) setMessage("Source bill changed; previous product allocations were cleared.");
+                    }} disabled={!editing || busy || !!doc} hasError={!!errors.importBillId}
                     scopeKey="purchase-bills" contextKey={`${p.companyId}:${p.branchId}`} placeholder="Choose a goods bill…"
                   />
                 </div>
                 <label className="block text-[11px] font-semibold text-slate-600">Customs / reference no
                   <input data-assessment-field data-field="referenceNo" className={fieldClass} maxLength={60} disabled={!editing || busy} value={form.referenceNo} onChange={(e) => setForm({ ...form, referenceNo: e.target.value })} />
-                </label>
-                <label className="block text-[11px] font-semibold text-slate-600">Assessment no.
-                  <input className={`${fieldClass} bg-slate-100`} readOnly aria-readonly="true" value={doc?.assessmentNumber ?? "(assigned on save)"} />
                 </label>
                 <label className="block text-[11px] font-semibold text-slate-600">Linked goods invoice
                   <input className={`${fieldClass} bg-slate-100`} readOnly aria-readonly="true" value={source ? `${source.invoiceNumber}${source.invoiceDate ? ` · ${source.invoiceDate}` : ""}` : "Choose a posted goods bill"} />
@@ -356,25 +394,25 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
               {errors.importBillId && <p className="mt-1 text-xs text-red-700" role="alert">{errors.importBillId}</p>}
             </FormSection>
 
-            <FormSection title="Charges" hint="Each charge posts Dr own ledger / Cr against ledger. Uncheck stock value for tax or pure P&L items.">
+            <FormSection title="Charges" hint="Dr own ledger / Cr against ledger · uncheck stock value for tax or P&L charges" className="2xl:col-span-8">
               <div className="mb-1 flex items-center justify-between gap-2">
                 <p className="text-[10px] text-slate-600">Percent terms use the CIF / running base.</p>
                 <button type="button" data-nav="add-charge" className="btn h-7" disabled={!editing || busy} onClick={addCharge}>
                   <Plus size={13} /> Add charge <span className="kbd">F6</span>
                 </button>
               </div>
-              <div className="overflow-x-auto border border-slate-200">
-                <table className="w-full min-w-[1000px] table-fixed text-[11px]">
-                  <thead className="bg-slate-50 text-slate-600">
+              <div className="max-h-[28vh] overflow-auto overscroll-contain border border-slate-200">
+                <table className="w-full min-w-[900px] table-fixed text-[10px]">
+                  <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 shadow-sm">
                     <tr>
-                      <th className="w-[210px] p-1 text-left">Charge term</th>
-                      <th className="w-[108px] p-1 text-left">Calculation</th>
-                      <th className="w-[170px] p-1 text-left">Rate / amount</th>
-                      <th className="w-[150px] p-1 text-left">Allocate by</th>
-                      <th className="w-[190px] p-1 text-left">Against ledger</th>
-                      <th className="w-[72px] p-1 text-center">In stock value</th>
-                      <th className="w-[82px] p-1 text-right">Calculated</th>
-                      <th className="w-[36px] p-1" aria-label="Remove" />
+                      <th className="w-[170px] p-1 text-left">Charge term</th>
+                      <th className="w-[96px] p-1 text-left">Calculation</th>
+                      <th className="w-[150px] p-1 text-left">Rate / amount</th>
+                      <th className="w-[132px] p-1 text-left">Allocate by</th>
+                      <th className="w-[170px] p-1 text-left">Against ledger</th>
+                      <th className="w-[64px] p-1 text-center">Stock</th>
+                      <th className="w-[80px] p-1 text-right">Calculated</th>
+                      <th className="w-[32px] p-1" aria-label="Remove" />
                     </tr>
                   </thead>
                   <tbody>
@@ -471,57 +509,11 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
               </div>
               {errors.terms && <p className="mt-2 text-xs text-red-700" role="alert">{errors.terms}</p>}
             </FormSection>
-            <div className={form.importBillId && manualTerms.length > 0 ? "grid grid-cols-1 2xl:grid-cols-12 gap-1.5" : "space-y-1.5"}>
-            {/* Dedicated manual allocation panel */}
-            {manualTerms.length > 0 && (
-              <FormSection title="Manual allocation" hint="Each manual charge must sum exactly to its calculated amount before apply" className={form.importBillId ? "2xl:col-span-5" : ""}>
-                <div className="space-y-1.5">
-                  {form.terms.map((t, i) => {
-                    if (!(t.capitalizable && t.allocationMode === "MANUAL" && t.termId)) return null;
-                    const m: any = termById.get(t.termId);
-                    const result = preview?.termResults?.find?.((x: any) => x.termId === Number(t.termId) || x.termId === t.termId)
-                      ?? preview?.terms?.find?.((x: any) => x.termId === Number(t.termId));
-                    const gap = termGap(t, result);
-                    const target = Number(result?.finalAmount ?? result?.amount ?? 0);
-                    return (
-                      <div key={t.key} className="rounded-sm border border-slate-200 bg-slate-50/50 p-1.5">
-                        <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-                          <h3 className="text-[12px] font-semibold text-slate-800">{m ? `${m.code} — ${m.name}` : `Charge ${i + 1}`}</h3>
-                          <p className="text-[11px] text-slate-600">Target <b className="tabular-nums">{target ? target.toFixed(2) : "—"}</b>
-                            {" · "}
-                            <span className={`font-semibold ${gap === 0 ? "text-green-700" : "text-red-700"}`} role="status">
-                              {gap === 0 ? "Balanced" : `Gap ${gap.toFixed(2)}`}
-                            </span>
-                          </p>
-                        </div>
-                        {!lineRows.length ? (
-                          <p className="text-[11px] text-slate-600">Choose a goods bill to allocate across product lines.</p>
-                        ) : (
-                          <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-7 2xl:grid-cols-5">
-                            {lineRows.map((line, n) => {
-                              const id = String(line.key ?? line.id);
-                              return (
-                                <label key={id} className="block text-[10px] font-semibold text-slate-600">
-                                  {line.lineNumber}. {line.productCode ?? line.description ?? `Line ${n + 1}`}
-                                  <input data-field={`manual.${i}.${id}`} className="fld h-7 w-full text-right tabular-nums" inputMode="decimal" disabled={!editing || busy}
-                                    aria-label={`Amount for line ${line.lineNumber}, charge ${i + 1}`}
-                                    value={t.manual[id] ?? ""}
-                                    onChange={(e) => updateTerm(i, { manual: { ...t.manual, [id]: e.target.value } })} />
-                                </label>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </FormSection>
-            )}
-
+            </div>
+            <div className="space-y-1.5">
             {form.importBillId ? (
-              <div className={`space-y-1.5 ${manualTerms.length > 0 ? "2xl:col-span-7" : ""}`}>
-                <section className="sticky top-0 z-10 border border-blue-300 bg-blue-50 shadow-sm" aria-label="Cost assessment summary" aria-live="polite">
+              <div className="space-y-1.5">
+                <section className="sticky top-0 z-10 border border-blue-300 bg-blue-50 shadow-sm" aria-label="Cost assessment summary" aria-live="polite" aria-busy={previewPending}>
                   <div className="grid grid-cols-2 divide-x divide-y divide-blue-200 sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
                     {([
                       ["Goods value", preview?.goodsValue],
@@ -538,57 +530,33 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                     ))}
                   </div>
                   <p className={`border-t border-blue-200 px-2.5 py-1 text-[11px] ${previewError ? "text-red-800" : "text-slate-600"}`} role={previewError ? "alert" : "status"}>
-                    {previewError || (preview
+                    {previewError || (previewPending
+                      ? "Updating the live costing preview…"
+                      : preview
                       ? "Live preview · same costing engine as save/apply. Non-stock charges stay out of inventory value."
                       : "Calculating product-wise landed costs…")}
                   </p>
                 </section>
 
-                <FormSection title="Impact on products" hint="How assessed costs land on each bill line">
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[760px] table-fixed text-[10px]">
-                      <thead className="bg-slate-50 text-slate-600">
-                        <tr>
-                          <th className="w-[140px] p-1 text-left">Line</th>
-                          <th className="w-[80px] p-1 text-right">Goods value</th>
-                          <th className="w-[80px] p-1 text-right">Customs value</th>
-                          <th className="w-[80px] p-1 text-right">Service costs</th>
-                          <th className="w-[95px] p-1 text-right">Existing bill terms</th>
-                          <th className="w-[90px] p-1 text-right">Assessed costs</th>
-                          <th className="w-[90px] p-1 text-right">Landed value</th>
-                          <th className="w-[105px] p-1 text-right">Landed unit cost</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {lineRows.map((line, i) => (
-                          <tr key={line.key ?? line.id ?? i} className="border-t border-slate-200">
-                            <td className="p-1">{line.lineNumber}. {line.productCode ?? line.description ?? `Product line ${line.lineNumber}`}</td>
-                            <td className="p-1 text-right tabular-nums">{safeMoney(line.goodsValue)}</td>
-                            <td className="p-1 text-right tabular-nums">{safeMoney(line.customsValue)}</td>
-                            <td className="p-1 text-right tabular-nums">{safeMoney(line.capitalizedSources)}</td>
-                            <td className="p-1 text-right tabular-nums">{safeMoney(line.existingPurchaseTermCosts)}</td>
-                            <td className="p-1 text-right tabular-nums">{safeMoney(line.capitalizedAssessments)}</td>
-                            <td className="p-1 text-right tabular-nums font-semibold">{safeMoney(line.landedValue)}</td>
-                            <td className="p-1 text-right tabular-nums font-semibold">{safeMoney(line.landedRate)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {!lineRows.length && <p className="p-3 text-xs text-slate-600">Choose a goods bill to see product-wise cost allocation.</p>}
-                  </div>
+                <FormSection title="Product allocation & landed cost" hint={manualColumns.length
+                  ? "Edit manual splits inline · paste spreadsheet ranges · auto-fill exact splits by basis."
+                  : "Choose Manual split on any charge to edit product allocations inline."}>
+                  <AssessmentAllocationGrid lines={lineRows} terms={manualColumns} editing={editing} busy={busy}
+                    previewReady={previewOk && !previewPending} onCellsChange={updateManualCells} onMessage={setMessage} />
                 </FormSection>
               </div>
             ) : (
-              <div className={`rounded-sm border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-[12px] text-slate-600 ${manualTerms.length > 0 ? "2xl:col-span-7" : ""}`}>
+              <div className="rounded-sm border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-[12px] text-slate-600">
                 Select a posted goods bill to unlock product allocation and landed-cost impact. <button type="button" className="ml-1 font-semibold text-blue-700 underline underline-offset-2" onClick={() => document.querySelector<HTMLElement>('[data-field="importBillId"]')?.focus()}>Choose a goods bill</button>.
               </div>
             )}
             </div>
-            <FormSection title="Remarks" hint="Optional note for this assessment" className="w-full">
-              <textarea data-assessment-field data-field="remarks" className="fld min-w-0 w-full h-14 min-h-14 resize-y" maxLength={1024}
+            <div className="flex w-full items-center gap-2 border border-slate-300 bg-white/70 px-3 py-1">
+              <label htmlFor="assessment-remarks" className="shrink-0 text-[11px] font-semibold text-slate-600">Remarks</label>
+              <textarea id="assessment-remarks" data-assessment-field data-field="remarks" className="fld min-w-0 flex-1 h-9 min-h-9 resize-y" maxLength={1024}
                 disabled={!editing || busy} value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })}
                 placeholder="Add a note for this assessment" />
-            </FormSection>
+            </div>
           </>}
         </div>
 
