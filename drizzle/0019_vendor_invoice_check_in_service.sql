@@ -1,2 +1,0 @@
-DROP INDEX "PurchaseBill_vendor_vendorInvoiceNo_key";--> statement-breakpoint
-CREATE INDEX "PurchaseBill_vendor_vendorInvoiceNo_idx" ON "PurchaseBill" USING btree ("companyId","vendorGLId","vendorInvoiceNo") WHERE "PurchaseBill"."vendorInvoiceNo" IS NOT NULL;
