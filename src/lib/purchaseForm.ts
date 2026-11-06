@@ -175,6 +175,13 @@ export function validateTerms(terms: TermRow[], masters: Map<string, Term>, line
 export const dateErr = (label: string, v: string, required = false) =>
   v === "" ? (required ? `${label} is required.` : undefined) : v.startsWith("?") || !isValidAd(v) ? `${label}: enter a valid date (YYYY-MM-DD).` : undefined;
 
+// A date (YYYY-MM-DD) some whole days after another, or "" when the start is not a valid date. Used to keep a bill's due date in step with its invoice date and due days.
+export function addDaysIso(iso: string, days: number): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m || !isValidAd(iso) || !Number.isInteger(days) || days < 0) return "";
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + days)).toISOString().slice(0, 10);
+}
+
 // A date to start a new document on: today, kept inside the selected fiscal year.
 export function defaultDate(fy: { startDate: string; endDate: string } | undefined): string {
   const d = new Date();
