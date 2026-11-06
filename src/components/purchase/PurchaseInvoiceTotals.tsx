@@ -13,7 +13,9 @@ interface Props {
   preview: PurchasePreview;
   savedDoc?: SavedDocTotals | null;
   readOnly: boolean;
+  isAdditional: boolean;
   hasLines: boolean;
+  hasTerms: boolean;
 }
 
 const safeMoney = (value: unknown) => money(value == null ? "0" : String(value)) || "0.00";
@@ -22,8 +24,9 @@ const signedMoney = (value: unknown) => {
   return text.startsWith("-") ? `− ${money(text.slice(1))}` : money(text);
 };
 
-export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, hasLines }: Props) {
+export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, isAdditional, hasLines, hasTerms }: Props) {
   const showSaved = readOnly && !!savedDoc;
+  const awaitingAdditionalTerm = !showSaved && isAdditional && !hasTerms;
   let savedAdditions = "0.00";
   let savedDeductions = "0.00";
   let savedBreakdownMismatch = false;
@@ -45,18 +48,19 @@ export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, hasLines }:
 
   const entries = [
     { label: "Basic amount", value: showSaved ? safeMoney(savedDoc?.basicAmount) : money(preview.basicAmount) },
-    { label: "Additions", value: showSaved ? savedAdditions : preview.additions === null ? "—" : money(preview.additions) },
-    { label: "Deductions", value: showSaved ? savedDeductions : preview.deductions === null ? "—" : money(preview.deductions) },
-    { label: "Net terms", value: showSaved ? signedMoney(savedDoc?.termAmount) : preview.termAmount === null ? "—" : signedMoney(preview.termAmount) },
-    { label: "Net amount", value: showSaved ? signedMoney(savedDoc?.totalAmount) : preview.netAmount === null ? "—" : signedMoney(preview.netAmount), total: true },
+    { label: "Additions", value: showSaved ? savedAdditions : awaitingAdditionalTerm || preview.additions === null ? "—" : money(preview.additions) },
+    { label: "Deductions", value: showSaved ? savedDeductions : awaitingAdditionalTerm || preview.deductions === null ? "—" : money(preview.deductions) },
+    { label: "Net terms", value: showSaved ? signedMoney(savedDoc?.termAmount) : awaitingAdditionalTerm || preview.termAmount === null ? "—" : signedMoney(preview.termAmount) },
+    { label: "Net amount", value: showSaved ? signedMoney(savedDoc?.totalAmount) : awaitingAdditionalTerm || preview.netAmount === null ? "—" : signedMoney(preview.netAmount), total: true },
   ];
   const calculationAlert = savedBreakdownMismatch || (!showSaved && preview.status === "error");
 
   const message = showSaved
     ? savedBreakdownMismatch ? "Saved term detail does not reconcile to the stored net-terms total. Review this bill before relying on the breakdown." : "Saved bill totals · additions and deductions are itemized from the saved terms."
-    : !hasLines ? "Add invoice lines to begin the live calculation."
-      : preview.status === "ready" ? "Live preview · follows the same calculation rules used when saving the bill."
-        : preview.message ?? "Complete the bill inputs to calculate totals.";
+    : !hasLines && !isAdditional ? "Add invoice lines to begin the live calculation."
+    : awaitingAdditionalTerm ? "Add an additional-charge term to calculate this bill."
+        : preview.status === "ready" ? "Live preview · follows the same calculation rules used when saving the bill."
+          : preview.message ?? "Complete the bill inputs to calculate totals.";
 
   return (
     <section aria-label="Purchase invoice totals" className="sticky top-0 z-20 border border-slate-400 bg-white shadow-sm">
