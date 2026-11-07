@@ -149,12 +149,8 @@ export function Combobox({ value, options, onChange, onCommit, onBlurField, fiel
           // Typing away the whole label on an optional field empties the bound value.
           if (clearable && next === "" && value) onChange("");
         }}
-        onFocus={(e) => {
-          e.currentTarget.select();
-          if (!open) openList();
-        }}
-        // Focus is kept after picking or clearing, so a plain click must be able to bring the list back.
-        onClick={() => { if (!open && !disabled) openList(); }}
+        // Focus only selects the text; the list opens on the first keystroke (onChange), or on F4 / Alt+ArrowDown.
+        onFocus={(e) => e.currentTarget.select()}
         onBlur={() => {
           if (typed) {
             const q = query.trim().toLowerCase();
