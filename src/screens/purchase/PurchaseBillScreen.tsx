@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, FilePlus2, RotateCcw, Send } from "lucide-react";
+import { ChevronDown, ChevronRight, RotateCcw, Send } from "lucide-react";
 import { purchaseApi, type PDoc, type PListRow } from "../../api";
 import { Combobox, type ComboOption } from "../../components/Combobox";
 import { COMMON_HELP, DocShell, Field, FormSection, HINTS, Pill, focusStep, money } from "../../components/purchase/Bits";
@@ -7,7 +7,7 @@ import { DateField, TextField, VendorFields } from "../../components/purchase/He
 import { LinesGrid, TermsGrid } from "../../components/purchase/LinesGrid";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
 import {
-  blankLine, dateErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
+  addDaysIso, blankLine, dateErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
   type LineRow, type TermRow,
 } from "../../lib/purchaseForm";
 import { parseDec } from "../../../shared/decimal";
@@ -18,12 +18,12 @@ import type { PurchaseScreenProps } from "./PurchaseOrderScreen";
 import { useDocScreen, type DocConfig, type Errors } from "./useDocScreen";
 
 const IMPORT_FIELDS: { key: string; label: string; kind: "text" | "date" | "mode"; max?: number }[] = [
-  { key: "customsDeclarationNo", label: "Customs Declaration No", kind: "text" }, { key: "customsDeclarationDate", label: "Declaration Date", kind: "date" },
-  { key: "customsOffice", label: "Customs Office", kind: "text" }, { key: "countryOfOrigin", label: "Country of Origin", kind: "text" },
-  { key: "lcNo", label: "LC No", kind: "text" }, { key: "lcDate", label: "LC Date", kind: "date" }, { key: "lcBankName", label: "LC Bank", kind: "text" },
-  { key: "transportMode", label: "Transport Mode", kind: "mode" }, { key: "blAwbNo", label: "BL / AWB No", kind: "text" }, { key: "blAwbDate", label: "BL / AWB Date", kind: "date" },
-  { key: "transporterName", label: "Transporter", kind: "text" }, { key: "vehicleNo", label: "Vehicle No", kind: "text" }, { key: "lrNo", label: "LR No", kind: "text" }, { key: "lrDate", label: "LR Date", kind: "date" },
-  { key: "importPermitNo", label: "Import Permit No", kind: "text" }, { key: "importPermitDate", label: "Permit Date", kind: "date" },
+  { key: "customsDeclarationNo", label: "Customs Declaration No", kind: "text", max: 30 }, { key: "customsDeclarationDate", label: "Declaration Date", kind: "date" },
+  { key: "customsOffice", label: "Customs Office", kind: "text", max: 100 }, { key: "countryOfOrigin", label: "Country of Origin", kind: "text", max: 50 },
+  { key: "lcNo", label: "LC No", kind: "text", max: 30 }, { key: "lcDate", label: "LC Date", kind: "date" }, { key: "lcBankName", label: "LC Bank", kind: "text", max: 100 },
+  { key: "transportMode", label: "Transport Mode", kind: "mode" }, { key: "blAwbNo", label: "BL / AWB No", kind: "text", max: 30 }, { key: "blAwbDate", label: "BL / AWB Date", kind: "date" },
+  { key: "transporterName", label: "Transporter", kind: "text", max: 100 }, { key: "vehicleNo", label: "Vehicle No", kind: "text", max: 30 }, { key: "lrNo", label: "LR No", kind: "text", max: 30 }, { key: "lrDate", label: "LR Date", kind: "date" },
+  { key: "importPermitNo", label: "Import Permit No", kind: "text", max: 30 }, { key: "importPermitDate", label: "Permit Date", kind: "date" },
   // Optional foreign currency: amounts on the bill stay in NPR; these record how they were converted.
   { key: "currencyCode", label: "Foreign Currency (optional, e.g. USD)", kind: "text", max: 3 }, { key: "exchangeRate", label: "Exchange Rate (NPR per 1 unit)", kind: "text", max: 20 }, { key: "foreignInvoiceAmount", label: "Invoice Total in Foreign Currency", kind: "text", max: 20 },
 ];
@@ -37,7 +37,7 @@ const HELP: [string, string][] = [...COMMON_HELP, ["Post", "Writes the journal v
 
 interface BForm {
   invoiceDate: string; invoiceType: "LOCAL" | "IMPORT"; purchaseType: string; vendorGLId: string; subLedgerId: string; agentId: string; vendorInvoiceNo: string; vendorInvoiceDate: string;
-  dueDays: string; dueDate: string; remarks: string; purchaseChallanId: string; purchaseOrderId: string; mainBillId: string; importCostForBillId: string; importCostAllocationBasis: "VALUE" | "QUANTITY"; importCostTreatment: "CIF" | "LANDED_ONLY"; challanNo: string; orderNo: string;
+  dueDays: string; dueDate: string; remarks: string; purchaseChallanId: string; purchaseOrderId: string; importCostForBillId: string; importCostAllocationBasis: "VALUE" | "QUANTITY"; importCostTreatment: "CIF" | "LANDED_ONLY"; challanNo: string; orderNo: string;
   lines: LineRow[]; terms: TermRow[]; imp: Record<string, string>;
 }
 type TermDialog = { scope: "header" } | { scope: "line"; lineNumber: number; lineIndex: number };
@@ -48,7 +48,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
     kind: "bills", title: "Purchase Bill", singular: "Bill", statusOptions: OPTIONS,
     emptyForm: (lk) => ({
       invoiceDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), invoiceType: "LOCAL", purchaseType: "GOODS_PURCHASE_OTHERS", vendorGLId: "", subLedgerId: "", agentId: "",
-      vendorInvoiceNo: "", vendorInvoiceDate: "", dueDays: "", dueDate: "", remarks: "", purchaseChallanId: "", purchaseOrderId: "", mainBillId: "", importCostForBillId: "", importCostAllocationBasis: "VALUE", importCostTreatment: "CIF", challanNo: "", orderNo: "",
+      vendorInvoiceNo: "", vendorInvoiceDate: "", dueDays: "", dueDate: "", remarks: "", purchaseChallanId: "", purchaseOrderId: "", importCostForBillId: "", importCostAllocationBasis: "VALUE", importCostTreatment: "CIF", challanNo: "", orderNo: "",
       lines: Array.from({ length: 10 }, () => blankLine()), terms: [], imp: {},
     }),
     toForm: (d: PDoc, lk) => {
@@ -58,7 +58,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
       return {
         invoiceDate: str(d.invoiceDate), invoiceType: d.invoiceType, purchaseType: str(d.purchaseType), vendorGLId: str(d.vendorGLId), subLedgerId: str(d.subLedgerId), agentId: str(d.agentId),
         vendorInvoiceNo: str(d.vendorInvoiceNo), vendorInvoiceDate: str(d.vendorInvoiceDate), dueDays: str(d.dueDays), dueDate: str(d.dueDate), remarks: str(d.remarks),
-        purchaseChallanId: str(d.purchaseChallanId), purchaseOrderId: str(d.purchaseOrderId), mainBillId: str(d.mainBillId), importCostForBillId: str(d.importCostForBillId), importCostAllocationBasis: d.importCostAllocationBasis === "QUANTITY" ? "QUANTITY" : "VALUE", importCostTreatment: d.importCostTreatment === "LANDED_ONLY" ? "LANDED_ONLY" : "CIF", challanNo: str(d.challanNumber), orderNo: str(d.orderNumber),
+        purchaseChallanId: str(d.purchaseChallanId), purchaseOrderId: str(d.purchaseOrderId), importCostForBillId: str(d.importCostForBillId), importCostAllocationBasis: d.importCostAllocationBasis === "QUANTITY" ? "QUANTITY" : "VALUE", importCostTreatment: d.importCostTreatment === "LANDED_ONLY" ? "LANDED_ONLY" : "CIF", challanNo: str(d.challanNumber), orderNo: str(d.orderNumber),
         lines: d.lines.length ? d.lines.map((l) => lineFromDoc(l, prods.get(str(l.productId)))) : [blankLine()], terms: (d.terms ?? []).map(termFromDoc), imp,
       };
     },
@@ -70,9 +70,9 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
         invoiceDate: f.invoiceDate, invoiceType: f.invoiceType, purchaseType: f.purchaseType, vendorGLId: Number(f.vendorGLId), subLedgerId: f.subLedgerId ? Number(f.subLedgerId) : null,
         agentId: f.agentId ? Number(f.agentId) : null, vendorInvoiceNo: nn(f.vendorInvoiceNo), vendorInvoiceDate: f.vendorInvoiceDate || null,
         dueDays: f.dueDays ? Number(f.dueDays) : null, dueDate: f.dueDate || null, remarks: nn(f.remarks),
-        purchaseChallanId: f.purchaseChallanId ? Number(f.purchaseChallanId) : null, purchaseOrderId: f.purchaseOrderId ? Number(f.purchaseOrderId) : null, mainBillId: f.mainBillId ? Number(f.mainBillId) : null,
-        importCostForBillId: f.importCostForBillId && !f.mainBillId ? Number(f.importCostForBillId) : null, importCostAllocationBasis: f.importCostAllocationBasis, importCostTreatment: f.importCostTreatment,
-        lines: f.mainBillId ? [] : f.lines.filter((l) => !isBlankLine(l)).map((l) => lineToPayload(l, prods.get(l.productId), "bill")),
+        purchaseChallanId: f.purchaseChallanId ? Number(f.purchaseChallanId) : null, purchaseOrderId: f.purchaseOrderId ? Number(f.purchaseOrderId) : null,
+        importCostForBillId: f.importCostForBillId ? Number(f.importCostForBillId) : null, importCostAllocationBasis: f.importCostAllocationBasis, importCostTreatment: f.importCostTreatment,
+        lines: f.lines.filter((l) => !isBlankLine(l)).map((l) => lineToPayload(l, prods.get(l.productId), "bill")),
         terms: f.terms.filter((t) => !isBlankTerm(t)).map((t) => termToPayload(t, masters.get(t.termId))),
         importDetail: f.invoiceType === "IMPORT" ? Object.fromEntries(IMPORT_FIELDS.map((k) => [k.key, nn(f.imp[k.key] ?? "")])) : null,
       };
@@ -86,11 +86,10 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
       e.vendorInvoiceDate = dateErr("Vendor invoice date", f.vendorInvoiceDate);
       e.dueDate = dateErr("Due date", f.dueDate);
       if (f.dueDays && !/^\d{1,4}$/.test(f.dueDays)) e.dueDays = "Due days must be a whole number.";
-      if (f.importCostForBillId && (f.mainBillId || !f.purchaseType.startsWith("SERVICE_PURCHASE_"))) e.importCostForBillId = "Only a normal service purchase bill can be linked to a goods bill as a cost.";
+      if (f.importCostForBillId && !f.purchaseType.startsWith("SERVICE_PURCHASE_")) e.importCostForBillId = "Only a service purchase bill can be linked to a goods bill as a cost.";
       for (const k of IMPORT_FIELDS) if (f.invoiceType === "IMPORT" && k.kind === "date") { const m = dateErr(k.label, f.imp[k.key] ?? ""); if (m) e[`imp.${k.key}`] = m; }
       const live = f.lines.filter((l) => !isBlankLine(l)).length;
-      if (f.mainBillId) { if (!f.terms.some((t) => !isBlankTerm(t))) e.terms = "An additional bill needs at least one charge (term)."; }
-      else Object.assign(e, validateLines(f.lines, new Map(lk.products.map((x) => [String(x.id), x])), { rate: "required", tracking: true }));
+      Object.assign(e, validateLines(f.lines, new Map(lk.products.map((x) => [String(x.id), x])), { rate: "required", tracking: true }));
       Object.assign(e, validateTerms(f.terms, new Map(lk.terms.map((x) => [String(x.id), x])), live));
       return e;
     },
@@ -105,11 +104,10 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
   const f = s.form, lk = s.lookups, doc = s.doc, ro = s.readOnly;
   const products = useMemo(() => new Map((lk?.products ?? []).map((x) => [String(x.id), x])), [lk]);
   const masters = useMemo(() => new Map((lk?.terms ?? []).map((x) => [String(x.id), x])), [lk]);
-  const isAdditional = !!f?.mainBillId;
   const invoicePreview = useMemo(() => {
     if (!f) return previewPurchase([], [], new Map(), true);
     const liveLines = f.lines.filter((line) => !isBlankLine(line));
-    let incompleteLines = !isAdditional && liveLines.length === 0;
+    let incompleteLines = liveLines.length === 0;
     const pricedLines = liveLines.flatMap((line, index) => {
       const product = products.get(line.productId);
       const qty = effectiveQty(line, product);
@@ -133,7 +131,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
     }));
     const termMasters = new Map((lk?.terms ?? []).map((term) => [term.id, term]));
     return previewPurchase(pricedLines, terms, termMasters, incompleteLines);
-  }, [f, isAdditional, lk?.terms, products]);
+  }, [f, lk?.terms, products]);
 
   const isScopedTerm = (term: TermRow, scope: TermDialog) => {
     if (isBlankTerm(term)) return false;
@@ -237,8 +235,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
     const onShortcut = (event: KeyboardEvent) => {
       if (event.key !== "F6" || termDialog || !f || ro) return;
       event.preventDefault();
-      if (isAdditional) openTerms({ scope: "header" });
-      else document.querySelector<HTMLElement>('[data-grid="lines"] [data-nav="add-line"]')?.click();
+      document.querySelector<HTMLElement>('[data-grid="lines"] [data-nav="add-line"]')?.click();
     };
     window.addEventListener("keydown", onShortcut);
     return () => window.removeEventListener("keydown", onShortcut);
@@ -267,7 +264,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.fromChallan, lk]);
 
-  // posted main bills that a charge can be added to
+  // posted goods bills that a service bill can be linked to as a cost
   const [mains, setMains] = useState<PListRow[]>([]);
   // Import / landed-cost detail panels stay collapsed until the user opens them (or existing data forces open once).
   const [importOpen, setImportOpen] = useState(false);
@@ -277,11 +274,6 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
   useEffect(() => {
     purchaseApi.list("bills", { companyId: p.companyId, branchId: p.branchId, fiscalYear: "", status: "POSTED" }).then((r) => setMains(r.rows.filter((x) => !x.isAdditional))).catch(() => {});
   }, [p.companyId, p.branchId, s.doc?.id, s.mode]);
-  const mainOpts = useMemo<ComboOption[]>(() => {
-    const o = mains.map((x) => ({ value: String(x.id), label: `${x.invoiceNumber} — ${x.vendorName}` }));
-    if (f?.mainBillId && !o.some((x) => x.value === f.mainBillId) && doc?.mainBill) o.push({ value: f.mainBillId, label: doc.mainBill.invoiceNumber });
-    return o;
-  }, [mains, f?.mainBillId, doc]);
   const sourceTargetOpts = useMemo<ComboOption[]>(() => {
     const o = mains.filter((x) => String(x.purchaseType).startsWith("GOODS_PURCHASE_") && !x.isAdditional)
       .map((x) => ({ value: String(x.id), label: `${x.invoiceNumber} — ${x.vendorName} (${x.invoiceDate})${x.invoiceType === "IMPORT" ? " · import" : " · local"}` }));
@@ -303,21 +295,6 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
     if (!doc) landedAutoOpened.current = false;
   }, [doc?.id, doc?.importCostSources?.length]);
 
-  const pickMain = async (id: string) => {
-    if (!id) return s.patch({ mainBillId: "" });
-    try {
-      const m = await purchaseApi.get("bills", Number(id), p.companyId);
-      s.patch({ mainBillId: id, importCostForBillId: "", vendorGLId: str(m.vendorGLId), subLedgerId: str(m.subLedgerId), agentId: str(m.agentId), invoiceType: m.invoiceType, purchaseType: str(m.purchaseType), lines: [blankLine()] });
-    } catch (e) { s.flash((e as Error).message, "err"); }
-  };
-  const addCharges = () => {
-    if (!doc || !lk) return;
-    s.newDoc({
-      ...cfg.emptyForm(lk), mainBillId: String(doc.id), vendorGLId: str(doc.vendorGLId), subLedgerId: str(doc.subLedgerId), agentId: str(doc.agentId), invoiceType: doc.invoiceType, purchaseType: str(doc.purchaseType),
-      remarks: `Additional charges for ${doc.invoiceNumber}`,
-    });
-  };
-
   const state = doc?.state as string | undefined;
   const reversible = !!doc && state === "POSTED";
   const includedSources = (doc?.importCostSources ?? []).filter((source: any) => source.includedInCIF);
@@ -329,7 +306,6 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
   const actions = doc && (
     <>
       {state === "DRAFT" && <button data-nav className="btn btn-primary" onClick={() => s.run({ action: "post", title: "Post bill?", body: <>Post <b className="font-mono">{doc.invoiceNumber}</b> for <b>{money(doc.totalAmount)}</b>? A balanced journal voucher is written and the bill can no longer be edited or deleted — only reversed.</>, button: "Post", done: (d) => `Posted ${d.invoiceNumber}${d.journalVoucher ? ` (voucher ${d.journalVoucher.voucherNumber})` : ""}` })}><Send size={14} /> Post</button>}
-      {reversible && !doc.mainBillId && <button data-nav className="btn" onClick={addCharges}><FilePlus2 size={14} /> Add Charges</button>}
       {reversible && (
         <button data-nav className="btn" onClick={() => {
           const fy = lk?.fiscalYears.find((y) => y.code === p.fyCode);
@@ -355,7 +331,6 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
       {state === "POSTED" && <p className="text-[12px] text-green-800 bg-green-50 border border-green-300 px-2 py-1">Posted{doc.journalVoucher ? <> as voucher <b className="font-mono">{doc.journalVoucher.voucherNumber}</b> dated {doc.journalVoucher.voucherDate}</> : ""}. A posted bill cannot be edited; reverse it to correct it.</p>}
       {state === "REVERSED" && <p className="text-[12px] text-amber-800 bg-amber-50 border border-amber-300 px-2 py-1">Reversed by <b className="font-mono">{doc.reversedBy?.invoiceNumber}</b>.</p>}
       {state === "REVERSAL" && <p className="text-[12px] text-blue-800 bg-blue-50 border border-blue-300 px-2 py-1">This is the reversal of <b className="font-mono">{doc.reversalOf?.invoiceNumber}</b>.</p>}
-      {doc.mainBill && <p className="text-[12px] text-slate-700 bg-slate-50 border border-slate-300 px-2 py-1">Additional charges bill for <b className="font-mono">{doc.mainBill.invoiceNumber}</b>.</p>}
     </div>
   );
 
@@ -364,7 +339,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
       pill={state && <Pill text={state} tone={STATE_TONE[state]} />} canEdit={!!doc && cfg.editable(doc)} canDelete={!!doc && cfg.deletable(doc)} actions={actions} help={HELP} notice={notice}
       listRow={(r) => (
         <>
-          <div className="flex items-start justify-between gap-2"><span className="min-w-0 font-mono font-semibold break-words">{r.invoiceNumber}</span><span className="flex shrink-0 gap-1">{r.isAdditional && <Pill text="ADDL" tone="blue" />}<Pill text={r.state} tone={STATE_TONE[r.state]} /></span></div>
+          <div className="flex items-start justify-between gap-2"><span className="min-w-0 font-mono font-semibold break-words">{r.invoiceNumber}</span><span className="flex shrink-0"><Pill text={r.state} tone={STATE_TONE[r.state]} /></span></div>
           <div className="text-[12px] text-slate-600 break-words">{r.vendorName}{r.vendorInvoiceNo ? ` · ${r.vendorInvoiceNo}` : ""}</div>
           <div className="flex flex-wrap justify-between gap-x-2 text-[12px] text-slate-500"><span>{r.invoiceDate}</span><span className="tabular-nums whitespace-nowrap">{money(r.totalAmount)}</span></div>
         </>
@@ -390,10 +365,9 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
           s.clearError(...mapped);
         };
         const liveLines = f.lines.filter((line) => !isBlankLine(line)).length;
-        const liveTerms = f.terms.filter((term) => !isBlankTerm(term)).length;
         const impFilled = Object.values(f.imp).filter((v) => String(v ?? "").trim() !== "").length;
         const dialogPreview = termDialog && !ro ? (() => {
-          let incompleteLines = !isAdditional && liveLines === 0;
+          let incompleteLines = liveLines === 0;
           const pricedLines = f.lines.filter((line) => !isBlankLine(line)).flatMap((line, index) => {
             const product = products.get(line.productId);
             const qty = effectiveQty(line, product);
@@ -432,23 +406,31 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
           <FormSection title="Bill Header" hint="Invoice, supplier, payment and document links">
             <div className="grid min-w-0 grid-cols-2 md:grid-cols-4 2xl:grid-cols-6 gap-x-2 gap-y-1">
               <Field label="Invoice No"><input disabled className="fld bg-slate-100 text-slate-600" value={doc?.invoiceNumber ?? ""} placeholder="(next number)" aria-label="Invoice number" /></Field>
-              <DateField label="Invoice Date" name="invoiceDate" value={f.invoiceDate} onChange={(v) => { s.patch({ invoiceDate: v }); s.clearError("invoiceDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("invoiceDate")} required />
+              <DateField label="Invoice Date" name="invoiceDate" value={f.invoiceDate} onChange={(v) => {
+                // with due days entered, the due date follows the invoice date
+                const due = f.dueDays ? addDaysIso(v, Number(f.dueDays)) : "";
+                s.patch(due ? { invoiceDate: v, dueDate: due } : { invoiceDate: v });
+                s.clearError("invoiceDate");
+              }} calendar={p.calendar} readOnly={ro} error={s.err("invoiceDate")} required />
               <Field label="Invoice Type">
-                <select data-field="invoiceType" disabled={ro || isAdditional} value={f.invoiceType} onChange={(e) => { s.patch({ invoiceType: e.target.value as BForm["invoiceType"] }); if (e.target.value !== "IMPORT") setImportOpen(false); }} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}><option value="LOCAL">Local</option><option value="IMPORT">Import</option></select>
+                <select data-field="invoiceType" disabled={ro} value={f.invoiceType} onChange={(e) => { s.patch({ invoiceType: e.target.value as BForm["invoiceType"] }); if (e.target.value !== "IMPORT") setImportOpen(false); }} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}><option value="LOCAL">Local</option><option value="IMPORT">Import</option></select>
               </Field>
               <Field label="Purchase Type">
-                <select data-field="purchaseType" disabled={ro || isAdditional} value={f.purchaseType} onChange={(e) => { const purchaseType = e.target.value; s.patch({ purchaseType, importCostForBillId: purchaseType.startsWith("SERVICE_PURCHASE_") ? f.importCostForBillId : "" }); s.clearError("importCostForBillId"); }} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}>{PURCHASE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select>
+                <select data-field="purchaseType" disabled={ro} value={f.purchaseType} onChange={(e) => { const purchaseType = e.target.value; s.patch({ purchaseType, importCostForBillId: purchaseType.startsWith("SERVICE_PURCHASE_") ? f.importCostForBillId : "" }); s.clearError("importCostForBillId"); }} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}>{PURCHASE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select>
               </Field>
-              <VendorFields lookups={lk} contextKey={String(p.companyId)} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors} lockVendor={!!f.purchaseChallanId || isAdditional}
+              <VendorFields lookups={lk} contextKey={String(p.companyId)} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors} lockVendor={!!f.purchaseChallanId}
                 onChange={(c) => { s.patch(c); s.clearError("vendorGLId", "subLedgerId"); }} />
-              <TextField label="Vendor Invoice No" name="vendorInvoiceNo" value={f.vendorInvoiceNo} onChange={(v) => s.patch({ vendorInvoiceNo: v })} readOnly={ro} error={s.err("vendorInvoiceNo")} />
+              <TextField label="Vendor Invoice No" name="vendorInvoiceNo" value={f.vendorInvoiceNo} onChange={(v) => s.patch({ vendorInvoiceNo: v })} readOnly={ro} error={s.err("vendorInvoiceNo")} max={30} />
               <DateField label="Vendor Invoice Date" name="vendorInvoiceDate" value={f.vendorInvoiceDate} onChange={(v) => { s.patch({ vendorInvoiceDate: v }); s.clearError("vendorInvoiceDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("vendorInvoiceDate")} />
-              <TextField label="Due Days" name="dueDays" value={f.dueDays} onChange={(v) => /^\d{0,4}$/.test(v) && s.patch({ dueDays: v })} readOnly={ro} error={s.err("dueDays")} max={4} />
+              <TextField label="Due Days" name="dueDays" value={f.dueDays} onChange={(v) => {
+                if (!/^\d{0,4}$/.test(v)) return;
+                // typing the days sets the due date from the invoice date; a due date typed afterwards still wins
+                const due = v ? addDaysIso(f.invoiceDate, Number(v)) : "";
+                s.patch(due ? { dueDays: v, dueDate: due } : { dueDays: v });
+                if (due) s.clearError("dueDate");
+              }} readOnly={ro} error={s.err("dueDays")} max={4} />
               <DateField label="Due Date" name="dueDate" value={f.dueDate} onChange={(v) => { s.patch({ dueDate: v }); s.clearError("dueDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("dueDate")} />
-              <Field label="Additional to Bill" error={s.err("mainBillId")}>
-                <Combobox fieldName="mainBillId" placeholder="— (a normal bill)" value={f.mainBillId} hasError={!!s.err("mainBillId")} options={mainOpts} disabled={ro || !!doc || !!f.purchaseChallanId} allowClear onChange={(v) => void pickMain(v)} onCommit={(el, dir) => focusStep(el, dir)} />
-              </Field>
-              {!isAdditional && f.purchaseType.startsWith("SERVICE_PURCHASE_") && (
+              {f.purchaseType.startsWith("SERVICE_PURCHASE_") && (
                 <>
                   <Field label="Cost of goods bill" error={s.err("importCostForBillId")}>
                     <Combobox fieldName="importCostForBillId" placeholder="— (not linked: stays an expense)" value={f.importCostForBillId} hasError={!!s.err("importCostForBillId")} options={sourceTargetOpts} disabled={ro} allowClear onChange={(value) => { const target = mains.find((x) => String(x.id) === value); s.patch({ importCostForBillId: value, ...(value && target && target.invoiceType !== "IMPORT" ? { importCostTreatment: "LANDED_ONLY" as const } : {}) }); s.clearError("importCostForBillId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
@@ -491,7 +473,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
               )}
             </section>
           )}
-          {!isAdditional && !!doc && String(doc.purchaseType ?? "").startsWith("GOODS_PURCHASE_") && (
+          {!!doc && String(doc.purchaseType ?? "").startsWith("GOODS_PURCHASE_") && (
             <section className="rounded-sm border border-sky-300 bg-sky-50/40">
               <button type="button" className="flex w-full items-center gap-2 border-b border-sky-200 bg-sky-50 px-3 py-1.5 text-left" onClick={() => setLandedOpen((v) => !v)} aria-expanded={landedOpen}>
                 {landedOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -527,14 +509,11 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
             </section>
           )}
 
-          {!isAdditional && (
-            <FormSection title="Lines" hint="Product, quantity and rate — stock columns appear only when a product needs them">
-              <LinesGrid kind="bill" lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
-                onOpenTerms={(index) => openTerms({ scope: "line", lineNumber: lineNumberAt(index), lineIndex: index })} termSummary={lineTermsSummary} />
-            </FormSection>
-          )}
-          {isAdditional && <div className="border border-slate-300 bg-slate-50 px-3 py-2 text-[12px] text-slate-600">This is an additional-charge bill linked to an existing goods bill. <button type="button" className="font-semibold text-blue-700 underline underline-offset-2" onClick={() => openTerms({ scope: "header" })}>Open charge terms</button>.</div>}
-          <PurchaseInvoiceTotals preview={invoicePreview} savedDoc={doc} readOnly={ro} isAdditional={isAdditional} hasLines={liveLines > 0} hasTerms={liveTerms > 0} />
+          <FormSection title="Lines" hint="Product, quantity and rate — stock columns appear only when a product needs them">
+            <LinesGrid kind="bill" lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
+              onOpenTerms={(index) => openTerms({ scope: "line", lineNumber: lineNumberAt(index), lineIndex: index })} termSummary={lineTermsSummary} />
+          </FormSection>
+          <PurchaseInvoiceTotals preview={invoicePreview} savedDoc={doc} readOnly={ro} hasLines={liveLines > 0} />
           <section className="flex flex-wrap items-center gap-2 border border-slate-400 bg-white px-3 py-2" aria-label="Header terms and conditions">
             <div className="min-w-0 flex-1">
               <h2 className="text-[12px] font-semibold text-slate-800">Header Terms &amp; Conditions</h2>
@@ -547,10 +526,9 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
             </button>
             {s.err("terms") && <p className="w-full text-[12px] text-red-700" role="alert">{s.err("terms")}</p>}
           </section>
-          {ro && doc && !isAdditional && doc.lines.some((l) => Number(l.landedAmount) !== 0) && (
+          {ro && doc && doc.lines.some((l) => Number(l.landedAmount) !== 0) && (
             <p className="text-[12px] text-slate-600">Landed cost per line: {doc.lines.map((l) => `${l.lineNumber}: ${money(l.landedAmount)}`).join(" · ")}</p>
           )}
-          {doc && doc.additionalBills?.length > 0 && <p className="text-[12px] text-slate-600">Additional bills: {doc.additionalBills.map((a: any) => `${a.invoiceNumber} (${money(a.totalAmount)}, ${a.state.toLowerCase()})`).join(", ")}</p>}
           <FormSection title="Remarks" hint="Optional note for this bill" className="w-full">
             <textarea data-field="remarks" maxLength={1024} disabled={ro} value={f.remarks} onChange={(e) => s.patch({ remarks: e.target.value })}
               placeholder="Add remarks…" className={`fld h-20 min-h-20 resize-y py-2 ${s.err("remarks") ? "fld-err" : ""}`} aria-label="Remarks" />
@@ -571,7 +549,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
                 <div className="flex items-center justify-between gap-3 border-b border-slate-300 bg-slate-100 px-3 py-2">
                   <div>
                     <h2 id="purchase-term-dialog-title" className="text-[14px] font-semibold text-slate-800">
-                      {termDialog.scope === "header" ? (isAdditional ? "Additional bill charges" : "Header terms & conditions") : `Line ${termDialog.lineNumber} terms`}
+                      {termDialog.scope === "header" ? "Header terms & conditions" : `Line ${termDialog.lineNumber} terms`}
                     </h2>
                     <p className="text-[11px] text-slate-600">
                       {termDialog.scope === "header" ? "Assess document-level terms; line-specific terms are managed from the item grid." : products.get(f.lines[termDialog.lineIndex]?.productId)?.description ?? "Product line terms and amount"}
@@ -581,7 +559,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
                 </div>
                 <div className="min-h-0 flex-1 overflow-auto p-3">
                   <TermsGrid terms={termDraft} onChange={setTermDraft} lookups={lk} masters={masters} lineCount={liveLines} readOnly={ro} errors={dialogErrors} clearError={clearDialogError} contextKey={String(p.companyId)} calculationPreview={ro ? undefined : dialogPreview?.terms} previewError={dialogPreview?.message}
-                    category={isAdditional ? "ADDITIONAL" : undefined} productwiseOnly={termDialog.scope === "line"} fixedLineNumber={termDialog.scope === "line" ? termDialog.lineNumber : undefined} />
+                    category="GENERAL" productwiseOnly={termDialog.scope === "line"} fixedLineNumber={termDialog.scope === "line" ? termDialog.lineNumber : undefined} />
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-300 bg-slate-50 px-3 py-2">
                   <span className="text-[12px] text-slate-600">{termDraft.filter((term) => !isBlankTerm(term)).length} term(s) · Dialog net <b className="tabular-nums">{dialogTotalText}</b></span>

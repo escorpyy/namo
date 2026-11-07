@@ -262,7 +262,7 @@ export function getPurchaseBill(id: number, companyId: number) {
       vendorGLId: b.vendorGLId, subLedgerId: b.subLedgerId, agentId: b.agentId, vendorInvoiceNo: b.vendorInvoiceNo, vendorInvoiceDate: iso(b.vendorInvoiceDate),
       purchaseChallanId: b.purchaseChallanId, challanNumber: challan[0]?.challanNumber ?? null, purchaseOrderId: b.purchaseOrderId, orderNumber: order[0]?.orderNumber ?? null,
       mainBillId: b.mainBillId, mainBill: main[0] ?? null, reversalOfId: b.reversalOfId, reversalOf, reversedBy: reversedBy[0] ?? null,
-      importCostForBillId: b.importCostForBillId, importCostTarget: importTarget[0] ?? null, importCostAllocationBasis: b.importCostAllocationBasis,
+      importCostForBillId: b.importCostForBillId, importCostTarget: importTarget[0] ?? null, importCostAllocationBasis: b.importCostAllocationBasis, importCostTreatment: b.importCostTreatment,
       dueDays: b.dueDays, dueDate: iso(b.dueDate), remarks: b.remarks,
       isPosted: b.isPosted, postedAt: b.postedAt, state: billState(b.isPosted, b.reversalOfId, reversed),
       journalVoucher: voucher[0] ? { ...voucher[0], voucherDate: iso(voucher[0].voucherDate) } : null,

@@ -225,7 +225,9 @@ describe.skipIf(!DB_READY)("Cost assessment: local and import, against ledgers, 
     expect(noStock.status).toBe(400);
   });
   it("an import bill can optionally carry a foreign currency and exchange rate; the last against ledger used for a charge is offered next time", async () => {
-    const imp = (extra: Record<string, unknown>) => call("POST", api("bills"), billBody({ invoiceType: "IMPORT", purchaseType: "GOODS_PURCHASE_OTHERS", importDetail: { customsDeclarationNo: "CUS-FX", ...extra }, lines: goodsLines() }));
+    // each valid bill needs its own customs declaration number (one declaration belongs to one live bill)
+    let fx = 0;
+    const imp = (extra: Record<string, unknown>) => call("POST", api("bills"), billBody({ invoiceType: "IMPORT", purchaseType: "GOODS_PURCHASE_OTHERS", importDetail: { customsDeclarationNo: `CUS-FX-${++fx}`, ...extra }, lines: goodsLines() }));
     const plain = await imp({});
     expect(plain.status, JSON.stringify(plain.body)).toBe(201); // currency stays optional
     expect((await imp({ currencyCode: "USD" })).status).toBe(400);               // a currency needs its rate

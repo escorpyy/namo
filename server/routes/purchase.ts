@@ -19,6 +19,8 @@ import { HttpError, wrap } from "./_util";
 //   POST   /api/purchase/orders/:id/{approve|close|cancel}   POST /api/purchase/challans/:id/confirm
 //   POST   /api/purchase/bills/:id/{post|reverse}            GET  /api/purchase/bills/from-challan/:challanId?companyId=
 //
+// A bill body with `mainBillId` (an "additional bill") is refused with 400: use a cost assessment or a linked service bill instead.
+//
 // Bill writes (create, edit, delete, post, reverse) are refused with 409 and code PERIOD_LOCKED when the document is dated on or before the
 // company lock date (ERP-025, GET/PUT /api/period-lock). The body may carry `lockOverride: { password, reason }` to override that for this one
 // request: 403 LOCK_PASSWORD_WRONG for a wrong password, 400 for a missing reason. Orders and challans are not covered by the lock.
@@ -200,6 +202,14 @@ const BILL_HEAD = {
   vendorInvoiceNo: "str", vendorInvoiceDate: "date", purchaseChallanId: "int", purchaseOrderId: "int", mainBillId: "int", importCostForBillId: "int",
   importCostAllocationBasis: ["VALUE", "QUANTITY"], importCostTreatment: ["CIF", "LANDED_ONLY"], dueDays: "int", dueDate: "date",
 } as const satisfies Record<string, Kind>;
+// Additional bills are retired. Customs, excise and similar charges are recorded with a cost assessment, and an agent's or freight company's
+// invoice is a service bill linked to the goods bill (importCostForBillId). The service layer can still post and reverse any that already exist.
+function refuseAdditionalBill(body: any) {
+  const v = body?.mainBillId;
+  if (v !== undefined && v !== null && v !== "") {
+    throw new HttpError(400, "Additional bills are no longer entered. Record customs, excise and similar charges with a cost assessment, or enter the agent's or freight invoice as a service bill linked to the goods bill.", "mainBillId");
+  }
+}
 const billInput = (b: any, base: { companyId: number; branchId: number; id?: number }): P.PurchaseBillInput => ({
   ...(pick(b, BILL_HEAD, "Bill") as any),
   lines: rows(b?.lines, { ...LINE, ...TRACK, challanLineId: "int", purchaseOrderLineId: "int" }, "lines", MAX_LINES, "Line") as any,
@@ -217,11 +227,13 @@ purchaseRouter.get("/bills/from-challan/:challanId", wrap(async (req, res) => {
 purchaseRouter.get("/bills/:id", wrap(async (req, res) => { res.json(await P.getPurchaseBill(idOf(req), companyOf(req))); }));
 
 purchaseRouter.post("/bills", wrap(async (req, res) => {
+  refuseAdditionalBill(req.body);
   const companyId = whole(req.body?.companyId ?? q(req, "companyId"), "companyId"), branchId = whole(req.body?.branchId, "branchId");
   const result = await P.savePurchaseBill(billInput(req.body, { companyId, branchId }), await actorOf(req), { lockOverride: lockOverrideOf(req) });
   res.status(201).json({ result, document: await P.getPurchaseBill(result.id, companyId) });
 }));
 purchaseRouter.put("/bills/:id", wrap(async (req, res) => {
+  refuseAdditionalBill(req.body);
   const id = idOf(req), companyId = companyOf(req), b = await owned("bill", id, companyId);
   const result = await P.savePurchaseBill(billInput(req.body, { companyId, branchId: b.branchId, id }), await actorOf(req), { lockOverride: lockOverrideOf(req) });
   res.json({ result, document: await P.getPurchaseBill(id, companyId) });

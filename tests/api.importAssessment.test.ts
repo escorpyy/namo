@@ -24,6 +24,12 @@ describe.skipIf(!DB_READY)("Import cost assessment (API)", () => {
     expect(response.status, JSON.stringify(response.body)).toBe(201);
     return response.body.result as { id: number; invoiceNumber: string };
   };
+  // Additional bills can no longer be entered through the API (it answers 400); the service still posts and reverses any that already exist,
+  // so the tests create them there to keep covering how an import assessment treats them.
+  const createLegacyAdditional = async (mainBillId: number, terms: Record<string, unknown>[]) => {
+    const svc = await import("../server/services/purchase");
+    return await svc.savePurchaseBill({ companyId: W.co, branchId: W.br, fiscalYear: "2082/83", invoiceDate: "2025-10-15", vendorGLId: W.vendor, invoiceType: "LOCAL", mainBillId, lines: [], terms } as any, { userId }) as { id: number; invoiceNumber: string };
+  };
   const action = async (id: number, name: string, body: Record<string, unknown> = {}) => call("POST", `${api("bills")}/${id}/${name}?companyId=${W.co}`, { userId, ...body });
   const assessmentTerms = () => [
     { termId: W.duty, calcType: "PERCENT", rate: "10", allocationBasis: "VALUE", capitalizable: true, againstLedgerId: W.bank },
@@ -93,7 +99,7 @@ describe.skipIf(!DB_READY)("Import cost assessment (API)", () => {
     const service = await createBill({ invoiceType: "LOCAL", purchaseType: "SERVICE_PURCHASE_OTHERS", importCostForBillId: goods.id, importCostAllocationBasis: "VALUE", importCostTreatment: "CIF",
       lines: [{ productId: W.service, qty: 1, rate: 300 }], terms: [{ termId: W.vat }] });
     expect((await action(service.id, "post")).status).toBe(200);
-    const legacyAdditional = await createBill({ invoiceType: "LOCAL", mainBillId: goods.id, terms: [{ termId: W.duty, calcType: "AMOUNT", inputAmount: "75" }] });
+    const legacyAdditional = await createLegacyAdditional(goods.id, [{ termId: W.duty, calcType: "AMOUNT", inputAmount: "75" }]);
     expect((await action(legacyAdditional.id, "post")).status).toBe(200);
 
     const termInput = assessmentTerms();
@@ -139,7 +145,7 @@ describe.skipIf(!DB_READY)("Import cost assessment (API)", () => {
     expect(amountOf(postedLines, W.bank, "cr")).toBe(230);
     expect(postedLines.reduce((a, l) => a + Number(l.dr), 0)).toBe(postedLines.reduce((a, l) => a + Number(l.cr), 0));
 
-    const lateAdditional = await createBill({ invoiceType: "LOCAL", mainBillId: goods.id, terms: [{ termId: W.duty, calcType: "AMOUNT", inputAmount: "10" }] });
+    const lateAdditional = await createLegacyAdditional(goods.id, [{ termId: W.duty, calcType: "AMOUNT", inputAmount: "10" }]);
     let directPostError: any;
     try { await db.execute(sql`update "PurchaseBill" set "isPosted" = true where id = ${lateAdditional.id}`); } catch (error) { directPostError = error; }
     expect(directPostError, "the database guard must refuse a direct post").toBeTruthy();

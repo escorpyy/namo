@@ -429,22 +429,103 @@ describe.skipIf(!DB_READY)("Purchase documents (API)", () => {
       expect((await act("bills", b.id, "post")).status).toBe(200);
     });
 
-    it("an additional bill adds a charge to a posted main bill's landed cost", async () => {
+    it("an additional bill can no longer be entered: create and edit answer 400 naming mainBillId, nothing is stored", async () => {
       const main = await mkBill();
       expect((await act("bills", main.id, "post")).status).toBe(200);
-      const before = (await get("bills", main.id)).body;
-      expect(before.lines.map((l: any) => n2(l.landedAmount))).toEqual(["1000.00", "1000.00"]);
-      const add = await call("POST", base("bills"), { companyId: W.co, branchId: W.br, invoiceDate: "2025-10-20", vendorGLId: W.customs ?? W.vendor, mainBillId: main.id, lines: [], terms: [{ termId: W.tDuty, inputAmount: 150 }] });
-      expect(add.status, JSON.stringify(add.body)).toBe(201);
-      expect(add.body.document).toMatchObject({ mainBillId: main.id, mainBill: { id: main.id }, state: "DRAFT", totalAmount: "150.00" });
-      expect((await act("bills", add.body.result.id, "post")).status).toBe(200);
-      const after = (await get("bills", main.id)).body;
-      expect(after.lines.map((l: any) => n2(l.landedAmount))).toEqual(["1100.00", "1050.00"]); // 150 by quantity: 10 pcs and 5 pcs -> 100 and 50
-      expect(after.additionalBills).toEqual([expect.objectContaining({ id: add.body.result.id, state: "POSTED" })]);
-      // the main bill cannot be reversed while a live additional bill stands
-      const rev = await act("bills", main.id, "reverse");
-      expect(rev.status).toBe(409);
-      expect(rev.body.message).toMatch(/additional bills first/);
+      const body = { companyId: W.co, branchId: W.br, invoiceDate: "2025-10-20", vendorGLId: W.vendor, mainBillId: main.id, lines: [], terms: [{ termId: W.tDuty, inputAmount: 150 }] };
+      const add = await call("POST", base("bills"), body);
+      expect(add.status).toBe(400);
+      expect(add.body.field).toBe("mainBillId");
+      expect(add.body.message).toMatch(/cost assessment/);
+      const draft = await mkBill();
+      const edit = await call("PUT", `${base("bills")}/${draft.id}?${qs()}`, billBody({ mainBillId: main.id }));
+      expect(edit.status).toBe(400);
+      expect(edit.body.field).toBe("mainBillId");
+      const rows = await rowsOf(sql`select count(*)::int as n from "PurchaseBill" where "companyId" = ${W.co} and "mainBillId" is not null`);
+      expect(rows[0].n).toBe(0);
+      // a null mainBillId (what the screen sends) is just an ordinary bill
+      expect((await call("POST", base("bills"), billBody({ mainBillId: null }))).status).toBe(201);
+    });
+
+    it("the cost treatment of a bill is returned, so editing and saving again keeps it", async () => {
+      const b = await mkBill({ importCostTreatment: "LANDED_ONLY" });
+      expect((await get("bills", b.id)).body.importCostTreatment).toBe("LANDED_ONLY");
+      const again = await call("PUT", `${base("bills")}/${b.id}?${qs()}`, billBody({ importCostTreatment: (await get("bills", b.id)).body.importCostTreatment }));
+      expect(again.status, JSON.stringify(again.body)).toBe(200);
+      expect(again.body.document.importCostTreatment).toBe("LANDED_ONLY");
+      expect((await get("bills", (await mkBill()).id)).body.importCostTreatment).toBe("CIF");
+    });
+
+    it("vendor invoice number: unique per vendor ledger AND sub-ledger; a reversed bill's number can be used again", async () => {
+      const no = `VI-${tag}`;
+      const sub2 = await ins("SubLedger", { code: c("S2"), name: "Second vendor sub", generalLedgerId: W.vendor, updatedAt: NOW });
+      await mkBill({ vendorInvoiceNo: no, subLedgerId: W.sub });
+      // another supplier under the same ledger may use the same number
+      expect((await call("POST", base("bills"), billBody({ vendorInvoiceNo: no, subLedgerId: sub2 }))).status).toBe(201);
+      // the same supplier may not
+      const dup = await call("POST", base("bills"), billBody({ vendorInvoiceNo: no, subLedgerId: W.sub }));
+      expect(dup.status).toBe(409);
+      expect(dup.body.field).toBe("vendorInvoiceNo");
+      expect(dup.body.message).toMatch(/already/i);
+      // editing a bill and keeping its own number is fine
+      const mine = await mkBill({ vendorInvoiceNo: `${no}-B`, subLedgerId: W.sub });
+      expect((await call("PUT", `${base("bills")}/${mine.id}?${qs()}`, billBody({ vendorInvoiceNo: `${no}-B`, subLedgerId: W.sub }))).status).toBe(200);
+      // after the bill is posted and reversed, the vendor's invoice can be keyed in again, correctly
+      const wrong = await mkBill({ vendorInvoiceNo: `${no}-R` });
+      expect((await act("bills", wrong.id, "post")).status).toBe(200);
+      const live = await call("POST", base("bills"), billBody({ vendorInvoiceNo: `${no}-R` }));
+      expect(live.status).toBe(409);
+      expect((await act("bills", wrong.id, "reverse", { reason: "wrong amount", date: "2025-10-20" })).status).toBe(200);
+      const fixed = await call("POST", base("bills"), billBody({ vendorInvoiceNo: `${no}-R` }));
+      expect(fixed.status, JSON.stringify(fixed.body)).toBe(201);
+    });
+
+    it("text longer than the database allows is a 400 naming the field, never a 500", async () => {
+      const long = "X".repeat(31);
+      const a = await call("POST", base("bills"), billBody({ vendorInvoiceNo: long }));
+      expect(a.status).toBe(400);
+      expect(a.body.field).toBe("vendorInvoiceNo");
+      for (const key of ["customsDeclarationNo", "lcNo", "blAwbNo", "vehicleNo", "lrNo", "importPermitNo"]) {
+        const r = await call("POST", base("bills"), billBody({ invoiceType: "IMPORT", importDetail: { [key]: long } }));
+        expect(r.status, key).toBe(400);
+        expect(r.body.field, key).toBe("importDetail");
+        expect(r.body.message, key).toMatch(/30 characters/);
+      }
+      expect((await call("POST", base("bills"), billBody({ invoiceType: "IMPORT", importDetail: { customsOffice: "Y".repeat(101) } }))).status).toBe(400);
+      expect((await call("POST", base("bills"), billBody({ vendorInvoiceNo: "X".repeat(30) }))).status).toBe(201);
+    });
+
+    it("a customs declaration number can be on one live bill only; a reversed bill frees it", async () => {
+      const cd = `CD-${tag}`;
+      const imp = (no: string) => billBody({ invoiceType: "IMPORT", importDetail: { customsDeclarationNo: no, customsDeclarationDate: "2025-10-12" } });
+      const first = await call("POST", base("bills"), imp(cd));
+      expect(first.status, JSON.stringify(first.body)).toBe(201);
+      const dup = await call("POST", base("bills"), imp(cd));
+      expect(dup.status).toBe(409);
+      expect(dup.body.field).toBe("importDetail");
+      expect(dup.body.message).toMatch(new RegExp(cd));
+      // the bill's own number on edit is fine
+      expect((await call("PUT", `${base("bills")}/${first.body.result.id}?${qs()}`, imp(cd))).status).toBe(200);
+      // post and reverse the first: the declaration can be used again
+      expect((await act("bills", first.body.result.id, "post")).status).toBe(200);
+      expect((await call("POST", base("bills"), imp(cd))).status).toBe(409);
+      expect((await act("bills", first.body.result.id, "reverse", { reason: "re-enter", date: "2025-10-20" })).status).toBe(200);
+      expect((await call("POST", base("bills"), imp(cd))).status).toBe(201);
+    });
+
+    it("moving a draft into another fiscal year gives it that year's next number", async () => {
+      await ins("FiscalYear", { companyId: W.co, code: "2083/84", startDate: "2026-07-17", endDate: "2027-07-16", isCurrent: false, updatedAt: NOW });
+      const a = await mkBill();
+      const b = await mkBill();
+      const before = (await get("bills", b.id)).body;
+      expect(before.fiscalYear).toBe("2082/83");
+      const moved = await call("PUT", `${base("bills")}/${b.id}?${qs()}`, billBody({ invoiceDate: "2026-08-01" }));
+      expect(moved.status, JSON.stringify(moved.body)).toBe(200);
+      expect(moved.body.document.fiscalYear).toBe("2083/84");
+      expect(moved.body.document.invoiceNumber).toBe("0001");
+      // an edit that stays in the year keeps its number
+      const same = await call("PUT", `${base("bills")}/${a.id}?${qs()}`, billBody({ invoiceDate: "2025-10-20" }));
+      expect(same.body.document.invoiceNumber).toBe(a.invoiceNumber);
     });
 
     it("list: state filter DRAFT / POSTED / REVERSED / REVERSAL, flags for additional bills, search by vendor invoice number", async () => {

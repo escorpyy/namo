@@ -163,8 +163,9 @@ export const purchaseBill = pgTable(
       t.fiscalYear,
       t.invoiceNumber,
     ),
-    // Catches the same vendor bill being keyed in twice.
-    uniqueIndex("PurchaseBill_vendor_vendorInvoiceNo_key")
+    // Lookup for the duplicate check on the same vendor bill being keyed in twice. The rule itself lives in the service (savePurchaseBill):
+    // it is per vendor ledger AND sub-ledger, and a bill that was posted and reversed frees its number, which a unique index cannot express.
+    index("PurchaseBill_vendor_vendorInvoiceNo_idx")
       .on(t.companyId, t.vendorGLId, t.vendorInvoiceNo)
       .where(sql`${t.vendorInvoiceNo} IS NOT NULL`),
     index("PurchaseBill_companyId_idx").on(t.companyId),

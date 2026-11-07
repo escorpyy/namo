@@ -165,6 +165,41 @@ async function recalcBill(tx: Tx, billId: number, mainBillId: number | null) {
   return t;
 }
 
+// The widths of the text columns. A longer value is refused here with the field named, instead of reaching the database as a "value too long" 500.
+const IMPORT_TEXT_LIMITS: Record<string, [string, number]> = {
+  customsDeclarationNo: ["Customs declaration no.", 30], customsOffice: ["Customs office", 100], countryOfOrigin: ["Country of origin", 50],
+  lcNo: ["LC no.", 30], lcBankName: ["LC bank", 100], blAwbNo: ["BL / AWB no.", 30], transporterName: ["Transporter", 100],
+  vehicleNo: ["Vehicle no.", 30], lrNo: ["LR no.", 30], importPermitNo: ["Import permit no.", 30],
+};
+const VENDOR_INVOICE_NO_MAX = 30;
+
+// A bill that still counts: not itself a reversal, and not undone by a posted reversal.
+const liveBill = (alias: string) => sql.raw(`${alias}."reversalOfId" is null and not exists (select 1 from "PurchaseBill" r where r."reversalOfId" = ${alias}.id and r."isPosted")`);
+
+// The same supplier (ledger and sub-ledger) cannot have one invoice number on two live bills. A bill that was posted and reversed frees its number,
+// so the supplier's invoice can be entered again correctly. The lock keeps two people saving the same number at once from both passing.
+async function assertVendorInvoiceFree(tx: Tx, h: { companyId: number; vendorGLId: number; subLedgerId: number | null; vendorInvoiceNo: string; excludeId: number | null }) {
+  const key = h.vendorInvoiceNo.toLowerCase();
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`PurchaseBillVendorInvoice:${h.companyId}:${h.vendorGLId}:${key}`}))`);
+  const dup = (await tx.execute(sql`
+    select b."invoiceNumber" from "PurchaseBill" b
+     where b."companyId" = ${h.companyId} and b."vendorGLId" = ${h.vendorGLId} and b."subLedgerId" is not distinct from ${h.subLedgerId}::int
+       and lower(b."vendorInvoiceNo") = ${key} and b.id <> ${h.excludeId ?? 0} and ${liveBill("b")}
+     limit 1`)) as any[];
+  if (dup[0]) throw new HttpError(409, `Vendor invoice ${h.vendorInvoiceNo} is already entered for this vendor, on bill ${dup[0].invoiceNumber}. Reverse that bill first if it was wrong.`, "vendorInvoiceNo");
+}
+
+// One customs declaration (Pragyapan Patra) belongs to one live bill of the company, otherwise its import VAT could be claimed twice.
+async function assertCustomsDeclarationFree(tx: Tx, h: { companyId: number; declarationNo: string; excludeId: number | null }) {
+  const key = h.declarationNo.toLowerCase();
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`PurchaseBillCustoms:${h.companyId}:${key}`}))`);
+  const dup = (await tx.execute(sql`
+    select b."invoiceNumber" from "PurchaseBillImportDetail" d join "PurchaseBill" b on b.id = d."purchaseBillId"
+     where b."companyId" = ${h.companyId} and lower(d."customsDeclarationNo") = ${key} and b.id <> ${h.excludeId ?? 0} and ${liveBill("b")}
+     limit 1`)) as any[];
+  if (dup[0]) throw new HttpError(409, `Customs declaration ${h.declarationNo} is already on bill ${dup[0].invoiceNumber}. One declaration belongs to one bill; reverse that bill first if it was wrong.`, "importDetail");
+}
+
 export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: Opts & QtyOpts & LockOpts = {}) {
   return inActorTx(actor, opts.tx, async (tx) => {
     const invoiceDate = parseDate(input.invoiceDate, "invoiceDate");
@@ -225,12 +260,29 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
     const lines = await resolveLines(tx, input.companyId, input.lines ?? [], { allowZeroQty: false });
     await checkBillQuantities(tx, existing?.id ?? 0, lines.map((l, i) => ({ lineNumber: l.lineNumber, qty: l.qty, challanLineId: input.lines[i].challanLineId ?? null, purchaseOrderLineId: input.lines[i].purchaseOrderLineId ?? null })), opts.tolerancePercent);
 
-    const invoiceNumber = input.invoiceNumber?.trim() || existing?.invoiceNumber || (await nextNumber(tx, "PurchaseBill", "invoiceNumber", input.branchId, fy.code));
+    // A draft moved into another fiscal year starts that year's numbering; the old number belongs to the old year's sequence.
+    const keepsNumber = !!existing && existing.fiscalYear === fy.code;
+    const invoiceNumber = input.invoiceNumber?.trim() || (keepsNumber ? existing!.invoiceNumber : await nextNumber(tx, "PurchaseBill", "invoiceNumber", input.branchId, fy.code));
     const dueDate = input.dueDate ? parseDate(input.dueDate, "dueDate") : addDays(invoiceDate, dueDays);
+    const vendorInvoiceNo = input.vendorInvoiceNo?.trim() || null;
+    if (vendorInvoiceNo) {
+      if (vendorInvoiceNo.length > VENDOR_INVOICE_NO_MAX) throw new HttpError(400, `Vendor invoice no. can be at most ${VENDOR_INVOICE_NO_MAX} characters.`, "vendorInvoiceNo");
+      await assertVendorInvoiceFree(tx, { companyId: input.companyId, vendorGLId: input.vendorGLId, subLedgerId: input.subLedgerId ?? null, vendorInvoiceNo, excludeId: existing?.id ?? null });
+    }
+    // Import details are cleaned and checked before anything is written.
+    const importText: Record<string, string | null> = {};
+    if (input.importDetail && invoiceType === "IMPORT") {
+      for (const [key, [label, max]] of Object.entries(IMPORT_TEXT_LIMITS)) {
+        const v = (input.importDetail as any)[key];
+        const text = v === undefined || v === null ? "" : String(v).trim();
+        if (text.length > max) throw new HttpError(400, `${label} can be at most ${max} characters.`, "importDetail");
+        importText[key] = text || null;
+      }
+    }
     const header = {
       companyId: input.companyId, branchId: input.branchId, invoiceNumber, invoiceDate, fiscalYear: fy.code, invoiceType,
       purchaseType, vendorGLId: input.vendorGLId, subLedgerId: input.subLedgerId ?? null, agentId: input.agentId ?? null,
-      vendorInvoiceNo: input.vendorInvoiceNo?.trim() || null, vendorInvoiceDate: optDate(input.vendorInvoiceDate, "vendorInvoiceDate"),
+      vendorInvoiceNo, vendorInvoiceDate: optDate(input.vendorInvoiceDate, "vendorInvoiceDate"),
       purchaseChallanId: input.purchaseChallanId ?? null, purchaseOrderId: input.purchaseOrderId ?? null, mainBillId: input.mainBillId ?? null,
       importCostForBillId, importCostAllocationBasis: input.importCostAllocationBasis ?? "VALUE", importCostTreatment: input.importCostTreatment ?? "CIF",
       dueDays, dueDate, remarks: input.remarks ?? null, updatedAt: new Date(),
@@ -269,11 +321,13 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
       if (currencyCode && (exchangeRate === null || !(Number(exchangeRate) > 0))) throw new HttpError(400, "Enter the exchange rate (NPR per 1 unit of the foreign currency) when a foreign currency is given.", "importDetail");
       if (!currencyCode && (exchangeRate !== null || foreignInvoiceAmount !== null)) throw new HttpError(400, "Enter the currency code for the exchange rate and foreign amount.", "importDetail");
       if (foreignInvoiceAmount !== null && !(Number(foreignInvoiceAmount) >= 0)) throw new HttpError(400, "The foreign invoice amount cannot be negative.", "importDetail");
+      // after the format checks above, so a malformed detail is a 400 whatever else is on the bill
+      if (importText.customsDeclarationNo) await assertCustomsDeclarationFree(tx, { companyId: input.companyId, declarationNo: importText.customsDeclarationNo, excludeId: id });
       await tx.insert(S.purchaseBillImportDetail).values({
-        purchaseBillId: id, customsDeclarationNo: d.customsDeclarationNo ?? null, customsDeclarationDate: optDate(d.customsDeclarationDate, "customsDeclarationDate"),
-        customsOffice: d.customsOffice ?? null, countryOfOrigin: d.countryOfOrigin ?? null, lcNo: d.lcNo ?? null, lcDate: optDate(d.lcDate, "lcDate"), lcBankName: d.lcBankName ?? null,
-        transportMode: d.transportMode ?? null, blAwbNo: d.blAwbNo ?? null, blAwbDate: optDate(d.blAwbDate, "blAwbDate"), transporterName: d.transporterName ?? null,
-        vehicleNo: d.vehicleNo ?? null, lrNo: d.lrNo ?? null, lrDate: optDate(d.lrDate, "lrDate"), importPermitNo: d.importPermitNo ?? null, importPermitDate: optDate(d.importPermitDate, "importPermitDate"),
+        purchaseBillId: id, customsDeclarationNo: importText.customsDeclarationNo, customsDeclarationDate: optDate(d.customsDeclarationDate, "customsDeclarationDate"),
+        customsOffice: importText.customsOffice, countryOfOrigin: importText.countryOfOrigin, lcNo: importText.lcNo, lcDate: optDate(d.lcDate, "lcDate"), lcBankName: importText.lcBankName,
+        transportMode: d.transportMode ?? null, blAwbNo: importText.blAwbNo, blAwbDate: optDate(d.blAwbDate, "blAwbDate"), transporterName: importText.transporterName,
+        vehicleNo: importText.vehicleNo, lrNo: importText.lrNo, lrDate: optDate(d.lrDate, "lrDate"), importPermitNo: importText.importPermitNo, importPermitDate: optDate(d.importPermitDate, "importPermitDate"),
         currencyCode, exchangeRate, foreignInvoiceAmount,
       });
     }

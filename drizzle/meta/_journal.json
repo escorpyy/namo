@@ -134,6 +134,13 @@
       "when": 1793800547284,
       "tag": "0018_import_currency",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793961658533,
+      "tag": "0019_vendor_invoice_check_in_service",
+      "breakpoints": true
     }
   ]
 }
