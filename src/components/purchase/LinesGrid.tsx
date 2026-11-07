@@ -133,6 +133,22 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
     else focusStep(el, 1);
   };
 
+  // Enter on the empty Product cell of a blank row = leave the table, to the first field after it (skipping "Add line").
+  // A blank last row (usually the one Enter just created) is dropped again; it is not a real line.
+  const leaveTable = (el: HTMLElement, i: number) => {
+    const addLine = el.closest("[data-grid=lines]")?.parentElement?.querySelector<HTMLElement>('[data-nav="add-line"]:not(:disabled)');
+    if (!focusStep(addLine ?? el, 1)) return;
+    if (i === lines.length - 1 && lines.length > 1) { onChange(lines.slice(0, -1)); clearError(...Object.keys(errors).filter((k) => k.startsWith(`L.${i}.`)), "lines"); }
+  };
+  // Runs before the picker's own Enter handler (capture phase), because the picker would otherwise open its dialog for a required empty field.
+  const onKeyCapture = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Enter" || e.shiftKey || readOnly) return;
+    const el = e.target as HTMLElement, m = /^L\.(\d+)\.p$/.exec(el.getAttribute("data-field") ?? "");
+    if (!m || !isBlankLine(lines[Number(m[1])])) return;
+    e.preventDefault(); e.stopPropagation();
+    leaveTable(el, Number(m[1]));
+  };
+
   // Keys while the grid itself has focus (ROW MODE).
   const onRowModeKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const grid = e.currentTarget, last = lines.length - 1, r = Math.max(0, Math.min(rowSel ?? lastRow.current, last));
@@ -163,7 +179,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
 
   return (
     <div className="border border-slate-400 bg-white/60">
-      <div className="overflow-x-auto outline-none" data-grid="lines" data-nav="lines-grid" onKeyDown={onKey} tabIndex={0} aria-label={`${kind} line items`}
+      <div className="overflow-x-auto outline-none" data-grid="lines" data-nav="lines-grid" onKeyDown={onKey} onKeyDownCapture={onKeyCapture} tabIndex={0} aria-label={`${kind} line items`}
         onFocus={(e) => { if (e.target === e.currentTarget) setRowSel(Math.max(0, Math.min(lastRow.current, lines.length - 1))); else { const r = rowOf(e.target as Element); if (r >= 0) lastRow.current = r; } }}
         onBlur={(e) => { if (e.target === e.currentTarget) setRowSel(null); }}>
         <div className="min-w-max">
