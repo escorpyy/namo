@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Plus, X } from "lucide-react";
 import type { PLookups } from "../../api";
-import { blankLine, blankTerm, derivedQty, isBlankLine, isBlankTerm, lineAmount, trimDec, type LineKind, type LineRow, type Product, type Term, type TermRow } from "../../lib/purchaseForm";
+import { blankLine, blankTerm, derivedQty, isBlankLine, isBlankTerm, lineAmount, pickableTerms, trimDec, type LineKind, type LineRow, type Product, type Term, type TermRow } from "../../lib/purchaseForm";
 import { fmtPaise, toPaise } from "../../lib/money";
 import { MasterReferencePicker, type ReferenceOption } from "../MasterReferencePicker";
 import { DateInput } from "../DateInput";
@@ -233,13 +233,14 @@ interface TProps {
   calculationPreview?: Map<string, PreviewTermResult>;
   previewError?: string;
   category?: "GENERAL" | "ADDITIONAL";
+  excludeCategory?: "ADDITIONAL";
   productwiseOnly?: boolean;
   fixedLineNumber?: number;
 }
 
 // Billing terms: discount, VAT, freight ... The active preview is calculated by the same shared exact engine as the server.
-export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOnly, errors, clearError, contextKey, calculationPreview, previewError, category, productwiseOnly, fixedLineNumber }: TProps) {
-  const opts = useMemo<ReferenceOption[]>(() => lookups.terms.filter((t) => (!category || t.category === category) && (productwiseOnly === undefined || t.isProductwise === productwiseOnly)).map((t) => ({ value: String(t.id), label: `${t.code} — ${t.name}`, code: t.code, name: t.name, detail: `${t.category} · ${t.nature} · ${t.calcBase.replaceAll("_", " ")} · seq ${t.sequence}`, searchText: `${t.sequence} ${t.isProductwise ? "productwise" : "document"}`, isActive: t.isActive, badge: t.nature === "DEDUCTIVE" ? "less" : undefined })), [lookups.terms, category, productwiseOnly]);
+export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOnly, errors, clearError, contextKey, calculationPreview, previewError, category, excludeCategory, productwiseOnly, fixedLineNumber }: TProps) {
+  const opts = useMemo<ReferenceOption[]>(() => pickableTerms(lookups.terms, { category, excludeCategory, productwiseOnly }).map((t) => ({ value: String(t.id), label: `${t.code} — ${t.name}`, code: t.code, name: t.name, detail: `${t.category} · ${t.nature} · ${t.calcBase.replaceAll("_", " ")} · seq ${t.sequence}`, searchText: `${t.sequence} ${t.isProductwise ? "productwise" : "document"}`, isActive: t.isActive, badge: t.nature === "DEDUCTIVE" ? "less" : undefined })), [lookups.terms, category, excludeCategory, productwiseOnly]);
   const patch = (i: number, p: Partial<TermRow>) => { onChange(terms.map((t, k) => (k === i ? { ...t, ...p } : t))); clearError(...Object.keys(errors).filter((k) => k.startsWith(`T.${i}.`))); };
   const pick = (i: number, id: string) => {
     const m = masters.get(id);

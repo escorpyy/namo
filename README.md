@@ -10,6 +10,7 @@ cp .env.example .env          # DATABASE_URL local wala already set hai
 docker compose up -d          # local Postgres
 pnpm db:migrate            # tables + DB triggers bana do (committed migrations: ./drizzle)
 pnpm db:seed               # demo data (dobara chalana safe hai, sirf missing data banta hai)
+pnpm db:reset              # LOCAL DB ko poora mita kar migrations + seed se dobara banata hai (testing ke liye clean start); database ka naam type karna padta hai, localhost ke alawa kuch nahi chalta
 pnpm dev                   # web http://localhost:5173  |  api http://localhost:4000
 ```
 

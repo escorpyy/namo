@@ -44,7 +44,7 @@ export const purchaseImportAssessment = pgTable("PurchaseImportAssessment", {
   updatedAt: updatedAt(),
 }, (t) => [
   uniqueIndex("PurchaseImportAssessment_branch_fy_number_key").on(t.branchId, t.fiscalYear, t.assessmentNumber),
-  uniqueIndex("PurchaseImportAssessment_active_bill_key").on(t.importBillId).where(sql`${t.reversedAt} IS NULL`),
+  // A goods bill can carry several assessments (a late or supplementary charge is a new one), so importBillId is only indexed, not unique.
   index("PurchaseImportAssessment_company_branch_fy_idx").on(t.companyId, t.branchId, t.fiscalYear),
   index("PurchaseImportAssessment_importBillId_idx").on(t.importBillId),
   uniqueIndex("PurchaseImportAssessment_journalVoucherId_key").on(t.journalVoucherId).where(sql`${t.journalVoucherId} IS NOT NULL`),

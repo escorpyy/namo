@@ -296,6 +296,27 @@ async function main() {
         { companyId: co.id, code: "ROUND", name: "Round Off", category: "ROUNDED", nature: "ADDITIVE", sequence: 900, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "RUNNING_TOTAL", generalLedgerId: rent?.id ?? null },
       ]);
     }
+    // Charges for trying out cost assessments and service bills: customs duty and excise (ADDITIONAL, so a cost assessment can use them; each posts
+    // Dr Purchases / Cr the against ledger chosen on the assessment) and an input VAT for service bills. Added one by code, so `pnpm db:seed`
+    // also adds them to a database that already has terms.
+    {
+      const gl = async (code: string) => (await db.select().from(S.generalLedger).where(and(eq(S.generalLedger.companyId, co.id), eq(S.generalLedger.code, code))))[0];
+      const purchases = await gl("GL040");
+      let vatInput = await gl("GL070");
+      if (!vatInput) {
+        const [group] = await db.select().from(S.accountGroup).where(and(eq(S.accountGroup.companyId, co.id), eq(S.accountGroup.code, "AG01")));
+        const [existingSub] = await db.select().from(S.accountSubGroup).where(and(eq(S.accountSubGroup.accountGroupId, group.id), eq(S.accountSubGroup.code, "SG05")));
+        const taxSub = existingSub ?? (await db.insert(S.accountSubGroup).values({ accountGroupId: group.id, code: "SG05", description: "Duties & Taxes" }).returning())[0];
+        vatInput = (await db.insert(S.generalLedger).values({ companyId: co.id, code: "GL070", name: "VAT Input (Receivable)", accountSubGroupId: taxSub.id, normalBalance: "DEBIT" }).returning())[0];
+      }
+      const ensureTerm = async (t: typeof S.purchaseTerm.$inferInsert) => {
+        const [ex] = await db.select({ id: S.purchaseTerm.id }).from(S.purchaseTerm).where(and(eq(S.purchaseTerm.companyId, co.id), eq(S.purchaseTerm.code, t.code)));
+        if (!ex) await db.insert(S.purchaseTerm).values(t);
+      };
+      await ensureTerm({ companyId: co.id, code: "CUSTOMS", name: "Customs Duty", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 10, isProductwise: false, defaultCalcType: "PERCENT", defaultValue: "10", calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "VALUE", generalLedgerId: purchases?.id ?? null });
+      await ensureTerm({ companyId: co.id, code: "EXCISE", name: "Excise Duty", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 20, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "QUANTITY", generalLedgerId: purchases?.id ?? null });
+      await ensureTerm({ companyId: co.id, code: "VAT", name: "Input VAT", category: "GENERAL", nature: "ADDITIVE", sequence: 90, isProductwise: false, defaultCalcType: "PERCENT", defaultValue: "13", generalLedgerId: vatInput.id });
+    }
     if (!(await hasRows(S.salesTerm, co.id))) {
       const gl = async (code: string) => (await db.select().from(S.generalLedger).where(and(eq(S.generalLedger.companyId, co.id), eq(S.generalLedger.code, code))))[0];
       const sales = await gl("GL020");

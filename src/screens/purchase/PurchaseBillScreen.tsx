@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, RotateCcw, Send } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, RotateCcw, Send } from "lucide-react";
 import { purchaseApi, type PDoc, type PListRow } from "../../api";
 import { Combobox, type ComboOption } from "../../components/Combobox";
 import { COMMON_HELP, DocShell, Field, FormSection, HINTS, Pill, focusStep, money } from "../../components/purchase/Bits";
@@ -7,7 +7,7 @@ import { DateField, TextField, VendorFields } from "../../components/purchase/He
 import { LinesGrid, TermsGrid } from "../../components/purchase/LinesGrid";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
 import {
-  addDaysIso, blankLine, dateErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
+  addDaysIso, blankLine, copyBillForm, dateErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
   type LineRow, type TermRow,
 } from "../../lib/purchaseForm";
 import { parseDec } from "../../../shared/decimal";
@@ -303,8 +303,12 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
   const cifSourceAmount = cifSources.reduce((sum: bigint, source: any) => sum + toMicro(source.basicAmount), 0n);
   const landedOnlyAmount = landedOnlySources.reduce((sum: bigint, source: any) => sum + toMicro(source.basicAmount), 0n);
   const cifTotal = doc?.invoiceType === "IMPORT" ? formatImportCost(toMicro(doc.basicAmount) + cifSourceAmount, 2) : null;
+  // A new draft from this bill (any state): same vendor, lines and charges, dated today, without the vendor invoice no., links or declaration no.
+  const canCopy = !!doc && !!lk && state !== "REVERSAL" && !doc.mainBillId;
+  const copyBill = () => { if (doc && lk) s.newDoc(copyBillForm(cfg.toForm(doc, lk), cfg.emptyForm(lk).invoiceDate)); };
   const actions = doc && (
     <>
+      {canCopy && <button data-nav className="btn" onClick={copyBill}><Copy size={14} /> Copy</button>}
       {state === "DRAFT" && <button data-nav className="btn btn-primary" onClick={() => s.run({ action: "post", title: "Post bill?", body: <>Post <b className="font-mono">{doc.invoiceNumber}</b> for <b>{money(doc.totalAmount)}</b>? A balanced journal voucher is written and the bill can no longer be edited or deleted — only reversed.</>, button: "Post", done: (d) => `Posted ${d.invoiceNumber}${d.journalVoucher ? ` (voucher ${d.journalVoucher.voucherNumber})` : ""}` })}><Send size={14} /> Post</button>}
       {reversible && (
         <button data-nav className="btn" onClick={() => {
@@ -559,7 +563,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
                 </div>
                 <div className="min-h-0 flex-1 overflow-auto p-3">
                   <TermsGrid terms={termDraft} onChange={setTermDraft} lookups={lk} masters={masters} lineCount={liveLines} readOnly={ro} errors={dialogErrors} clearError={clearDialogError} contextKey={String(p.companyId)} calculationPreview={ro ? undefined : dialogPreview?.terms} previewError={dialogPreview?.message}
-                    category="GENERAL" productwiseOnly={termDialog.scope === "line"} fixedLineNumber={termDialog.scope === "line" ? termDialog.lineNumber : undefined} />
+                    excludeCategory="ADDITIONAL" productwiseOnly={termDialog.scope === "line"} fixedLineNumber={termDialog.scope === "line" ? termDialog.lineNumber : undefined} />
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-300 bg-slate-50 px-3 py-2">
                   <span className="text-[12px] text-slate-600">{termDraft.filter((term) => !isBlankTerm(term)).length} term(s) · Dialog net <b className="tabular-nums">{dialogTotalText}</b></span>

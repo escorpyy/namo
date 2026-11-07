@@ -182,6 +182,31 @@ export function addDaysIso(iso: string, days: number): string {
   return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + days)).toISOString().slice(0, 10);
 }
 
+// The charge terms a picker offers: optionally only one category, or everything except one (a bill hides ADDITIONAL terms but keeps GENERAL and
+// ROUNDED ones such as Round Off), and optionally only line-wise or only document-wise terms.
+export function pickableTerms<T extends { category: string; isProductwise: boolean }>(terms: T[], f: { category?: string; excludeCategory?: string; productwiseOnly?: boolean }): T[] {
+  return terms.filter((t) => (!f.category || t.category === f.category) && (!f.excludeCategory || t.category !== f.excludeCategory) && (f.productwiseOnly === undefined || t.isProductwise === f.productwiseOnly));
+}
+
+// The form for a NEW draft bill copied from an existing one: the same vendor, lines and charges, but nothing that identifies the original or links
+// it to other documents. The vendor invoice no./date, due date and customs declaration no./date are cleared (a repeated vendor invoice no. or a
+// repeated declaration no. is refused on save), the order and challan links are dropped, the invoice date is today's, and every row gets a new key.
+export interface BillCopyFields {
+  invoiceDate: string; vendorInvoiceNo: string; vendorInvoiceDate: string; dueDate: string;
+  purchaseChallanId: string; purchaseOrderId: string; challanNo: string; orderNo: string;
+  lines: LineRow[]; terms: TermRow[]; imp: Record<string, string>;
+}
+export function copyBillForm<F extends BillCopyFields>(source: F, invoiceDate: string): F {
+  return {
+    ...source,
+    invoiceDate, vendorInvoiceNo: "", vendorInvoiceDate: "", dueDate: "",
+    purchaseChallanId: "", purchaseOrderId: "", challanNo: "", orderNo: "",
+    lines: source.lines.map((l) => ({ ...l, key: newKey(), purchaseOrderLineId: "", challanLineId: "", link: "" })),
+    terms: source.terms.map((t) => ({ ...t, key: newKey(), finalAmount: "" })),
+    imp: { ...source.imp, customsDeclarationNo: "", customsDeclarationDate: "" },
+  };
+}
+
 // A date to start a new document on: today, kept inside the selected fiscal year.
 export function defaultDate(fy: { startDate: string; endDate: string } | undefined): string {
   const d = new Date();

@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FileCheck2, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
+import { Copy, FileCheck2, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
 import { ApiError, importAssessmentApi, purchaseApi, type ImportAssessmentPreview, type ImportAssessmentTermInput, type PLookups } from "../../api";
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
 import { AssessmentAllocationGrid, type AssessmentAllocationCellUpdate } from "../../components/purchase/AssessmentAllocationGrid";
@@ -160,6 +160,19 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
     if (dirty && !window.confirm("Discard unsaved assessment changes?")) return;
     const next: Form = { importBillId: "", assessmentDate: defaultDate(lookups?.fiscalYears.find((y) => y.code === p.fyCode)), referenceNo: "", remarks: "", terms: [blankTerm()] };
     setDoc(null); setForm(next); setEditing(true); setPreview(null); setErrors({}); baseSig.current = JSON.stringify(next); setMessage("New cost assessment");
+    requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-assessment-field]")?.focus());
+  };
+  // A new draft with the same charges as the open assessment (any state). The goods bill is left to choose, and product-wise typed amounts are
+  // reset to automatic because they belong to the original bill's lines.
+  const startCopy = () => {
+    if (!doc) return;
+    const source = asForm(doc);
+    const next: Form = {
+      importBillId: "", assessmentDate: defaultDate(lookups?.fiscalYears.find((y) => y.code === p.fyCode)), referenceNo: "", remarks: "",
+      terms: source.terms.length ? source.terms.map((t) => ({ ...t, key: Math.random().toString(36).slice(2), allocationMode: "AUTO" as const, manual: {} })) : [blankTerm()],
+    };
+    setDoc(null); setForm(next); setEditing(true); setPreview(null); setErrors({}); baseSig.current = JSON.stringify(next);
+    setMessage(`New assessment copied from ${doc.assessmentNumber}: choose the goods bill, then save`);
     requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-assessment-field]")?.focus());
   };
   const openDoc = async (id: number) => {
@@ -519,7 +532,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
                       ["Goods value", preview?.goodsValue],
                       ["CIF base", preview?.cifValue],
                       ["Invoiced services", preview?.invoicedCapitalizedCosts],
-                      ["Existing bill terms", preview?.existingPurchaseTermCosts],
+                      ["Earlier costs on bill", preview?.existingPurchaseTermCosts],
                       ["Assessed net", preview?.assessedNet],
                       ["Final landed value", preview?.totalLandedValue],
                     ] as const).map(([label, value]) => (
@@ -569,6 +582,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
           ) : (
             <>
               <button type="button" className="btn btn-primary" onClick={startNew}><Plus size={14} /> New assessment <span className="kbd">F3</span></button>
+              <button type="button" className="btn" disabled={!doc || busy} onClick={startCopy}><Copy size={14} /> Copy</button>
               <button type="button" className="btn" disabled={!doc || doc.isPosted || !!doc.reversedAt} onClick={beginEdit}>Edit draft <span className="kbd">F2</span></button>
               <button type="button" className="btn" disabled={!doc || doc.isPosted || !!doc.reversedAt} onClick={() => void deleteDraft()}><Trash2 size={14} /> Delete draft</button>
               {canApply && <button type="button" className="btn btn-primary" disabled={busy || !ledgersOk || !manualsBalanced || !previewOk} onClick={() => void applyAssessment()}><FileCheck2 size={14} /> Apply assessment</button>}

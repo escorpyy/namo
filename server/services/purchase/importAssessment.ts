@@ -159,10 +159,20 @@ async function calculate(tx: Tx, targetBillId: number, terms: any[], manualByKey
        and not exists (select 1 from "PurchaseBill" r where r."reversalOfId" = b.id and r."isPosted")
      group by a."documentLineId"`) as any[];
   const priorTermByLine = new Map(priorTermRows.map((row) => [Number(row.id), toMicro(row.amt)]));
+  // A goods bill can carry several assessments (a late or supplementary charge is a new assessment). The ones already APPLIED and not reversed
+  // stand on the lines as signed allocations, so a new assessment's landed value must include them. Drafts are not counted (their rows are only
+  // typed product-wise amounts), and neither are reversed ones. This feeds the same "already posted to the lines" input as the bill's own terms.
+  const priorAssessmentRows = await tx.execute(sql`
+    select a."purchaseBillLineId" as id, sum(a."allocatedAmount")::text as amt
+      from "PurchaseImportAssessmentAllocation" a
+      join "PurchaseImportAssessment" d on d.id = a."assessmentId"
+     where d."importBillId" = ${targetBillId} and d."isPosted" and d."reversedAt" is null
+     group by a."purchaseBillLineId"`) as any[];
+  const priorAssessmentByLine = new Map(priorAssessmentRows.map((row) => [Number(row.id), toMicro(row.amt)]));
   const productRows = await tx.select({ id: S.purchaseBillLine.id, productId: S.purchaseBillLine.productId, productCode: S.product.code, description: S.product.description, qty: S.purchaseBillLine.qty }).from(S.purchaseBillLine)
     .leftJoin(S.product, eq(S.product.id, S.purchaseBillLine.productId)).where(eq(S.purchaseBillLine.purchaseBillId, targetBillId));
   const productByLine = new Map(productRows.map((l) => [l.id, l]));
-  const lines: ImportCostLineInput[] = basis.lines.map((line) => ({ key: line.id, lineNumber: line.lineNumber, quantity: fmt(line.qty), goodsValue: fmt(line.goodsValue, 2), existingPurchaseTermCosts: fmt(priorTermByLine.get(line.id) ?? ZERO, 2) }));
+  const lines: ImportCostLineInput[] = basis.lines.map((line) => ({ key: line.id, lineNumber: line.lineNumber, quantity: fmt(line.qty), goodsValue: fmt(line.goodsValue, 2), existingPurchaseTermCosts: fmt((priorTermByLine.get(line.id) ?? ZERO) + (priorAssessmentByLine.get(line.id) ?? ZERO), 2) }));
   const sources: ImportCostSourceInput[] = basis.sources.map((source) => ({
     key: String(source.id), label: source.invoiceNumber,
     capitalizedAmount: fmt(source.basicAmount, 2), customsValueAmount: source.treatment === "CIF" ? fmt(source.basicAmount, 2) : "0",
@@ -241,8 +251,7 @@ export async function eligibleImportBills(filter: { companyId: number; branchId:
   const rows = await db.select({ id: S.purchaseBill.id, invoiceNumber: S.purchaseBill.invoiceNumber, invoiceDate: S.purchaseBill.invoiceDate, basicAmount: S.purchaseBill.basicAmount, invoiceType: S.purchaseBill.invoiceType })
     .from(S.purchaseBill).where(and(eq(S.purchaseBill.companyId, filter.companyId), eq(S.purchaseBill.branchId, filter.branchId), eq(S.purchaseBill.fiscalYear, filter.fiscalYear),
       eq(S.purchaseBill.isPosted, true), sql`${S.purchaseBill.purchaseType} IN ('GOODS_PURCHASE_OTHERS','GOODS_PURCHASE_CAPITAL')`, sql`${S.purchaseBill.mainBillId} IS NULL`, sql`${S.purchaseBill.reversalOfId} IS NULL`,
-      sql`NOT EXISTS (SELECT 1 FROM "PurchaseBill" r WHERE r."reversalOfId" = "PurchaseBill"."id" AND r."isPosted")`,
-      sql`NOT EXISTS (SELECT 1 FROM "PurchaseImportAssessment" a WHERE a."importBillId" = "PurchaseBill"."id" AND a."reversedAt" IS NULL)`))
+      sql`NOT EXISTS (SELECT 1 FROM "PurchaseBill" r WHERE r."reversalOfId" = "PurchaseBill"."id" AND r."isPosted")`))
     .orderBy(desc(S.purchaseBill.invoiceDate), desc(S.purchaseBill.id));
   const result = [];
   for (const b of rows) {
@@ -262,8 +271,6 @@ export async function createImportAssessment(input: AssessmentInput, actor: Acto
     await guardPeriod(tx, input.companyId, [assessmentDate], opts.lockOverride, "assessmentDate");
     const fy = await resolveFiscalYear(tx, input.companyId, assessmentDate, input.fiscalYear ?? null);
     const bill = await importBill(tx, input.companyId, input.branchId, input.importBillId, true);
-    const [existing] = await tx.select({ id: S.purchaseImportAssessment.id }).from(S.purchaseImportAssessment).where(and(eq(S.purchaseImportAssessment.importBillId, bill.id), sql`${S.purchaseImportAssessment.reversedAt} IS NULL`)).limit(1);
-    if (existing) throw new HttpError(409, "This import bill already has an assessment. Open or reverse it before creating another.", "importBillId");
     const terms = await resolveTerms(tx, input.companyId, input.terms);
     const calc = await calculate(tx, bill.id, terms, manualFromResolved(terms));
     const number = await nextAssessmentNumber(tx, input.branchId, fy.code);
@@ -360,9 +367,6 @@ export async function applyImportAssessment(id: number, companyId: number, actor
     if (doc.isPosted || doc.reversedAt) throw new HttpError(409, "This assessment is not an unapplied draft.");
     await guardPeriod(tx, companyId, [doc.assessmentDate], opts.lockOverride, "assessmentDate");
     const bill = await importBill(tx, companyId, doc.branchId, doc.importBillId, true);
-    const [existing] = await tx.select({ id: S.purchaseImportAssessment.id }).from(S.purchaseImportAssessment)
-      .where(and(eq(S.purchaseImportAssessment.importBillId, bill.id), sql`${S.purchaseImportAssessment.reversedAt} IS NULL`, sql`${S.purchaseImportAssessment.id} <> ${id}`)).limit(1);
-    if (existing) throw new HttpError(409, "Another draft or applied assessment already exists for this import bill.");
     const terms = await tx.select().from(S.purchaseImportAssessmentTerm).where(eq(S.purchaseImportAssessmentTerm.assessmentId, id)).orderBy(asc(S.purchaseImportAssessmentTerm.sequence), asc(S.purchaseImportAssessmentTerm.id));
     // Product-wise amounts typed by hand are stored as draft allocation rows: read them before the rows are rebuilt.
     const typed = await tx.select({ assessmentTermId: S.purchaseImportAssessmentAllocation.assessmentTermId, purchaseBillLineId: S.purchaseImportAssessmentAllocation.purchaseBillLineId, allocatedAmount: S.purchaseImportAssessmentAllocation.allocatedAmount })

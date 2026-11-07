@@ -1,0 +1,1 @@
+DROP INDEX "PurchaseImportAssessment_active_bill_key";

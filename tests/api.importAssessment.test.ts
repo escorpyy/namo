@@ -119,9 +119,11 @@ describe.skipIf(!DB_READY)("Import cost assessment (API)", () => {
     const listed = await call("GET", `${api("import-assessments")}?companyId=${W.co}&branchId=${W.br}&fiscalYear=2082%2F83`);
     expect(listed.status).toBe(200);
     expect(listed.body.rows).toMatchObject([{ id: assessmentId, state: "DRAFT", referenceNo: "CUS-ASSESS-UPDATED" }]);
-    const duplicate = await call("POST", api("import-assessments"), { companyId: W.co, branchId: W.br, fiscalYear: "2082/83", importBillId: goods.id, assessmentDate: "2025-10-16", userId, terms: termInput });
-    expect(duplicate.status).toBe(409);
-    expect((await call("GET", `${api("import-assessments")}/eligible-imports?companyId=${W.co}&branchId=${W.br}&fiscalYear=2082%2F83`)).body.rows).toHaveLength(0);
+    // A goods bill can carry several assessments: a second draft on the same bill is allowed (it is removed again so the rest of this test is unchanged).
+    const second = await call("POST", api("import-assessments"), { companyId: W.co, branchId: W.br, fiscalYear: "2082/83", importBillId: goods.id, assessmentDate: "2025-10-16", userId, terms: termInput });
+    expect(second.status, JSON.stringify(second.body)).toBe(201);
+    expect((await call("DELETE", `${api("import-assessments")}/${second.body.document.id}?companyId=${W.co}&userId=${userId}`, { userId })).status).toBe(200);
+    expect((await call("GET", `${api("import-assessments")}/eligible-imports?companyId=${W.co}&branchId=${W.br}&fiscalYear=2082%2F83`)).body.rows.map((r: any) => r.id)).toEqual([goods.id]);
     const beforeVoucherCount = Number((await rows(sql`select count(*)::int as n from "JournalVoucher" where "companyId" = ${W.co}`))[0].n);
 
     const applied = await call("POST", `${api("import-assessments")}/${assessmentId}/apply?companyId=${W.co}`, { userId });
@@ -209,5 +211,63 @@ describe.skipIf(!DB_READY)("Import cost assessment (API)", () => {
     const loaded = await call("GET", `${api("import-assessments")}/${assessmentId}?companyId=${W.co}`);
     expect(loaded.status).toBe(200);
     expect(loaded.body.document.preview.lines.map((l: any) => Number(l.landedValue).toFixed(2))).toEqual(["1433.63", "671.37"]);
+  });
+
+  it("a goods bill can carry several assessments: each posts its own voucher, landed cost accumulates, and reversing one leaves the others", async () => {
+    const goods = await createBill({ invoiceType: "LOCAL", purchaseType: "GOODS_PURCHASE_OTHERS", lines: [{ productId: W.goods, qty: 10, rate: 100 }, { productId: W.goods, qty: 5, rate: 200 }] });
+    expect((await action(goods.id, "post")).status).toBe(200);
+    const landed = async () => (await rows(sql`select "landedAmount" from "PurchaseBillLine" where "purchaseBillId" = ${goods.id} order by "lineNumber"`)).map((l) => Number(l.landedAmount).toFixed(2));
+    const draft = async (terms: Record<string, unknown>[]) => {
+      const r = await call("POST", api("import-assessments"), { companyId: W.co, branchId: W.br, fiscalYear: "2082/83", importBillId: goods.id, assessmentDate: "2025-10-16", userId, terms });
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      return r.body.document.id as number;
+    };
+    const apply = async (id: number) => {
+      const r = await call("POST", `${api("import-assessments")}/${id}/apply?companyId=${W.co}`, { userId });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      return r.body.document;
+    };
+    const eligible = async () => (await call("GET", `${api("import-assessments")}/eligible-imports?companyId=${W.co}&branchId=${W.br}&fiscalYear=2082%2F83`)).body.rows.map((r: any) => r.id);
+    const duty = (extra: Record<string, unknown>) => ({ termId: W.duty, allocationBasis: "VALUE", capitalizable: true, againstLedgerId: W.bank, ...extra });
+    expect(await landed()).toEqual(["1000.00", "1000.00"]);
+
+    // 1st assessment: 10% duty on 2000 = 200, split by value 100 / 100.
+    const first = await apply(await draft([duty({ calcType: "PERCENT", rate: "10" })]));
+    expect(await landed()).toEqual(["1100.00", "1100.00"]);
+    expect(await eligible()).toContain(goods.id);
+
+    // 2nd assessment on the same bill: its preview already counts what the first one put on the lines (existing costs 200, landed 2260).
+    const excise = [{ termId: W.excise, calcType: "AMOUNT", inputAmount: "60", allocationBasis: "QUANTITY", capitalizable: true, againstLedgerId: W.bank }];
+    const preview = await call("POST", `${api("import-assessments")}/preview`, { companyId: W.co, branchId: W.br, importBillId: goods.id, terms: excise });
+    expect(preview.status, JSON.stringify(preview.body)).toBe(200);
+    expect(preview.body.preview).toMatchObject({ goodsValue: "2000.00", existingPurchaseTermCosts: "200.00", assessedNet: "60.00", totalLandedValue: "2260.00" });
+    expect(preview.body.preview.lines.map((l: any) => l.existingPurchaseTermCosts)).toEqual(["100.00", "100.00"]);
+    const second = await apply(await draft(excise));
+    expect(await landed()).toEqual(["1140.00", "1120.00"]); // 60 by quantity 10 : 5 -> 40 / 20
+
+    // A late charge of the same term as the first (duty again) is just a third assessment.
+    const third = await apply(await draft([duty({ calcType: "AMOUNT", inputAmount: "30" })]));
+    expect(await landed()).toEqual(["1155.00", "1135.00"]);
+    expect(new Set([first.journalVoucherId, second.journalVoucherId, third.journalVoucherId]).size).toBe(3);
+    expect(Number(third.totalLandedValue)).toBe(2290);
+
+    // The goods bill cannot be reversed while any of them stands.
+    const blocked = await action(goods.id, "reverse", { date: "2025-10-20", reason: "Should be refused" });
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.message).toMatch(/assessment/i);
+
+    // Reversing the first removes only its own 100 / 100; the other two stay applied.
+    const reversed = await call("POST", `${api("import-assessments")}/${first.id}/reverse?companyId=${W.co}`, { userId, reason: "First duty was wrong", date: "2025-10-20" });
+    expect(reversed.status, JSON.stringify(reversed.body)).toBe(200);
+    expect(await landed()).toEqual(["1055.00", "1035.00"]);
+    for (const other of [second, third]) {
+      const state = (await call("GET", `${api("import-assessments")}/${other.id}?companyId=${W.co}`)).body.document.state;
+      expect(state).toBe("APPLIED");
+    }
+
+    // Reverse the rest; the bill goes back to its own value, and is eligible throughout.
+    for (const other of [second, third]) expect((await call("POST", `${api("import-assessments")}/${other.id}/reverse?companyId=${W.co}`, { userId, reason: "Clean up", date: "2025-10-21" })).status).toBe(200);
+    expect(await landed()).toEqual(["1000.00", "1000.00"]);
+    expect(await eligible()).toContain(goods.id);
   });
 });

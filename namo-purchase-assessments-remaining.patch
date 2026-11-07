@@ -1,65 +1,32 @@
-From 8296b73edef5dfec0f3562f5dd61bdda4602a4b1 Mon Sep 17 00:00:00 2001
-From: Claude <noreply@anthropic.com>
-Date: Fri, 6 Nov 2026 16:29:48 +0545
-Subject: [PATCH] Fix purchase bill flow bugs: cost treatment, duplicates,
- lengths, numbering, due date
-
-- Bill read returns importCostTreatment, so a service bill saved as
-  "Landed only" no longer turns back into CIF when it is edited and saved.
-- Vendor invoice number is unique per vendor ledger and sub-ledger, and a
-  bill that was posted and reversed frees its number, so the supplier's
-  invoice can be entered again correctly. The check moves from a unique
-  index to the service (migration 0019 swaps it for a lookup index) and is
-  serialised with an advisory lock.
-- A customs declaration number can be on one live bill of a company only
-  (409 naming the bill that holds it).
-- Text longer than its column (vendor invoice no. 30, import numbers 30,
-  office/bank/transporter 100, country 50) is a 400 naming the field instead
-  of a 500; the screen's field widths now match.
-- A draft moved into another fiscal year gets that year's next invoice
-  number instead of keeping the old year's.
-- Screen: due date follows the invoice date and due days.
-
-Tests: five new API tests, a unit test for the date helper, and the
-currency test now uses a different declaration number per bill.
-
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01UJ94HWDZsmypsV2sVkB9bn
----
- .../0019_vendor_invoice_check_in_service.sql  |     2 +
- drizzle/meta/0019_snapshot.json               | 12180 ++++++++++++++++
- drizzle/meta/_journal.json                    |     7 +
- server/db/schema/purchaseBill.ts              |     5 +-
- server/services/purchase/purchaseBill.ts      |    66 +-
- server/services/purchase/queries.ts           |     2 +-
- src/lib/purchaseForm.ts                       |     7 +
- src/screens/purchase/PurchaseBillScreen.tsx   |    31 +-
- tests/api.costAssessment.test.ts              |     4 +-
- tests/api.purchase.test.ts                    |    81 +
- tests/purchase.form.test.ts                   |    20 +
- 11 files changed, 12385 insertions(+), 20 deletions(-)
- create mode 100644 drizzle/0019_vendor_invoice_check_in_service.sql
- create mode 100644 drizzle/meta/0019_snapshot.json
- create mode 100644 tests/purchase.form.test.ts
-
-diff --git a/drizzle/0019_vendor_invoice_check_in_service.sql b/drizzle/0019_vendor_invoice_check_in_service.sql
+diff --git a/README.md b/README.md
+index b22dd0a..ed07c5a 100644
+--- a/README.md
++++ b/README.md
+@@ -10,6 +10,7 @@ cp .env.example .env          # DATABASE_URL local wala already set hai
+ docker compose up -d          # local Postgres
+ pnpm db:migrate            # tables + DB triggers bana do (committed migrations: ./drizzle)
+ pnpm db:seed               # demo data (dobara chalana safe hai, sirf missing data banta hai)
++pnpm db:reset              # LOCAL DB ko poora mita kar migrations + seed se dobara banata hai (testing ke liye clean start); database ka naam type karna padta hai, localhost ke alawa kuch nahi chalta
+ pnpm dev                   # web http://localhost:5173  |  api http://localhost:4000
+ ```
+ 
+diff --git a/drizzle/0020_multiple_assessments_per_bill.sql b/drizzle/0020_multiple_assessments_per_bill.sql
 new file mode 100644
-index 0000000..2afadc2
+index 0000000..340c5e8
 --- /dev/null
-+++ b/drizzle/0019_vendor_invoice_check_in_service.sql
-@@ -0,0 +1,2 @@
-+DROP INDEX "PurchaseBill_vendor_vendorInvoiceNo_key";--> statement-breakpoint
-+CREATE INDEX "PurchaseBill_vendor_vendorInvoiceNo_idx" ON "PurchaseBill" USING btree ("companyId","vendorGLId","vendorInvoiceNo") WHERE "PurchaseBill"."vendorInvoiceNo" IS NOT NULL;
++++ b/drizzle/0020_multiple_assessments_per_bill.sql
+@@ -0,0 +1 @@
++DROP INDEX "PurchaseImportAssessment_active_bill_key";
 \ No newline at end of file
-diff --git a/drizzle/meta/0019_snapshot.json b/drizzle/meta/0019_snapshot.json
+diff --git a/drizzle/meta/0020_snapshot.json b/drizzle/meta/0020_snapshot.json
 new file mode 100644
-index 0000000..f432538
+index 0000000..5207357
 --- /dev/null
-+++ b/drizzle/meta/0019_snapshot.json
-@@ -0,0 +1,12180 @@
++++ b/drizzle/meta/0020_snapshot.json
+@@ -0,0 +1,12164 @@
 +{
-+  "id": "261c618b-8544-4c87-8d17-3a195217de69",
-+  "prevId": "9c743bd7-8b8e-4479-b048-a0385351e4f5",
++  "id": "fefdfb47-22e9-4e63-9f28-e1de972d908d",
++  "prevId": "261c618b-8544-4c87-8d17-3a195217de69",
 +  "version": "7",
 +  "dialect": "postgresql",
 +  "tables": {
@@ -11073,22 +11040,6 @@ index 0000000..f432538
 +          "method": "btree",
 +          "with": {}
 +        },
-+        "PurchaseImportAssessment_active_bill_key": {
-+          "name": "PurchaseImportAssessment_active_bill_key",
-+          "columns": [
-+            {
-+              "expression": "importBillId",
-+              "isExpression": false,
-+              "asc": true,
-+              "nulls": "last"
-+            }
-+          ],
-+          "isUnique": true,
-+          "where": "\"PurchaseImportAssessment\".\"reversedAt\" IS NULL",
-+          "concurrently": false,
-+          "method": "btree",
-+          "with": {}
-+        },
 +        "PurchaseImportAssessment_company_branch_fy_idx": {
 +          "name": "PurchaseImportAssessment_company_branch_fy_idx",
 +          "columns": [
@@ -12239,364 +12190,537 @@ index 0000000..f432538
 +}
 \ No newline at end of file
 diff --git a/drizzle/meta/_journal.json b/drizzle/meta/_journal.json
-index 6f97bf0..37cce77 100644
+index 37cce77..087e6da 100644
 --- a/drizzle/meta/_journal.json
 +++ b/drizzle/meta/_journal.json
-@@ -134,6 +134,13 @@
-       "when": 1793800547284,
-       "tag": "0018_import_currency",
+@@ -141,6 +141,13 @@
+       "when": 1793961658533,
+       "tag": "0019_vendor_invoice_check_in_service",
        "breakpoints": true
 +    },
 +    {
-+      "idx": 19,
++      "idx": 20,
 +      "version": "7",
-+      "when": 1793961658533,
-+      "tag": "0019_vendor_invoice_check_in_service",
++      "when": 1794022622978,
++      "tag": "0020_multiple_assessments_per_bill",
 +      "breakpoints": true
      }
    ]
  }
 \ No newline at end of file
-diff --git a/server/db/schema/purchaseBill.ts b/server/db/schema/purchaseBill.ts
-index 8929067..dd02134 100644
---- a/server/db/schema/purchaseBill.ts
-+++ b/server/db/schema/purchaseBill.ts
-@@ -163,8 +163,9 @@ export const purchaseBill = pgTable(
-       t.fiscalYear,
-       t.invoiceNumber,
-     ),
--    // Catches the same vendor bill being keyed in twice.
--    uniqueIndex("PurchaseBill_vendor_vendorInvoiceNo_key")
-+    // Lookup for the duplicate check on the same vendor bill being keyed in twice. The rule itself lives in the service (savePurchaseBill):
-+    // it is per vendor ledger AND sub-ledger, and a bill that was posted and reversed frees its number, which a unique index cannot express.
-+    index("PurchaseBill_vendor_vendorInvoiceNo_idx")
-       .on(t.companyId, t.vendorGLId, t.vendorInvoiceNo)
-       .where(sql`${t.vendorInvoiceNo} IS NOT NULL`),
-     index("PurchaseBill_companyId_idx").on(t.companyId),
-diff --git a/server/services/purchase/purchaseBill.ts b/server/services/purchase/purchaseBill.ts
-index 6b99a75..627269d 100644
---- a/server/services/purchase/purchaseBill.ts
-+++ b/server/services/purchase/purchaseBill.ts
-@@ -165,6 +165,41 @@ async function recalcBill(tx: Tx, billId: number, mainBillId: number | null) {
-   return t;
+diff --git a/package.json b/package.json
+index 7dedde2..c3215e6 100644
+--- a/package.json
++++ b/package.json
+@@ -14,6 +14,7 @@
+     "db:migrate": "tsx server/db/migrate.ts",
+     "db:studio": "drizzle-kit studio",
+     "db:seed": "tsx server/db/seed.ts",
++    "db:reset": "node scripts/reset-db.mjs",
+     "typecheck": "tsc --noEmit",
+     "test": "vitest run",
+     "test:db": "node scripts/test-db.mjs",
+diff --git a/scripts/reset-db.mjs b/scripts/reset-db.mjs
+new file mode 100644
+index 0000000..e6ee295
+--- /dev/null
++++ b/scripts/reset-db.mjs
+@@ -0,0 +1,60 @@
++// One command to wipe the LOCAL development database and rebuild it from scratch:  pnpm db:reset
++// It drops everything, re-creates the schema from the committed migrations, then loads the seed data (company, users, ledgers, products, terms).
++// Use it to start testing from a clean slate. Everything you entered by hand is lost, so put anything you want to keep in server/db/seed.ts.
++// SAFETY: refuses any database that is not on this computer (localhost / 127.0.0.1), and asks you to type the database name first.
++// For scripts, pass the name instead of being asked:  pnpm db:reset --confirm <database name>
++import "dotenv/config";
++import postgres from "postgres";
++import { spawnSync } from "node:child_process";
++import { createInterface } from "node:readline/promises";
++
++const url = process.env.DATABASE_URL_DIRECT || process.env.DATABASE_URL; // "||": an empty DATABASE_URL_DIRECT= line in .env counts as not set
++if (!url) {
++  console.error("No DATABASE_URL is set (see .env.example). Nothing was changed.");
++  process.exit(1);
++}
++const u = new URL(url);
++const name = decodeURIComponent(u.pathname.slice(1));
++if (!name || !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(u.hostname)) {
++  console.error(`Refusing to run: "${name}" on "${u.hostname}" is not a database on this computer. db:reset only works on localhost. Nothing was changed.`);
++  process.exit(1);
++}
++
++const args = process.argv.slice(2);
++const at = args.indexOf("--confirm");
++let typed = at >= 0 ? args[at + 1] : undefined;
++if (typed === undefined) {
++  if (!process.stdin.isTTY) {
++    console.error("This is not an interactive terminal. Pass the database name to confirm:  pnpm db:reset --confirm <database name>. Nothing was changed.");
++    process.exit(1);
++  }
++  const rl = createInterface({ input: process.stdin, output: process.stdout });
++  typed = (await rl.question(`This ERASES everything in database "${name}" on ${u.host} and rebuilds it from the migrations and the seed.\nType the database name to continue: `)).trim();
++  rl.close();
++}
++if (typed !== name) {
++  console.error(`"${typed ?? ""}" is not "${name}". Nothing was changed.`);
++  process.exit(1);
++}
++
++try {
++  const db = postgres(url, { max: 1, onnotice: () => {} });
++  // "drizzle" holds the migration history and "namo" holds our DB-level integrity helpers: both must go too, otherwise the next
++  // migrate believes everything is already applied to an empty database.
++  await db.unsafe("drop schema if exists drizzle cascade; drop schema if exists namo cascade; drop schema public cascade; create schema public;");
++  await db.end();
++} catch (e) {
++  console.error(`Could not reset the database at ${u.host}. Is Postgres running? (docker compose up -d)\n${e.message}`);
++  process.exit(1);
++}
++
++// Pin both URL variables so the steps below cannot be pointed at another database.
++const env = { ...process.env, DATABASE_URL: url, DATABASE_URL_DIRECT: url };
++const run = (cmd) => {
++  console.log(`\n> ${cmd}`);
++  const r = spawnSync(cmd, { stdio: "inherit", shell: true, env });
++  if (r.status !== 0) process.exit(r.status ?? 1);
++};
++run("pnpm db:migrate");
++run("pnpm db:seed");
++console.log(`\nDatabase "${name}" has been reset and seeded.`);
+diff --git a/server/db/schema/importAssessment.ts b/server/db/schema/importAssessment.ts
+index 40a12a4..dd616e9 100644
+--- a/server/db/schema/importAssessment.ts
++++ b/server/db/schema/importAssessment.ts
+@@ -44,7 +44,7 @@ export const purchaseImportAssessment = pgTable("PurchaseImportAssessment", {
+   updatedAt: updatedAt(),
+ }, (t) => [
+   uniqueIndex("PurchaseImportAssessment_branch_fy_number_key").on(t.branchId, t.fiscalYear, t.assessmentNumber),
+-  uniqueIndex("PurchaseImportAssessment_active_bill_key").on(t.importBillId).where(sql`${t.reversedAt} IS NULL`),
++  // A goods bill can carry several assessments (a late or supplementary charge is a new one), so importBillId is only indexed, not unique.
+   index("PurchaseImportAssessment_company_branch_fy_idx").on(t.companyId, t.branchId, t.fiscalYear),
+   index("PurchaseImportAssessment_importBillId_idx").on(t.importBillId),
+   uniqueIndex("PurchaseImportAssessment_journalVoucherId_key").on(t.journalVoucherId).where(sql`${t.journalVoucherId} IS NOT NULL`),
+diff --git a/server/db/seed.ts b/server/db/seed.ts
+index 9a5d91d..7cf49d6 100644
+--- a/server/db/seed.ts
++++ b/server/db/seed.ts
+@@ -296,6 +296,27 @@ async function main() {
+         { companyId: co.id, code: "ROUND", name: "Round Off", category: "ROUNDED", nature: "ADDITIVE", sequence: 900, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "RUNNING_TOTAL", generalLedgerId: rent?.id ?? null },
+       ]);
+     }
++    // Charges for trying out cost assessments and service bills: customs duty and excise (ADDITIONAL, so a cost assessment can use them; each posts
++    // Dr Purchases / Cr the against ledger chosen on the assessment) and an input VAT for service bills. Added one by code, so `pnpm db:seed`
++    // also adds them to a database that already has terms.
++    {
++      const gl = async (code: string) => (await db.select().from(S.generalLedger).where(and(eq(S.generalLedger.companyId, co.id), eq(S.generalLedger.code, code))))[0];
++      const purchases = await gl("GL040");
++      let vatInput = await gl("GL070");
++      if (!vatInput) {
++        const [group] = await db.select().from(S.accountGroup).where(and(eq(S.accountGroup.companyId, co.id), eq(S.accountGroup.code, "AG01")));
++        const [existingSub] = await db.select().from(S.accountSubGroup).where(and(eq(S.accountSubGroup.accountGroupId, group.id), eq(S.accountSubGroup.code, "SG05")));
++        const taxSub = existingSub ?? (await db.insert(S.accountSubGroup).values({ accountGroupId: group.id, code: "SG05", description: "Duties & Taxes" }).returning())[0];
++        vatInput = (await db.insert(S.generalLedger).values({ companyId: co.id, code: "GL070", name: "VAT Input (Receivable)", accountSubGroupId: taxSub.id, normalBalance: "DEBIT" }).returning())[0];
++      }
++      const ensureTerm = async (t: typeof S.purchaseTerm.$inferInsert) => {
++        const [ex] = await db.select({ id: S.purchaseTerm.id }).from(S.purchaseTerm).where(and(eq(S.purchaseTerm.companyId, co.id), eq(S.purchaseTerm.code, t.code)));
++        if (!ex) await db.insert(S.purchaseTerm).values(t);
++      };
++      await ensureTerm({ companyId: co.id, code: "CUSTOMS", name: "Customs Duty", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 10, isProductwise: false, defaultCalcType: "PERCENT", defaultValue: "10", calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "VALUE", generalLedgerId: purchases?.id ?? null });
++      await ensureTerm({ companyId: co.id, code: "EXCISE", name: "Excise Duty", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 20, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "QUANTITY", generalLedgerId: purchases?.id ?? null });
++      await ensureTerm({ companyId: co.id, code: "VAT", name: "Input VAT", category: "GENERAL", nature: "ADDITIVE", sequence: 90, isProductwise: false, defaultCalcType: "PERCENT", defaultValue: "13", generalLedgerId: vatInput.id });
++    }
+     if (!(await hasRows(S.salesTerm, co.id))) {
+       const gl = async (code: string) => (await db.select().from(S.generalLedger).where(and(eq(S.generalLedger.companyId, co.id), eq(S.generalLedger.code, code))))[0];
+       const sales = await gl("GL020");
+diff --git a/server/services/purchase/importAssessment.ts b/server/services/purchase/importAssessment.ts
+index ce67586..dabee08 100644
+--- a/server/services/purchase/importAssessment.ts
++++ b/server/services/purchase/importAssessment.ts
+@@ -159,10 +159,20 @@ async function calculate(tx: Tx, targetBillId: number, terms: any[], manualByKey
+        and not exists (select 1 from "PurchaseBill" r where r."reversalOfId" = b.id and r."isPosted")
+      group by a."documentLineId"`) as any[];
+   const priorTermByLine = new Map(priorTermRows.map((row) => [Number(row.id), toMicro(row.amt)]));
++  // A goods bill can carry several assessments (a late or supplementary charge is a new assessment). The ones already APPLIED and not reversed
++  // stand on the lines as signed allocations, so a new assessment's landed value must include them. Drafts are not counted (their rows are only
++  // typed product-wise amounts), and neither are reversed ones. This feeds the same "already posted to the lines" input as the bill's own terms.
++  const priorAssessmentRows = await tx.execute(sql`
++    select a."purchaseBillLineId" as id, sum(a."allocatedAmount")::text as amt
++      from "PurchaseImportAssessmentAllocation" a
++      join "PurchaseImportAssessment" d on d.id = a."assessmentId"
++     where d."importBillId" = ${targetBillId} and d."isPosted" and d."reversedAt" is null
++     group by a."purchaseBillLineId"`) as any[];
++  const priorAssessmentByLine = new Map(priorAssessmentRows.map((row) => [Number(row.id), toMicro(row.amt)]));
+   const productRows = await tx.select({ id: S.purchaseBillLine.id, productId: S.purchaseBillLine.productId, productCode: S.product.code, description: S.product.description, qty: S.purchaseBillLine.qty }).from(S.purchaseBillLine)
+     .leftJoin(S.product, eq(S.product.id, S.purchaseBillLine.productId)).where(eq(S.purchaseBillLine.purchaseBillId, targetBillId));
+   const productByLine = new Map(productRows.map((l) => [l.id, l]));
+-  const lines: ImportCostLineInput[] = basis.lines.map((line) => ({ key: line.id, lineNumber: line.lineNumber, quantity: fmt(line.qty), goodsValue: fmt(line.goodsValue, 2), existingPurchaseTermCosts: fmt(priorTermByLine.get(line.id) ?? ZERO, 2) }));
++  const lines: ImportCostLineInput[] = basis.lines.map((line) => ({ key: line.id, lineNumber: line.lineNumber, quantity: fmt(line.qty), goodsValue: fmt(line.goodsValue, 2), existingPurchaseTermCosts: fmt((priorTermByLine.get(line.id) ?? ZERO) + (priorAssessmentByLine.get(line.id) ?? ZERO), 2) }));
+   const sources: ImportCostSourceInput[] = basis.sources.map((source) => ({
+     key: String(source.id), label: source.invoiceNumber,
+     capitalizedAmount: fmt(source.basicAmount, 2), customsValueAmount: source.treatment === "CIF" ? fmt(source.basicAmount, 2) : "0",
+@@ -241,8 +251,7 @@ export async function eligibleImportBills(filter: { companyId: number; branchId:
+   const rows = await db.select({ id: S.purchaseBill.id, invoiceNumber: S.purchaseBill.invoiceNumber, invoiceDate: S.purchaseBill.invoiceDate, basicAmount: S.purchaseBill.basicAmount, invoiceType: S.purchaseBill.invoiceType })
+     .from(S.purchaseBill).where(and(eq(S.purchaseBill.companyId, filter.companyId), eq(S.purchaseBill.branchId, filter.branchId), eq(S.purchaseBill.fiscalYear, filter.fiscalYear),
+       eq(S.purchaseBill.isPosted, true), sql`${S.purchaseBill.purchaseType} IN ('GOODS_PURCHASE_OTHERS','GOODS_PURCHASE_CAPITAL')`, sql`${S.purchaseBill.mainBillId} IS NULL`, sql`${S.purchaseBill.reversalOfId} IS NULL`,
+-      sql`NOT EXISTS (SELECT 1 FROM "PurchaseBill" r WHERE r."reversalOfId" = "PurchaseBill"."id" AND r."isPosted")`,
+-      sql`NOT EXISTS (SELECT 1 FROM "PurchaseImportAssessment" a WHERE a."importBillId" = "PurchaseBill"."id" AND a."reversedAt" IS NULL)`))
++      sql`NOT EXISTS (SELECT 1 FROM "PurchaseBill" r WHERE r."reversalOfId" = "PurchaseBill"."id" AND r."isPosted")`))
+     .orderBy(desc(S.purchaseBill.invoiceDate), desc(S.purchaseBill.id));
+   const result = [];
+   for (const b of rows) {
+@@ -262,8 +271,6 @@ export async function createImportAssessment(input: AssessmentInput, actor: Acto
+     await guardPeriod(tx, input.companyId, [assessmentDate], opts.lockOverride, "assessmentDate");
+     const fy = await resolveFiscalYear(tx, input.companyId, assessmentDate, input.fiscalYear ?? null);
+     const bill = await importBill(tx, input.companyId, input.branchId, input.importBillId, true);
+-    const [existing] = await tx.select({ id: S.purchaseImportAssessment.id }).from(S.purchaseImportAssessment).where(and(eq(S.purchaseImportAssessment.importBillId, bill.id), sql`${S.purchaseImportAssessment.reversedAt} IS NULL`)).limit(1);
+-    if (existing) throw new HttpError(409, "This import bill already has an assessment. Open or reverse it before creating another.", "importBillId");
+     const terms = await resolveTerms(tx, input.companyId, input.terms);
+     const calc = await calculate(tx, bill.id, terms, manualFromResolved(terms));
+     const number = await nextAssessmentNumber(tx, input.branchId, fy.code);
+@@ -360,9 +367,6 @@ export async function applyImportAssessment(id: number, companyId: number, actor
+     if (doc.isPosted || doc.reversedAt) throw new HttpError(409, "This assessment is not an unapplied draft.");
+     await guardPeriod(tx, companyId, [doc.assessmentDate], opts.lockOverride, "assessmentDate");
+     const bill = await importBill(tx, companyId, doc.branchId, doc.importBillId, true);
+-    const [existing] = await tx.select({ id: S.purchaseImportAssessment.id }).from(S.purchaseImportAssessment)
+-      .where(and(eq(S.purchaseImportAssessment.importBillId, bill.id), sql`${S.purchaseImportAssessment.reversedAt} IS NULL`, sql`${S.purchaseImportAssessment.id} <> ${id}`)).limit(1);
+-    if (existing) throw new HttpError(409, "Another draft or applied assessment already exists for this import bill.");
+     const terms = await tx.select().from(S.purchaseImportAssessmentTerm).where(eq(S.purchaseImportAssessmentTerm.assessmentId, id)).orderBy(asc(S.purchaseImportAssessmentTerm.sequence), asc(S.purchaseImportAssessmentTerm.id));
+     // Product-wise amounts typed by hand are stored as draft allocation rows: read them before the rows are rebuilt.
+     const typed = await tx.select({ assessmentTermId: S.purchaseImportAssessmentAllocation.assessmentTermId, purchaseBillLineId: S.purchaseImportAssessmentAllocation.purchaseBillLineId, allocatedAmount: S.purchaseImportAssessmentAllocation.allocatedAmount })
+diff --git a/src/components/purchase/LinesGrid.tsx b/src/components/purchase/LinesGrid.tsx
+index 4a1745c..5dba391 100644
+--- a/src/components/purchase/LinesGrid.tsx
++++ b/src/components/purchase/LinesGrid.tsx
+@@ -1,7 +1,7 @@
+ import { useMemo } from "react";
+ import { Plus, X } from "lucide-react";
+ import type { PLookups } from "../../api";
+-import { blankLine, blankTerm, derivedQty, isBlankLine, isBlankTerm, lineAmount, trimDec, type LineKind, type LineRow, type Product, type Term, type TermRow } from "../../lib/purchaseForm";
++import { blankLine, blankTerm, derivedQty, isBlankLine, isBlankTerm, lineAmount, pickableTerms, trimDec, type LineKind, type LineRow, type Product, type Term, type TermRow } from "../../lib/purchaseForm";
+ import { fmtPaise, toPaise } from "../../lib/money";
+ import { MasterReferencePicker, type ReferenceOption } from "../MasterReferencePicker";
+ import { DateInput } from "../DateInput";
+@@ -233,13 +233,14 @@ interface TProps {
+   calculationPreview?: Map<string, PreviewTermResult>;
+   previewError?: string;
+   category?: "GENERAL" | "ADDITIONAL";
++  excludeCategory?: "ADDITIONAL";
+   productwiseOnly?: boolean;
+   fixedLineNumber?: number;
  }
  
-+// The widths of the text columns. A longer value is refused here with the field named, instead of reaching the database as a "value too long" 500.
-+const IMPORT_TEXT_LIMITS: Record<string, [string, number]> = {
-+  customsDeclarationNo: ["Customs declaration no.", 30], customsOffice: ["Customs office", 100], countryOfOrigin: ["Country of origin", 50],
-+  lcNo: ["LC no.", 30], lcBankName: ["LC bank", 100], blAwbNo: ["BL / AWB no.", 30], transporterName: ["Transporter", 100],
-+  vehicleNo: ["Vehicle no.", 30], lrNo: ["LR no.", 30], importPermitNo: ["Import permit no.", 30],
-+};
-+const VENDOR_INVOICE_NO_MAX = 30;
-+
-+// A bill that still counts: not itself a reversal, and not undone by a posted reversal.
-+const liveBill = (alias: string) => sql.raw(`${alias}."reversalOfId" is null and not exists (select 1 from "PurchaseBill" r where r."reversalOfId" = ${alias}.id and r."isPosted")`);
-+
-+// The same supplier (ledger and sub-ledger) cannot have one invoice number on two live bills. A bill that was posted and reversed frees its number,
-+// so the supplier's invoice can be entered again correctly. The lock keeps two people saving the same number at once from both passing.
-+async function assertVendorInvoiceFree(tx: Tx, h: { companyId: number; vendorGLId: number; subLedgerId: number | null; vendorInvoiceNo: string; excludeId: number | null }) {
-+  const key = h.vendorInvoiceNo.toLowerCase();
-+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`PurchaseBillVendorInvoice:${h.companyId}:${h.vendorGLId}:${key}`}))`);
-+  const dup = (await tx.execute(sql`
-+    select b."invoiceNumber" from "PurchaseBill" b
-+     where b."companyId" = ${h.companyId} and b."vendorGLId" = ${h.vendorGLId} and b."subLedgerId" is not distinct from ${h.subLedgerId}::int
-+       and lower(b."vendorInvoiceNo") = ${key} and b.id <> ${h.excludeId ?? 0} and ${liveBill("b")}
-+     limit 1`)) as any[];
-+  if (dup[0]) throw new HttpError(409, `Vendor invoice ${h.vendorInvoiceNo} is already entered for this vendor, on bill ${dup[0].invoiceNumber}. Reverse that bill first if it was wrong.`, "vendorInvoiceNo");
-+}
-+
-+// One customs declaration (Pragyapan Patra) belongs to one live bill of the company, otherwise its import VAT could be claimed twice.
-+async function assertCustomsDeclarationFree(tx: Tx, h: { companyId: number; declarationNo: string; excludeId: number | null }) {
-+  const key = h.declarationNo.toLowerCase();
-+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`PurchaseBillCustoms:${h.companyId}:${key}`}))`);
-+  const dup = (await tx.execute(sql`
-+    select b."invoiceNumber" from "PurchaseBillImportDetail" d join "PurchaseBill" b on b.id = d."purchaseBillId"
-+     where b."companyId" = ${h.companyId} and lower(d."customsDeclarationNo") = ${key} and b.id <> ${h.excludeId ?? 0} and ${liveBill("b")}
-+     limit 1`)) as any[];
-+  if (dup[0]) throw new HttpError(409, `Customs declaration ${h.declarationNo} is already on bill ${dup[0].invoiceNumber}. One declaration belongs to one bill; reverse that bill first if it was wrong.`, "importDetail");
-+}
-+
- export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: Opts & QtyOpts & LockOpts = {}) {
-   return inActorTx(actor, opts.tx, async (tx) => {
-     const invoiceDate = parseDate(input.invoiceDate, "invoiceDate");
-@@ -225,12 +260,29 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
-     const lines = await resolveLines(tx, input.companyId, input.lines ?? [], { allowZeroQty: false });
-     await checkBillQuantities(tx, existing?.id ?? 0, lines.map((l, i) => ({ lineNumber: l.lineNumber, qty: l.qty, challanLineId: input.lines[i].challanLineId ?? null, purchaseOrderLineId: input.lines[i].purchaseOrderLineId ?? null })), opts.tolerancePercent);
- 
--    const invoiceNumber = input.invoiceNumber?.trim() || existing?.invoiceNumber || (await nextNumber(tx, "PurchaseBill", "invoiceNumber", input.branchId, fy.code));
-+    // A draft moved into another fiscal year starts that year's numbering; the old number belongs to the old year's sequence.
-+    const keepsNumber = !!existing && existing.fiscalYear === fy.code;
-+    const invoiceNumber = input.invoiceNumber?.trim() || (keepsNumber ? existing!.invoiceNumber : await nextNumber(tx, "PurchaseBill", "invoiceNumber", input.branchId, fy.code));
-     const dueDate = input.dueDate ? parseDate(input.dueDate, "dueDate") : addDays(invoiceDate, dueDays);
-+    const vendorInvoiceNo = input.vendorInvoiceNo?.trim() || null;
-+    if (vendorInvoiceNo) {
-+      if (vendorInvoiceNo.length > VENDOR_INVOICE_NO_MAX) throw new HttpError(400, `Vendor invoice no. can be at most ${VENDOR_INVOICE_NO_MAX} characters.`, "vendorInvoiceNo");
-+      await assertVendorInvoiceFree(tx, { companyId: input.companyId, vendorGLId: input.vendorGLId, subLedgerId: input.subLedgerId ?? null, vendorInvoiceNo, excludeId: existing?.id ?? null });
-+    }
-+    // Import details are cleaned and checked before anything is written.
-+    const importText: Record<string, string | null> = {};
-+    if (input.importDetail && invoiceType === "IMPORT") {
-+      for (const [key, [label, max]] of Object.entries(IMPORT_TEXT_LIMITS)) {
-+        const v = (input.importDetail as any)[key];
-+        const text = v === undefined || v === null ? "" : String(v).trim();
-+        if (text.length > max) throw new HttpError(400, `${label} can be at most ${max} characters.`, "importDetail");
-+        importText[key] = text || null;
-+      }
-+    }
-     const header = {
-       companyId: input.companyId, branchId: input.branchId, invoiceNumber, invoiceDate, fiscalYear: fy.code, invoiceType,
-       purchaseType, vendorGLId: input.vendorGLId, subLedgerId: input.subLedgerId ?? null, agentId: input.agentId ?? null,
--      vendorInvoiceNo: input.vendorInvoiceNo?.trim() || null, vendorInvoiceDate: optDate(input.vendorInvoiceDate, "vendorInvoiceDate"),
-+      vendorInvoiceNo, vendorInvoiceDate: optDate(input.vendorInvoiceDate, "vendorInvoiceDate"),
-       purchaseChallanId: input.purchaseChallanId ?? null, purchaseOrderId: input.purchaseOrderId ?? null, mainBillId: input.mainBillId ?? null,
-       importCostForBillId, importCostAllocationBasis: input.importCostAllocationBasis ?? "VALUE", importCostTreatment: input.importCostTreatment ?? "CIF",
-       dueDays, dueDate, remarks: input.remarks ?? null, updatedAt: new Date(),
-@@ -269,11 +321,13 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
-       if (currencyCode && (exchangeRate === null || !(Number(exchangeRate) > 0))) throw new HttpError(400, "Enter the exchange rate (NPR per 1 unit of the foreign currency) when a foreign currency is given.", "importDetail");
-       if (!currencyCode && (exchangeRate !== null || foreignInvoiceAmount !== null)) throw new HttpError(400, "Enter the currency code for the exchange rate and foreign amount.", "importDetail");
-       if (foreignInvoiceAmount !== null && !(Number(foreignInvoiceAmount) >= 0)) throw new HttpError(400, "The foreign invoice amount cannot be negative.", "importDetail");
-+      // after the format checks above, so a malformed detail is a 400 whatever else is on the bill
-+      if (importText.customsDeclarationNo) await assertCustomsDeclarationFree(tx, { companyId: input.companyId, declarationNo: importText.customsDeclarationNo, excludeId: id });
-       await tx.insert(S.purchaseBillImportDetail).values({
--        purchaseBillId: id, customsDeclarationNo: d.customsDeclarationNo ?? null, customsDeclarationDate: optDate(d.customsDeclarationDate, "customsDeclarationDate"),
--        customsOffice: d.customsOffice ?? null, countryOfOrigin: d.countryOfOrigin ?? null, lcNo: d.lcNo ?? null, lcDate: optDate(d.lcDate, "lcDate"), lcBankName: d.lcBankName ?? null,
--        transportMode: d.transportMode ?? null, blAwbNo: d.blAwbNo ?? null, blAwbDate: optDate(d.blAwbDate, "blAwbDate"), transporterName: d.transporterName ?? null,
--        vehicleNo: d.vehicleNo ?? null, lrNo: d.lrNo ?? null, lrDate: optDate(d.lrDate, "lrDate"), importPermitNo: d.importPermitNo ?? null, importPermitDate: optDate(d.importPermitDate, "importPermitDate"),
-+        purchaseBillId: id, customsDeclarationNo: importText.customsDeclarationNo, customsDeclarationDate: optDate(d.customsDeclarationDate, "customsDeclarationDate"),
-+        customsOffice: importText.customsOffice, countryOfOrigin: importText.countryOfOrigin, lcNo: importText.lcNo, lcDate: optDate(d.lcDate, "lcDate"), lcBankName: importText.lcBankName,
-+        transportMode: d.transportMode ?? null, blAwbNo: importText.blAwbNo, blAwbDate: optDate(d.blAwbDate, "blAwbDate"), transporterName: importText.transporterName,
-+        vehicleNo: importText.vehicleNo, lrNo: importText.lrNo, lrDate: optDate(d.lrDate, "lrDate"), importPermitNo: importText.importPermitNo, importPermitDate: optDate(d.importPermitDate, "importPermitDate"),
-         currencyCode, exchangeRate, foreignInvoiceAmount,
-       });
-     }
-diff --git a/server/services/purchase/queries.ts b/server/services/purchase/queries.ts
-index 5d098c6..7ada58f 100644
---- a/server/services/purchase/queries.ts
-+++ b/server/services/purchase/queries.ts
-@@ -262,7 +262,7 @@ export function getPurchaseBill(id: number, companyId: number) {
-       vendorGLId: b.vendorGLId, subLedgerId: b.subLedgerId, agentId: b.agentId, vendorInvoiceNo: b.vendorInvoiceNo, vendorInvoiceDate: iso(b.vendorInvoiceDate),
-       purchaseChallanId: b.purchaseChallanId, challanNumber: challan[0]?.challanNumber ?? null, purchaseOrderId: b.purchaseOrderId, orderNumber: order[0]?.orderNumber ?? null,
-       mainBillId: b.mainBillId, mainBill: main[0] ?? null, reversalOfId: b.reversalOfId, reversalOf, reversedBy: reversedBy[0] ?? null,
--      importCostForBillId: b.importCostForBillId, importCostTarget: importTarget[0] ?? null, importCostAllocationBasis: b.importCostAllocationBasis,
-+      importCostForBillId: b.importCostForBillId, importCostTarget: importTarget[0] ?? null, importCostAllocationBasis: b.importCostAllocationBasis, importCostTreatment: b.importCostTreatment,
-       dueDays: b.dueDays, dueDate: iso(b.dueDate), remarks: b.remarks,
-       isPosted: b.isPosted, postedAt: b.postedAt, state: billState(b.isPosted, b.reversalOfId, reversed),
-       journalVoucher: voucher[0] ? { ...voucher[0], voucherDate: iso(voucher[0].voucherDate) } : null,
+ // Billing terms: discount, VAT, freight ... The active preview is calculated by the same shared exact engine as the server.
+-export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOnly, errors, clearError, contextKey, calculationPreview, previewError, category, productwiseOnly, fixedLineNumber }: TProps) {
+-  const opts = useMemo<ReferenceOption[]>(() => lookups.terms.filter((t) => (!category || t.category === category) && (productwiseOnly === undefined || t.isProductwise === productwiseOnly)).map((t) => ({ value: String(t.id), label: `${t.code} — ${t.name}`, code: t.code, name: t.name, detail: `${t.category} · ${t.nature} · ${t.calcBase.replaceAll("_", " ")} · seq ${t.sequence}`, searchText: `${t.sequence} ${t.isProductwise ? "productwise" : "document"}`, isActive: t.isActive, badge: t.nature === "DEDUCTIVE" ? "less" : undefined })), [lookups.terms, category, productwiseOnly]);
++export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOnly, errors, clearError, contextKey, calculationPreview, previewError, category, excludeCategory, productwiseOnly, fixedLineNumber }: TProps) {
++  const opts = useMemo<ReferenceOption[]>(() => pickableTerms(lookups.terms, { category, excludeCategory, productwiseOnly }).map((t) => ({ value: String(t.id), label: `${t.code} — ${t.name}`, code: t.code, name: t.name, detail: `${t.category} · ${t.nature} · ${t.calcBase.replaceAll("_", " ")} · seq ${t.sequence}`, searchText: `${t.sequence} ${t.isProductwise ? "productwise" : "document"}`, isActive: t.isActive, badge: t.nature === "DEDUCTIVE" ? "less" : undefined })), [lookups.terms, category, excludeCategory, productwiseOnly]);
+   const patch = (i: number, p: Partial<TermRow>) => { onChange(terms.map((t, k) => (k === i ? { ...t, ...p } : t))); clearError(...Object.keys(errors).filter((k) => k.startsWith(`T.${i}.`))); };
+   const pick = (i: number, id: string) => {
+     const m = masters.get(id);
 diff --git a/src/lib/purchaseForm.ts b/src/lib/purchaseForm.ts
-index 24d4403..f75790f 100644
+index f75790f..419d854 100644
 --- a/src/lib/purchaseForm.ts
 +++ b/src/lib/purchaseForm.ts
-@@ -175,6 +175,13 @@ export function validateTerms(terms: TermRow[], masters: Map<string, Term>, line
- export const dateErr = (label: string, v: string, required = false) =>
-   v === "" ? (required ? `${label} is required.` : undefined) : v.startsWith("?") || !isValidAd(v) ? `${label}: enter a valid date (YYYY-MM-DD).` : undefined;
+@@ -182,6 +182,31 @@ export function addDaysIso(iso: string, days: number): string {
+   return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + days)).toISOString().slice(0, 10);
+ }
  
-+// A date (YYYY-MM-DD) some whole days after another, or "" when the start is not a valid date. Used to keep a bill's due date in step with its invoice date and due days.
-+export function addDaysIso(iso: string, days: number): string {
-+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-+  if (!m || !isValidAd(iso) || !Number.isInteger(days) || days < 0) return "";
-+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + days)).toISOString().slice(0, 10);
++// The charge terms a picker offers: optionally only one category, or everything except one (a bill hides ADDITIONAL terms but keeps GENERAL and
++// ROUNDED ones such as Round Off), and optionally only line-wise or only document-wise terms.
++export function pickableTerms<T extends { category: string; isProductwise: boolean }>(terms: T[], f: { category?: string; excludeCategory?: string; productwiseOnly?: boolean }): T[] {
++  return terms.filter((t) => (!f.category || t.category === f.category) && (!f.excludeCategory || t.category !== f.excludeCategory) && (f.productwiseOnly === undefined || t.isProductwise === f.productwiseOnly));
++}
++
++// The form for a NEW draft bill copied from an existing one: the same vendor, lines and charges, but nothing that identifies the original or links
++// it to other documents. The vendor invoice no./date, due date and customs declaration no./date are cleared (a repeated vendor invoice no. or a
++// repeated declaration no. is refused on save), the order and challan links are dropped, the invoice date is today's, and every row gets a new key.
++export interface BillCopyFields {
++  invoiceDate: string; vendorInvoiceNo: string; vendorInvoiceDate: string; dueDate: string;
++  purchaseChallanId: string; purchaseOrderId: string; challanNo: string; orderNo: string;
++  lines: LineRow[]; terms: TermRow[]; imp: Record<string, string>;
++}
++export function copyBillForm<F extends BillCopyFields>(source: F, invoiceDate: string): F {
++  return {
++    ...source,
++    invoiceDate, vendorInvoiceNo: "", vendorInvoiceDate: "", dueDate: "",
++    purchaseChallanId: "", purchaseOrderId: "", challanNo: "", orderNo: "",
++    lines: source.lines.map((l) => ({ ...l, key: newKey(), purchaseOrderLineId: "", challanLineId: "", link: "" })),
++    terms: source.terms.map((t) => ({ ...t, key: newKey(), finalAmount: "" })),
++    imp: { ...source.imp, customsDeclarationNo: "", customsDeclarationDate: "" },
++  };
 +}
 +
  // A date to start a new document on: today, kept inside the selected fiscal year.
  export function defaultDate(fy: { startDate: string; endDate: string } | undefined): string {
    const d = new Date();
+diff --git a/src/screens/purchase/ImportCostAssessmentScreen.tsx b/src/screens/purchase/ImportCostAssessmentScreen.tsx
+index a66caa0..162118d 100644
+--- a/src/screens/purchase/ImportCostAssessmentScreen.tsx
++++ b/src/screens/purchase/ImportCostAssessmentScreen.tsx
+@@ -1,5 +1,5 @@
+ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+-import { FileCheck2, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
++import { Copy, FileCheck2, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
+ import { ApiError, importAssessmentApi, purchaseApi, type ImportAssessmentPreview, type ImportAssessmentTermInput, type PLookups } from "../../api";
+ import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
+ import { AssessmentAllocationGrid, type AssessmentAllocationCellUpdate } from "../../components/purchase/AssessmentAllocationGrid";
+@@ -162,6 +162,19 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
+     setDoc(null); setForm(next); setEditing(true); setPreview(null); setErrors({}); baseSig.current = JSON.stringify(next); setMessage("New cost assessment");
+     requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-assessment-field]")?.focus());
+   };
++  // A new draft with the same charges as the open assessment (any state). The goods bill is left to choose, and product-wise typed amounts are
++  // reset to automatic because they belong to the original bill's lines.
++  const startCopy = () => {
++    if (!doc) return;
++    const source = asForm(doc);
++    const next: Form = {
++      importBillId: "", assessmentDate: defaultDate(lookups?.fiscalYears.find((y) => y.code === p.fyCode)), referenceNo: "", remarks: "",
++      terms: source.terms.length ? source.terms.map((t) => ({ ...t, key: Math.random().toString(36).slice(2), allocationMode: "AUTO" as const, manual: {} })) : [blankTerm()],
++    };
++    setDoc(null); setForm(next); setEditing(true); setPreview(null); setErrors({}); baseSig.current = JSON.stringify(next);
++    setMessage(`New assessment copied from ${doc.assessmentNumber}: choose the goods bill, then save`);
++    requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-assessment-field]")?.focus());
++  };
+   const openDoc = async (id: number) => {
+     if (dirty && !window.confirm("Discard unsaved assessment changes?")) return;
+     setBusy(true);
+@@ -519,7 +532,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
+                       ["Goods value", preview?.goodsValue],
+                       ["CIF base", preview?.cifValue],
+                       ["Invoiced services", preview?.invoicedCapitalizedCosts],
+-                      ["Existing bill terms", preview?.existingPurchaseTermCosts],
++                      ["Earlier costs on bill", preview?.existingPurchaseTermCosts],
+                       ["Assessed net", preview?.assessedNet],
+                       ["Final landed value", preview?.totalLandedValue],
+                     ] as const).map(([label, value]) => (
+@@ -569,6 +582,7 @@ export default function ImportCostAssessmentScreen(p: PurchaseScreenProps) {
+           ) : (
+             <>
+               <button type="button" className="btn btn-primary" onClick={startNew}><Plus size={14} /> New assessment <span className="kbd">F3</span></button>
++              <button type="button" className="btn" disabled={!doc || busy} onClick={startCopy}><Copy size={14} /> Copy</button>
+               <button type="button" className="btn" disabled={!doc || doc.isPosted || !!doc.reversedAt} onClick={beginEdit}>Edit draft <span className="kbd">F2</span></button>
+               <button type="button" className="btn" disabled={!doc || doc.isPosted || !!doc.reversedAt} onClick={() => void deleteDraft()}><Trash2 size={14} /> Delete draft</button>
+               {canApply && <button type="button" className="btn btn-primary" disabled={busy || !ledgersOk || !manualsBalanced || !previewOk} onClick={() => void applyAssessment()}><FileCheck2 size={14} /> Apply assessment</button>}
 diff --git a/src/screens/purchase/PurchaseBillScreen.tsx b/src/screens/purchase/PurchaseBillScreen.tsx
-index e2ef152..5677e70 100644
+index 5677e70..d6a0fca 100644
 --- a/src/screens/purchase/PurchaseBillScreen.tsx
 +++ b/src/screens/purchase/PurchaseBillScreen.tsx
+@@ -1,5 +1,5 @@
+ import { useEffect, useMemo, useRef, useState } from "react";
+-import { ChevronDown, ChevronRight, RotateCcw, Send } from "lucide-react";
++import { ChevronDown, ChevronRight, Copy, RotateCcw, Send } from "lucide-react";
+ import { purchaseApi, type PDoc, type PListRow } from "../../api";
+ import { Combobox, type ComboOption } from "../../components/Combobox";
+ import { COMMON_HELP, DocShell, Field, FormSection, HINTS, Pill, focusStep, money } from "../../components/purchase/Bits";
 @@ -7,7 +7,7 @@ import { DateField, TextField, VendorFields } from "../../components/purchase/He
  import { LinesGrid, TermsGrid } from "../../components/purchase/LinesGrid";
  import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
  import {
--  blankLine, dateErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
-+  addDaysIso, blankLine, dateErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
+-  addDaysIso, blankLine, dateErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
++  addDaysIso, blankLine, copyBillForm, dateErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
    type LineRow, type TermRow,
  } from "../../lib/purchaseForm";
  import { parseDec } from "../../../shared/decimal";
-@@ -18,12 +18,12 @@ import type { PurchaseScreenProps } from "./PurchaseOrderScreen";
- import { useDocScreen, type DocConfig, type Errors } from "./useDocScreen";
+@@ -303,8 +303,12 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
+   const cifSourceAmount = cifSources.reduce((sum: bigint, source: any) => sum + toMicro(source.basicAmount), 0n);
+   const landedOnlyAmount = landedOnlySources.reduce((sum: bigint, source: any) => sum + toMicro(source.basicAmount), 0n);
+   const cifTotal = doc?.invoiceType === "IMPORT" ? formatImportCost(toMicro(doc.basicAmount) + cifSourceAmount, 2) : null;
++  // A new draft from this bill (any state): same vendor, lines and charges, dated today, without the vendor invoice no., links or declaration no.
++  const canCopy = !!doc && !!lk && state !== "REVERSAL" && !doc.mainBillId;
++  const copyBill = () => { if (doc && lk) s.newDoc(copyBillForm(cfg.toForm(doc, lk), cfg.emptyForm(lk).invoiceDate)); };
+   const actions = doc && (
+     <>
++      {canCopy && <button data-nav className="btn" onClick={copyBill}><Copy size={14} /> Copy</button>}
+       {state === "DRAFT" && <button data-nav className="btn btn-primary" onClick={() => s.run({ action: "post", title: "Post bill?", body: <>Post <b className="font-mono">{doc.invoiceNumber}</b> for <b>{money(doc.totalAmount)}</b>? A balanced journal voucher is written and the bill can no longer be edited or deleted — only reversed.</>, button: "Post", done: (d) => `Posted ${d.invoiceNumber}${d.journalVoucher ? ` (voucher ${d.journalVoucher.voucherNumber})` : ""}` })}><Send size={14} /> Post</button>}
+       {reversible && (
+         <button data-nav className="btn" onClick={() => {
+@@ -559,7 +563,7 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
+                 </div>
+                 <div className="min-h-0 flex-1 overflow-auto p-3">
+                   <TermsGrid terms={termDraft} onChange={setTermDraft} lookups={lk} masters={masters} lineCount={liveLines} readOnly={ro} errors={dialogErrors} clearError={clearDialogError} contextKey={String(p.companyId)} calculationPreview={ro ? undefined : dialogPreview?.terms} previewError={dialogPreview?.message}
+-                    category="GENERAL" productwiseOnly={termDialog.scope === "line"} fixedLineNumber={termDialog.scope === "line" ? termDialog.lineNumber : undefined} />
++                    excludeCategory="ADDITIONAL" productwiseOnly={termDialog.scope === "line"} fixedLineNumber={termDialog.scope === "line" ? termDialog.lineNumber : undefined} />
+                 </div>
+                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-300 bg-slate-50 px-3 py-2">
+                   <span className="text-[12px] text-slate-600">{termDraft.filter((term) => !isBlankTerm(term)).length} term(s) · Dialog net <b className="tabular-nums">{dialogTotalText}</b></span>
+diff --git a/tests/api.importAssessment.test.ts b/tests/api.importAssessment.test.ts
+index 5b2ee38..fc1fbdc 100644
+--- a/tests/api.importAssessment.test.ts
++++ b/tests/api.importAssessment.test.ts
+@@ -119,9 +119,11 @@ describe.skipIf(!DB_READY)("Import cost assessment (API)", () => {
+     const listed = await call("GET", `${api("import-assessments")}?companyId=${W.co}&branchId=${W.br}&fiscalYear=2082%2F83`);
+     expect(listed.status).toBe(200);
+     expect(listed.body.rows).toMatchObject([{ id: assessmentId, state: "DRAFT", referenceNo: "CUS-ASSESS-UPDATED" }]);
+-    const duplicate = await call("POST", api("import-assessments"), { companyId: W.co, branchId: W.br, fiscalYear: "2082/83", importBillId: goods.id, assessmentDate: "2025-10-16", userId, terms: termInput });
+-    expect(duplicate.status).toBe(409);
+-    expect((await call("GET", `${api("import-assessments")}/eligible-imports?companyId=${W.co}&branchId=${W.br}&fiscalYear=2082%2F83`)).body.rows).toHaveLength(0);
++    // A goods bill can carry several assessments: a second draft on the same bill is allowed (it is removed again so the rest of this test is unchanged).
++    const second = await call("POST", api("import-assessments"), { companyId: W.co, branchId: W.br, fiscalYear: "2082/83", importBillId: goods.id, assessmentDate: "2025-10-16", userId, terms: termInput });
++    expect(second.status, JSON.stringify(second.body)).toBe(201);
++    expect((await call("DELETE", `${api("import-assessments")}/${second.body.document.id}?companyId=${W.co}&userId=${userId}`, { userId })).status).toBe(200);
++    expect((await call("GET", `${api("import-assessments")}/eligible-imports?companyId=${W.co}&branchId=${W.br}&fiscalYear=2082%2F83`)).body.rows.map((r: any) => r.id)).toEqual([goods.id]);
+     const beforeVoucherCount = Number((await rows(sql`select count(*)::int as n from "JournalVoucher" where "companyId" = ${W.co}`))[0].n);
  
- const IMPORT_FIELDS: { key: string; label: string; kind: "text" | "date" | "mode"; max?: number }[] = [
--  { key: "customsDeclarationNo", label: "Customs Declaration No", kind: "text" }, { key: "customsDeclarationDate", label: "Declaration Date", kind: "date" },
--  { key: "customsOffice", label: "Customs Office", kind: "text" }, { key: "countryOfOrigin", label: "Country of Origin", kind: "text" },
--  { key: "lcNo", label: "LC No", kind: "text" }, { key: "lcDate", label: "LC Date", kind: "date" }, { key: "lcBankName", label: "LC Bank", kind: "text" },
--  { key: "transportMode", label: "Transport Mode", kind: "mode" }, { key: "blAwbNo", label: "BL / AWB No", kind: "text" }, { key: "blAwbDate", label: "BL / AWB Date", kind: "date" },
--  { key: "transporterName", label: "Transporter", kind: "text" }, { key: "vehicleNo", label: "Vehicle No", kind: "text" }, { key: "lrNo", label: "LR No", kind: "text" }, { key: "lrDate", label: "LR Date", kind: "date" },
--  { key: "importPermitNo", label: "Import Permit No", kind: "text" }, { key: "importPermitDate", label: "Permit Date", kind: "date" },
-+  { key: "customsDeclarationNo", label: "Customs Declaration No", kind: "text", max: 30 }, { key: "customsDeclarationDate", label: "Declaration Date", kind: "date" },
-+  { key: "customsOffice", label: "Customs Office", kind: "text", max: 100 }, { key: "countryOfOrigin", label: "Country of Origin", kind: "text", max: 50 },
-+  { key: "lcNo", label: "LC No", kind: "text", max: 30 }, { key: "lcDate", label: "LC Date", kind: "date" }, { key: "lcBankName", label: "LC Bank", kind: "text", max: 100 },
-+  { key: "transportMode", label: "Transport Mode", kind: "mode" }, { key: "blAwbNo", label: "BL / AWB No", kind: "text", max: 30 }, { key: "blAwbDate", label: "BL / AWB Date", kind: "date" },
-+  { key: "transporterName", label: "Transporter", kind: "text", max: 100 }, { key: "vehicleNo", label: "Vehicle No", kind: "text", max: 30 }, { key: "lrNo", label: "LR No", kind: "text", max: 30 }, { key: "lrDate", label: "LR Date", kind: "date" },
-+  { key: "importPermitNo", label: "Import Permit No", kind: "text", max: 30 }, { key: "importPermitDate", label: "Permit Date", kind: "date" },
-   // Optional foreign currency: amounts on the bill stay in NPR; these record how they were converted.
-   { key: "currencyCode", label: "Foreign Currency (optional, e.g. USD)", kind: "text", max: 3 }, { key: "exchangeRate", label: "Exchange Rate (NPR per 1 unit)", kind: "text", max: 20 }, { key: "foreignInvoiceAmount", label: "Invoice Total in Foreign Currency", kind: "text", max: 20 },
- ];
-@@ -406,7 +406,12 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
-           <FormSection title="Bill Header" hint="Invoice, supplier, payment and document links">
-             <div className="grid min-w-0 grid-cols-2 md:grid-cols-4 2xl:grid-cols-6 gap-x-2 gap-y-1">
-               <Field label="Invoice No"><input disabled className="fld bg-slate-100 text-slate-600" value={doc?.invoiceNumber ?? ""} placeholder="(next number)" aria-label="Invoice number" /></Field>
--              <DateField label="Invoice Date" name="invoiceDate" value={f.invoiceDate} onChange={(v) => { s.patch({ invoiceDate: v }); s.clearError("invoiceDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("invoiceDate")} required />
-+              <DateField label="Invoice Date" name="invoiceDate" value={f.invoiceDate} onChange={(v) => {
-+                // with due days entered, the due date follows the invoice date
-+                const due = f.dueDays ? addDaysIso(v, Number(f.dueDays)) : "";
-+                s.patch(due ? { invoiceDate: v, dueDate: due } : { invoiceDate: v });
-+                s.clearError("invoiceDate");
-+              }} calendar={p.calendar} readOnly={ro} error={s.err("invoiceDate")} required />
-               <Field label="Invoice Type">
-                 <select data-field="invoiceType" disabled={ro} value={f.invoiceType} onChange={(e) => { s.patch({ invoiceType: e.target.value as BForm["invoiceType"] }); if (e.target.value !== "IMPORT") setImportOpen(false); }} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}><option value="LOCAL">Local</option><option value="IMPORT">Import</option></select>
-               </Field>
-@@ -415,9 +420,15 @@ export default function PurchaseBillScreen(p: PurchaseScreenProps & { fromChalla
-               </Field>
-               <VendorFields lookups={lk} contextKey={String(p.companyId)} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors} lockVendor={!!f.purchaseChallanId}
-                 onChange={(c) => { s.patch(c); s.clearError("vendorGLId", "subLedgerId"); }} />
--              <TextField label="Vendor Invoice No" name="vendorInvoiceNo" value={f.vendorInvoiceNo} onChange={(v) => s.patch({ vendorInvoiceNo: v })} readOnly={ro} error={s.err("vendorInvoiceNo")} />
-+              <TextField label="Vendor Invoice No" name="vendorInvoiceNo" value={f.vendorInvoiceNo} onChange={(v) => s.patch({ vendorInvoiceNo: v })} readOnly={ro} error={s.err("vendorInvoiceNo")} max={30} />
-               <DateField label="Vendor Invoice Date" name="vendorInvoiceDate" value={f.vendorInvoiceDate} onChange={(v) => { s.patch({ vendorInvoiceDate: v }); s.clearError("vendorInvoiceDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("vendorInvoiceDate")} />
--              <TextField label="Due Days" name="dueDays" value={f.dueDays} onChange={(v) => /^\d{0,4}$/.test(v) && s.patch({ dueDays: v })} readOnly={ro} error={s.err("dueDays")} max={4} />
-+              <TextField label="Due Days" name="dueDays" value={f.dueDays} onChange={(v) => {
-+                if (!/^\d{0,4}$/.test(v)) return;
-+                // typing the days sets the due date from the invoice date; a due date typed afterwards still wins
-+                const due = v ? addDaysIso(f.invoiceDate, Number(v)) : "";
-+                s.patch(due ? { dueDays: v, dueDate: due } : { dueDays: v });
-+                if (due) s.clearError("dueDate");
-+              }} readOnly={ro} error={s.err("dueDays")} max={4} />
-               <DateField label="Due Date" name="dueDate" value={f.dueDate} onChange={(v) => { s.patch({ dueDate: v }); s.clearError("dueDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("dueDate")} />
-               {f.purchaseType.startsWith("SERVICE_PURCHASE_") && (
-                 <>
-diff --git a/tests/api.costAssessment.test.ts b/tests/api.costAssessment.test.ts
-index 6cb02a7..348090a 100644
---- a/tests/api.costAssessment.test.ts
-+++ b/tests/api.costAssessment.test.ts
-@@ -225,7 +225,9 @@ describe.skipIf(!DB_READY)("Cost assessment: local and import, against ledgers,
-     expect(noStock.status).toBe(400);
+     const applied = await call("POST", `${api("import-assessments")}/${assessmentId}/apply?companyId=${W.co}`, { userId });
+@@ -210,4 +212,62 @@ describe.skipIf(!DB_READY)("Import cost assessment (API)", () => {
+     expect(loaded.status).toBe(200);
+     expect(loaded.body.document.preview.lines.map((l: any) => Number(l.landedValue).toFixed(2))).toEqual(["1433.63", "671.37"]);
    });
-   it("an import bill can optionally carry a foreign currency and exchange rate; the last against ledger used for a charge is offered next time", async () => {
--    const imp = (extra: Record<string, unknown>) => call("POST", api("bills"), billBody({ invoiceType: "IMPORT", purchaseType: "GOODS_PURCHASE_OTHERS", importDetail: { customsDeclarationNo: "CUS-FX", ...extra }, lines: goodsLines() }));
-+    // each valid bill needs its own customs declaration number (one declaration belongs to one live bill)
-+    let fx = 0;
-+    const imp = (extra: Record<string, unknown>) => call("POST", api("bills"), billBody({ invoiceType: "IMPORT", purchaseType: "GOODS_PURCHASE_OTHERS", importDetail: { customsDeclarationNo: `CUS-FX-${++fx}`, ...extra }, lines: goodsLines() }));
-     const plain = await imp({});
-     expect(plain.status, JSON.stringify(plain.body)).toBe(201); // currency stays optional
-     expect((await imp({ currencyCode: "USD" })).status).toBe(400);               // a currency needs its rate
-diff --git a/tests/api.purchase.test.ts b/tests/api.purchase.test.ts
-index d146cf8..3c61882 100644
---- a/tests/api.purchase.test.ts
-+++ b/tests/api.purchase.test.ts
-@@ -447,6 +447,87 @@ describe.skipIf(!DB_READY)("Purchase documents (API)", () => {
-       expect((await call("POST", base("bills"), billBody({ mainBillId: null }))).status).toBe(201);
-     });
- 
-+    it("the cost treatment of a bill is returned, so editing and saving again keeps it", async () => {
-+      const b = await mkBill({ importCostTreatment: "LANDED_ONLY" });
-+      expect((await get("bills", b.id)).body.importCostTreatment).toBe("LANDED_ONLY");
-+      const again = await call("PUT", `${base("bills")}/${b.id}?${qs()}`, billBody({ importCostTreatment: (await get("bills", b.id)).body.importCostTreatment }));
-+      expect(again.status, JSON.stringify(again.body)).toBe(200);
-+      expect(again.body.document.importCostTreatment).toBe("LANDED_ONLY");
-+      expect((await get("bills", (await mkBill()).id)).body.importCostTreatment).toBe("CIF");
-+    });
 +
-+    it("vendor invoice number: unique per vendor ledger AND sub-ledger; a reversed bill's number can be used again", async () => {
-+      const no = `VI-${tag}`;
-+      const sub2 = await ins("SubLedger", { code: c("S2"), name: "Second vendor sub", generalLedgerId: W.vendor, updatedAt: NOW });
-+      await mkBill({ vendorInvoiceNo: no, subLedgerId: W.sub });
-+      // another supplier under the same ledger may use the same number
-+      expect((await call("POST", base("bills"), billBody({ vendorInvoiceNo: no, subLedgerId: sub2 }))).status).toBe(201);
-+      // the same supplier may not
-+      const dup = await call("POST", base("bills"), billBody({ vendorInvoiceNo: no, subLedgerId: W.sub }));
-+      expect(dup.status).toBe(409);
-+      expect(dup.body.field).toBe("vendorInvoiceNo");
-+      expect(dup.body.message).toMatch(/already/i);
-+      // editing a bill and keeping its own number is fine
-+      const mine = await mkBill({ vendorInvoiceNo: `${no}-B`, subLedgerId: W.sub });
-+      expect((await call("PUT", `${base("bills")}/${mine.id}?${qs()}`, billBody({ vendorInvoiceNo: `${no}-B`, subLedgerId: W.sub }))).status).toBe(200);
-+      // after the bill is posted and reversed, the vendor's invoice can be keyed in again, correctly
-+      const wrong = await mkBill({ vendorInvoiceNo: `${no}-R` });
-+      expect((await act("bills", wrong.id, "post")).status).toBe(200);
-+      const live = await call("POST", base("bills"), billBody({ vendorInvoiceNo: `${no}-R` }));
-+      expect(live.status).toBe(409);
-+      expect((await act("bills", wrong.id, "reverse", { reason: "wrong amount", date: "2025-10-20" })).status).toBe(200);
-+      const fixed = await call("POST", base("bills"), billBody({ vendorInvoiceNo: `${no}-R` }));
-+      expect(fixed.status, JSON.stringify(fixed.body)).toBe(201);
-+    });
++  it("a goods bill can carry several assessments: each posts its own voucher, landed cost accumulates, and reversing one leaves the others", async () => {
++    const goods = await createBill({ invoiceType: "LOCAL", purchaseType: "GOODS_PURCHASE_OTHERS", lines: [{ productId: W.goods, qty: 10, rate: 100 }, { productId: W.goods, qty: 5, rate: 200 }] });
++    expect((await action(goods.id, "post")).status).toBe(200);
++    const landed = async () => (await rows(sql`select "landedAmount" from "PurchaseBillLine" where "purchaseBillId" = ${goods.id} order by "lineNumber"`)).map((l) => Number(l.landedAmount).toFixed(2));
++    const draft = async (terms: Record<string, unknown>[]) => {
++      const r = await call("POST", api("import-assessments"), { companyId: W.co, branchId: W.br, fiscalYear: "2082/83", importBillId: goods.id, assessmentDate: "2025-10-16", userId, terms });
++      expect(r.status, JSON.stringify(r.body)).toBe(201);
++      return r.body.document.id as number;
++    };
++    const apply = async (id: number) => {
++      const r = await call("POST", `${api("import-assessments")}/${id}/apply?companyId=${W.co}`, { userId });
++      expect(r.status, JSON.stringify(r.body)).toBe(200);
++      return r.body.document;
++    };
++    const eligible = async () => (await call("GET", `${api("import-assessments")}/eligible-imports?companyId=${W.co}&branchId=${W.br}&fiscalYear=2082%2F83`)).body.rows.map((r: any) => r.id);
++    const duty = (extra: Record<string, unknown>) => ({ termId: W.duty, allocationBasis: "VALUE", capitalizable: true, againstLedgerId: W.bank, ...extra });
++    expect(await landed()).toEqual(["1000.00", "1000.00"]);
 +
-+    it("text longer than the database allows is a 400 naming the field, never a 500", async () => {
-+      const long = "X".repeat(31);
-+      const a = await call("POST", base("bills"), billBody({ vendorInvoiceNo: long }));
-+      expect(a.status).toBe(400);
-+      expect(a.body.field).toBe("vendorInvoiceNo");
-+      for (const key of ["customsDeclarationNo", "lcNo", "blAwbNo", "vehicleNo", "lrNo", "importPermitNo"]) {
-+        const r = await call("POST", base("bills"), billBody({ invoiceType: "IMPORT", importDetail: { [key]: long } }));
-+        expect(r.status, key).toBe(400);
-+        expect(r.body.field, key).toBe("importDetail");
-+        expect(r.body.message, key).toMatch(/30 characters/);
-+      }
-+      expect((await call("POST", base("bills"), billBody({ invoiceType: "IMPORT", importDetail: { customsOffice: "Y".repeat(101) } }))).status).toBe(400);
-+      expect((await call("POST", base("bills"), billBody({ vendorInvoiceNo: "X".repeat(30) }))).status).toBe(201);
-+    });
++    // 1st assessment: 10% duty on 2000 = 200, split by value 100 / 100.
++    const first = await apply(await draft([duty({ calcType: "PERCENT", rate: "10" })]));
++    expect(await landed()).toEqual(["1100.00", "1100.00"]);
++    expect(await eligible()).toContain(goods.id);
 +
-+    it("a customs declaration number can be on one live bill only; a reversed bill frees it", async () => {
-+      const cd = `CD-${tag}`;
-+      const imp = (no: string) => billBody({ invoiceType: "IMPORT", importDetail: { customsDeclarationNo: no, customsDeclarationDate: "2025-10-12" } });
-+      const first = await call("POST", base("bills"), imp(cd));
-+      expect(first.status, JSON.stringify(first.body)).toBe(201);
-+      const dup = await call("POST", base("bills"), imp(cd));
-+      expect(dup.status).toBe(409);
-+      expect(dup.body.field).toBe("importDetail");
-+      expect(dup.body.message).toMatch(new RegExp(cd));
-+      // the bill's own number on edit is fine
-+      expect((await call("PUT", `${base("bills")}/${first.body.result.id}?${qs()}`, imp(cd))).status).toBe(200);
-+      // post and reverse the first: the declaration can be used again
-+      expect((await act("bills", first.body.result.id, "post")).status).toBe(200);
-+      expect((await call("POST", base("bills"), imp(cd))).status).toBe(409);
-+      expect((await act("bills", first.body.result.id, "reverse", { reason: "re-enter", date: "2025-10-20" })).status).toBe(200);
-+      expect((await call("POST", base("bills"), imp(cd))).status).toBe(201);
-+    });
++    // 2nd assessment on the same bill: its preview already counts what the first one put on the lines (existing costs 200, landed 2260).
++    const excise = [{ termId: W.excise, calcType: "AMOUNT", inputAmount: "60", allocationBasis: "QUANTITY", capitalizable: true, againstLedgerId: W.bank }];
++    const preview = await call("POST", `${api("import-assessments")}/preview`, { companyId: W.co, branchId: W.br, importBillId: goods.id, terms: excise });
++    expect(preview.status, JSON.stringify(preview.body)).toBe(200);
++    expect(preview.body.preview).toMatchObject({ goodsValue: "2000.00", existingPurchaseTermCosts: "200.00", assessedNet: "60.00", totalLandedValue: "2260.00" });
++    expect(preview.body.preview.lines.map((l: any) => l.existingPurchaseTermCosts)).toEqual(["100.00", "100.00"]);
++    const second = await apply(await draft(excise));
++    expect(await landed()).toEqual(["1140.00", "1120.00"]); // 60 by quantity 10 : 5 -> 40 / 20
 +
-+    it("moving a draft into another fiscal year gives it that year's next number", async () => {
-+      await ins("FiscalYear", { companyId: W.co, code: "2083/84", startDate: "2026-07-17", endDate: "2027-07-16", isCurrent: false, updatedAt: NOW });
-+      const a = await mkBill();
-+      const b = await mkBill();
-+      const before = (await get("bills", b.id)).body;
-+      expect(before.fiscalYear).toBe("2082/83");
-+      const moved = await call("PUT", `${base("bills")}/${b.id}?${qs()}`, billBody({ invoiceDate: "2026-08-01" }));
-+      expect(moved.status, JSON.stringify(moved.body)).toBe(200);
-+      expect(moved.body.document.fiscalYear).toBe("2083/84");
-+      expect(moved.body.document.invoiceNumber).toBe("0001");
-+      // an edit that stays in the year keeps its number
-+      const same = await call("PUT", `${base("bills")}/${a.id}?${qs()}`, billBody({ invoiceDate: "2025-10-20" }));
-+      expect(same.body.document.invoiceNumber).toBe(a.invoiceNumber);
-+    });
++    // A late charge of the same term as the first (duty again) is just a third assessment.
++    const third = await apply(await draft([duty({ calcType: "AMOUNT", inputAmount: "30" })]));
++    expect(await landed()).toEqual(["1155.00", "1135.00"]);
++    expect(new Set([first.journalVoucherId, second.journalVoucherId, third.journalVoucherId]).size).toBe(3);
++    expect(Number(third.totalLandedValue)).toBe(2290);
 +
-     it("list: state filter DRAFT / POSTED / REVERSED / REVERSAL, flags for additional bills, search by vendor invoice number", async () => {
-       const draft = await mkBill({ vendorInvoiceNo: `V-D-${tag}` });
-       const posted = await mkBill({ vendorInvoiceNo: `V-P-${tag}` });
-diff --git a/tests/purchase.form.test.ts b/tests/purchase.form.test.ts
-new file mode 100644
-index 0000000..84e4802
---- /dev/null
-+++ b/tests/purchase.form.test.ts
-@@ -0,0 +1,20 @@
-+import { describe, expect, it } from "vitest";
-+import { addDaysIso } from "../src/lib/purchaseForm";
++    // The goods bill cannot be reversed while any of them stands.
++    const blocked = await action(goods.id, "reverse", { date: "2025-10-20", reason: "Should be refused" });
++    expect(blocked.status).toBe(409);
++    expect(blocked.body.message).toMatch(/assessment/i);
 +
-+// The due date on a bill follows its invoice date and due days: whole calendar days, month and year ends included, never a timezone slip.
-+describe("addDaysIso", () => {
-+  it("adds whole days across month, year and leap-day ends", () => {
-+    expect(addDaysIso("2025-10-14", 30)).toBe("2025-11-13");
-+    expect(addDaysIso("2025-12-20", 15)).toBe("2026-01-04");
-+    expect(addDaysIso("2028-02-28", 1)).toBe("2028-02-29");
-+    expect(addDaysIso("2027-02-28", 1)).toBe("2027-03-01");
-+    expect(addDaysIso("2025-10-14", 0)).toBe("2025-10-14");
++    // Reversing the first removes only its own 100 / 100; the other two stay applied.
++    const reversed = await call("POST", `${api("import-assessments")}/${first.id}/reverse?companyId=${W.co}`, { userId, reason: "First duty was wrong", date: "2025-10-20" });
++    expect(reversed.status, JSON.stringify(reversed.body)).toBe(200);
++    expect(await landed()).toEqual(["1055.00", "1035.00"]);
++    for (const other of [second, third]) {
++      const state = (await call("GET", `${api("import-assessments")}/${other.id}?companyId=${W.co}`)).body.document.state;
++      expect(state).toBe("APPLIED");
++    }
++
++    // Reverse the rest; the bill goes back to its own value, and is eligible throughout.
++    for (const other of [second, third]) expect((await call("POST", `${api("import-assessments")}/${other.id}/reverse?companyId=${W.co}`, { userId, reason: "Clean up", date: "2025-10-21" })).status).toBe(200);
++    expect(await landed()).toEqual(["1000.00", "1000.00"]);
++    expect(await eligible()).toContain(goods.id);
 +  });
-+  it("answers an empty string when the start or the days are not usable", () => {
-+    expect(addDaysIso("", 5)).toBe("");
-+    expect(addDaysIso("2025-13-40", 5)).toBe("");
-+    expect(addDaysIso("?2025", 5)).toBe("");
-+    expect(addDaysIso("2025-10-14", -1)).toBe("");
-+    expect(addDaysIso("2025-10-14", 1.5)).toBe("");
+ });
+diff --git a/tests/purchase.form.test.ts b/tests/purchase.form.test.ts
+index 84e4802..2a7021b 100644
+--- a/tests/purchase.form.test.ts
++++ b/tests/purchase.form.test.ts
+@@ -1,5 +1,56 @@
+ import { describe, expect, it } from "vitest";
+-import { addDaysIso } from "../src/lib/purchaseForm";
++import { addDaysIso, blankLine, blankTerm, copyBillForm, pickableTerms } from "../src/lib/purchaseForm";
++
++// Copying a bill keeps what is worth re-using and drops everything that identifies the original or links it to other documents.
++describe("copyBillForm", () => {
++  const source = {
++    invoiceDate: "2025-08-01", vendorInvoiceNo: "INV-77", vendorInvoiceDate: "2025-07-30", dueDays: "30", dueDate: "2025-08-31", remarks: "keep me",
++    vendorGLId: "5", purchaseType: "GOODS_PURCHASE_OTHERS", importCostForBillId: "12",
++    purchaseChallanId: "3", purchaseOrderId: "4", challanNo: "CH-1", orderNo: "PO-1",
++    lines: [blankLine({ productId: "9", qty: "10", rate: "100", batchNo: "B1", purchaseOrderLineId: "41", challanLineId: "31", link: "Order line 1 · Challan line 1" })],
++    terms: [blankTerm({ termId: "2", calcType: "AMOUNT", inputAmount: "50", finalAmount: "50.00" })],
++    imp: { customsDeclarationNo: "CUS-9", customsDeclarationDate: "2025-07-29", lcNo: "LC-1", customsOffice: "Birgunj" },
++  };
++  const copy = copyBillForm(source, "2025-11-07");
++  it("starts today, with no vendor invoice no., due date, links or declaration no.", () => {
++    expect(copy).toMatchObject({ invoiceDate: "2025-11-07", vendorInvoiceNo: "", vendorInvoiceDate: "", dueDate: "", purchaseChallanId: "", purchaseOrderId: "", challanNo: "", orderNo: "" });
++    expect(copy.lines[0]).toMatchObject({ purchaseOrderLineId: "", challanLineId: "", link: "" });
++    expect(copy.imp).toMatchObject({ customsDeclarationNo: "", customsDeclarationDate: "" });
++  });
++  it("keeps the vendor, lines, charges, terms of payment and other import details", () => {
++    expect(copy).toMatchObject({ vendorGLId: "5", purchaseType: "GOODS_PURCHASE_OTHERS", importCostForBillId: "12", dueDays: "30", remarks: "keep me" });
++    expect(copy.lines[0]).toMatchObject({ productId: "9", qty: "10", rate: "100", batchNo: "B1" });
++    expect(copy.terms[0]).toMatchObject({ termId: "2", calcType: "AMOUNT", inputAmount: "50", finalAmount: "" });
++    expect(copy.imp).toMatchObject({ lcNo: "LC-1", customsOffice: "Birgunj" });
++  });
++  it("gives every row a new key and leaves the original untouched", () => {
++    expect(copy.lines[0].key).not.toBe(source.lines[0].key);
++    expect(copy.terms[0].key).not.toBe(source.terms[0].key);
++    expect(source.vendorInvoiceNo).toBe("INV-77");
++    expect(source.lines[0].challanLineId).toBe("31");
++    expect(source.imp.customsDeclarationNo).toBe("CUS-9");
 +  });
 +});
--- 
-2.43.0
-
++
++// A purchase bill's term picker hides ADDITIONAL terms only. Round Off (ROUNDED) and the ordinary GENERAL terms must stay selectable.
++describe("pickableTerms", () => {
++  const terms = [
++    { code: "DISC", category: "GENERAL", isProductwise: true },
++    { code: "VAT", category: "GENERAL", isProductwise: false },
++    { code: "ROUND", category: "ROUNDED", isProductwise: false },
++    { code: "CUSTOMS", category: "ADDITIONAL", isProductwise: false },
++  ];
++  const codes = (r: { code: string }[]) => r.map((t) => t.code);
++  it("a bill (exclude ADDITIONAL) keeps GENERAL and ROUNDED terms and hides the additional charge", () => {
++    expect(codes(pickableTerms(terms, { excludeCategory: "ADDITIONAL" }))).toEqual(["DISC", "VAT", "ROUND"]);
++  });
++  it("still filters by one category and by line-wise or document-wise", () => {
++    expect(codes(pickableTerms(terms, { category: "ADDITIONAL" }))).toEqual(["CUSTOMS"]);
++    expect(codes(pickableTerms(terms, { excludeCategory: "ADDITIONAL", productwiseOnly: true }))).toEqual(["DISC"]);
++    expect(codes(pickableTerms(terms, { excludeCategory: "ADDITIONAL", productwiseOnly: false }))).toEqual(["VAT", "ROUND"]);
++    expect(codes(pickableTerms(terms, {}))).toEqual(["DISC", "VAT", "ROUND", "CUSTOMS"]);
++  });
++});
+ 
+ // The due date on a bill follows its invoice date and due days: whole calendar days, month and year ends included, never a timezone slip.
+ describe("addDaysIso", () => {
+diff --git a/tests/seed.purchaseTerms.test.ts b/tests/seed.purchaseTerms.test.ts
+new file mode 100644
+index 0000000..9d45d54
+--- /dev/null
++++ b/tests/seed.purchaseTerms.test.ts
+@@ -0,0 +1,32 @@
++import { beforeAll, describe, expect, it } from "vitest";
++import { sql } from "drizzle-orm";
++import { DB_READY } from "./helpers";
++
++// The demo company's charge terms, so a cost assessment (ADDITIONAL terms) and a service bill (VAT) can be tried right after `pnpm db:seed` / `pnpm db:reset`.
++describe.skipIf(!DB_READY)("Seeded purchase terms (demo company)", () => {
++  let terms: any[] = [];
++  beforeAll(async () => {
++    const { db } = await import("../server/db");
++    terms = await db.execute(sql`
++      select t.code, t.category, t.nature, t."distributeToLines" as distribute, t."allocationBasis" as basis, g.code as ledger
++        from "PurchaseTerm" t join "Company" c on c.id = t."companyId" left join "GeneralLedger" g on g.id = t."generalLedgerId"
++       where c.code = 'ABC'`) as any[];
++  });
++  const term = (code: string) => terms.find((t) => t.code === code);
++
++  it("has customs duty and excise as ADDITIONAL charges that are capitalised into the lines and post to a ledger", () => {
++    expect(terms.length, "the demo company is not seeded: run pnpm db:seed").toBeGreaterThan(0);
++    expect(term("CUSTOMS")).toMatchObject({ category: "ADDITIONAL", nature: "ADDITIVE", distribute: true, basis: "VALUE", ledger: "GL040" });
++    expect(term("EXCISE")).toMatchObject({ category: "ADDITIONAL", nature: "ADDITIVE", distribute: true, basis: "QUANTITY", ledger: "GL040" });
++  });
++
++  it("has an input VAT term for service bills with its own VAT ledger, and keeps the original terms", () => {
++    expect(term("VAT")).toMatchObject({ category: "GENERAL", nature: "ADDITIVE", ledger: "GL070" });
++    expect(terms.map((t) => t.code)).toEqual(expect.arrayContaining(["DISC", "FREIGHT", "ROUND"]));
++    expect(term("ROUND")).toMatchObject({ category: "ROUNDED" });
++  });
++
++  it("has each term once", () => {
++    expect(new Set(terms.map((t) => t.code)).size).toBe(terms.length);
++  });
++});

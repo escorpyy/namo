@@ -141,6 +141,13 @@
       "when": 1793961658533,
       "tag": "0019_vendor_invoice_check_in_service",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794022622978,
+      "tag": "0020_multiple_assessments_per_bill",
+      "breakpoints": true
     }
   ]
 }
