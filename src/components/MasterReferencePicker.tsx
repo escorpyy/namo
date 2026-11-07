@@ -81,8 +81,6 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
   const [view, setView] = useState<"all" | "recent" | "frequent">("all");
   const [activeIndex, setActiveIndex] = useState(0);
   const [touched, setTouched] = useState(false);
-  // Focusing the field opens the list; our own programmatic re-focus (after choose / close) must not reopen it.
-  const suppressFocusOpen = useRef(false);
   // Enter picks the highlighted row only after the user typed, moved or the row is the current value; a bare Enter never picks "the first one".
   const navigated = useRef(false);
   const current = value === "" ? undefined : options.find((option) => option.value === value);
@@ -114,14 +112,12 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
   const showNone = clearable && !query && !findCode && !findName && view === "all";
   const rows = useMemo(() => (showNone ? [NONE, ...filtered] : filtered), [showNone, filtered]);
 
-  // Give focus back to the field without that focus reopening the list.
+  // Give focus back to the field after choosing / closing the dialog.
   const refocusTrigger = (after?: (el: HTMLInputElement) => void) => {
     requestAnimationFrame(() => {
       const el = triggerRef.current;
       if (!el) return;
-      suppressFocusOpen.current = true;
       el.focus();
-      suppressFocusOpen.current = false;
       after?.(el);
     });
   };
@@ -260,12 +256,8 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
           placeholder={placeholder}
           disabled={disabled}
           value={currentLabel}
-          onFocus={() => {
-            // Landing on the field shows the choices straight away.
-            if (suppressFocusOpen.current || disabled || open) return;
-            openDialog();
-          }}
-          onClick={() => { if (!open) openDialog(); }}
+          // Focus only selects the text; the dialog opens on the first keystroke, or on Space / F4 / Alt+ArrowDown / ArrowDown.
+          onFocus={(event) => event.currentTarget.select()}
           onBlur={() => {
             // The list taking focus is not "leaving the field".
             if (open) return;
