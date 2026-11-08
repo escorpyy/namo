@@ -5,7 +5,7 @@ import { Combobox, type ComboOption } from "../../components/Combobox";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
 import { COMMON_HELP, Field, FormSection, HINTS, Pill, focusStep, formEnterKey, money } from "../../components/purchase/Bits";
-import { EmptyPanel, HeaderSummary, SidePanel, VendorPanel } from "../../components/purchase/BillPanels";
+import { EmptyPanel, HeaderSummary, SidePanel, VendorPanel, usePanelState } from "../../components/purchase/BillPanels";
 import { DateField, TextField, VendorFields } from "../../components/purchase/HeadFields";
 import { LinesGrid, TermsGrid } from "../../components/purchase/LinesGrid";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
@@ -75,17 +75,6 @@ export interface BillEntryProps extends PurchaseScreenProps {
   onClose: (tabId: number) => void;
   onListChanged: () => void;
 }
-
-const usePanelState = (key: string) => {
-  const [collapsed, setCollapsed] = useState(() => {
-    try { const saved = localStorage.getItem(key); return saved === null ? window.innerWidth < 1200 : saved === "1"; } catch { return false; }
-  });
-  const toggle = useCallback(() => setCollapsed((current) => {
-    try { localStorage.setItem(key, current ? "0" : "1"); } catch { /* the panel still toggles without storage */ }
-    return !current;
-  }), [key]);
-  return [collapsed, toggle] as const;
-};
 
 export default function PurchaseBillEntry(p: BillEntryProps) {
   const cfg = useMemo<DocConfig<BForm>>(() => ({

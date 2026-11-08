@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Eye, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil } from "lucide-react";
 import { purchaseApi, type PListRow, type PLookups } from "../../api";
 import { adToBs } from "../../lib/nepaliDate";
@@ -38,11 +38,23 @@ export function SidePanel({ side, title, collapsed, onToggle, shortcut, children
   );
 }
 
+// Whether a side panel is folded, remembered per panel (first visit: folded on a narrow window).
+export const usePanelState = (key: string) => {
+  const [collapsed, setCollapsed] = useState(() => {
+    try { const saved = localStorage.getItem(key); return saved === null ? window.innerWidth < 1200 : saved === "1"; } catch { return false; }
+  });
+  const toggle = useCallback(() => setCollapsed((current) => {
+    try { localStorage.setItem(key, current ? "0" : "1"); } catch { /* the panel still toggles without storage */ }
+    return !current;
+  }), [key]);
+  return [collapsed, toggle] as const;
+};
+
 export function EmptyPanel({ children }: { children: ReactNode }) {
   return <p className="rounded-sm border border-dashed border-slate-300 px-2.5 py-3 text-[12px] leading-snug text-slate-500">{children}</p>;
 }
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
+export function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="border-b border-slate-200 py-1 last:border-0">
       <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</dt>

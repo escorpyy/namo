@@ -27,6 +27,7 @@ interface Props {
   previewReady: boolean;
   onCellsChange: (updates: AssessmentAllocationCellUpdate[]) => void;
   onMessage: (message: string) => void;
+  fill?: boolean; // take the height of the parent and scroll inside it (the fixed assessment screen)
 }
 
 const money = (value: unknown) => {
@@ -45,7 +46,7 @@ const totalEntered = (term: AssessmentAllocationColumn) => {
   return { amount, valid };
 };
 
-export function AssessmentAllocationGrid({ lines, terms, editing, busy, previewReady, onCellsChange, onMessage }: Props) {
+export function AssessmentAllocationGrid({ lines, terms, editing, busy, previewReady, onCellsChange, onMessage, fill }: Props) {
   const targetsReady = terms.every((term) => term.result?.finalAmount != null || term.result?.amount != null);
   const pasteRange = (event: React.ClipboardEvent<HTMLInputElement>, startRow: number, startColumn: number) => {
     const text = event.clipboardData.getData("text/plain").replace(/\r/g, "");
@@ -94,8 +95,8 @@ export function AssessmentAllocationGrid({ lines, terms, editing, busy, previewR
 
   const columnCount = 9 + terms.length;
   return (
-    <>
-      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+    <div className={fill ? "flex min-h-0 flex-1 flex-col" : undefined}>
+      <div className="mb-1 flex shrink-0 flex-wrap items-center justify-between gap-2">
         <p className="text-[10px] text-slate-600">
           {terms.length
             ? "Edit cells inline · paste an Excel/Sheets range · Enter/Tab moves across cells · ↑/↓ moves by product."
@@ -105,7 +106,7 @@ export function AssessmentAllocationGrid({ lines, terms, editing, busy, previewR
           Auto-fill splits
         </button>}
       </div>
-      <div className="max-h-[40vh] overflow-auto overscroll-contain border border-slate-200" aria-label="Product allocation and landed cost grid">
+      <div className={`${fill ? "min-h-0 flex-1" : "max-h-[40vh]"} overflow-auto overscroll-contain border border-slate-200`} aria-label="Product allocation and landed cost grid">
         <table className="w-full min-w-[900px] table-fixed text-[10px]">
           <thead className="sticky top-0 z-20 bg-slate-50 text-slate-600 shadow-sm">
             <tr>
@@ -183,6 +184,6 @@ export function AssessmentAllocationGrid({ lines, terms, editing, busy, previewR
           </tfoot>}
         </table>
       </div>
-    </>
+    </div>
   );
 }

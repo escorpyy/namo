@@ -10,7 +10,7 @@ import StockOpeningScreen from "./screens/StockOpeningScreen";
 import PurchaseOrderScreen from "./screens/purchase/PurchaseOrderScreen";
 import PurchaseChallanScreen from "./screens/purchase/PurchaseChallanScreen";
 import PurchaseBillWorkspace from "./screens/purchase/PurchaseBillWorkspace";
-import ImportCostAssessmentScreen from "./screens/purchase/ImportCostAssessmentScreen";
+import ImportCostAssessmentWorkspace from "./screens/purchase/ImportCostAssessmentWorkspace";
 import { MASTERS } from "../shared/masters";
 
 export default function App() {
@@ -114,7 +114,7 @@ export default function App() {
           };
           return screen === "purchase-orders" ? <PurchaseOrderScreen key={k} {...pp} />
             : screen === "purchase-challans" ? <PurchaseChallanScreen key={k} {...pp} onCreateBill={(id) => { setFromChallan({ id, n: Date.now() }); dirtyRef.current = false; setScreen("purchase-bills"); }} />
-            : screen === "purchase-import-assessments" ? <ImportCostAssessmentScreen key={k} {...pp} />
+            : screen === "purchase-import-assessments" ? <ImportCostAssessmentWorkspace key={k} {...pp} />
             : <PurchaseBillWorkspace key={k} {...pp} fromChallan={fromChallan} />;
         })() : screen === "stock-opening" ? (
           <StockOpeningScreen
