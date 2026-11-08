@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDaysIso, blankLine, blankTerm, copyBillForm, pickableTerms } from "../src/lib/purchaseForm";
+import { addDaysIso, blankLine, blankTerm, copyBillForm, dialogTermRows, dialogTermsToApply, isZeroTerm, pickableTerms, type Term } from "../src/lib/purchaseForm";
 
 // Copying a bill keeps what is worth re-using and drops everything that identifies the original or links it to other documents.
 describe("copyBillForm", () => {
@@ -67,5 +67,66 @@ describe("addDaysIso", () => {
     expect(addDaysIso("?2025", 5)).toBe("");
     expect(addDaysIso("2025-10-14", -1)).toBe("");
     expect(addDaysIso("2025-10-14", 1.5)).toBe("");
+  });
+});
+
+// The terms dialog opens with every term of its kind in sequence order, all at zero; only what the user fills in is kept on Apply.
+describe("terms dialog rows", () => {
+  const term = (over: Partial<Term> & { id: number; code: string }): Term => ({
+    name: over.code, category: "GENERAL", nature: "ADDITIVE", isProductwise: false, isMandatory: false, sequence: 10, defaultCalcType: "PERCENT", defaultValue: "13",
+    calcBase: "ITEM_VALUE", baseTermId: null, distributeToLines: false, isActive: true, ...over,
+  });
+  const masters = [
+    term({ id: 1, code: "VAT", sequence: 30, isMandatory: true }),
+    term({ id: 2, code: "DISC", sequence: 10, isProductwise: true, nature: "DEDUCTIVE" }),
+    term({ id: 3, code: "FREIGHT", sequence: 20, isProductwise: true, defaultCalcType: "AMOUNT", defaultValue: "100" }),
+    term({ id: 4, code: "OLD", sequence: 5, isProductwise: true, isActive: false }),
+    term({ id: 5, code: "CUSTOMS", sequence: 1, isProductwise: true, category: "ADDITIONAL" }),
+    term({ id: 6, code: "SCHEME", sequence: 10, isProductwise: true }),
+  ];
+  const byId = new Map(masters.map((m) => [String(m.id), m]));
+
+  it("lists the line-wise terms by sequence (ties by code), skipping inactive and ADDITIONAL ones, every value at zero", () => {
+    const rows = dialogTermRows(masters, [], { productwise: true, lineNumber: 3 });
+    expect(rows.map((r) => r.termId)).toEqual(["2", "6", "3"]);
+    expect(rows.every((r) => r.lineNumber === "3")).toBe(true);
+    expect(rows.map(isZeroTerm)).toEqual([true, true, true]);
+    expect(rows[0]).toMatchObject({ calcType: "PERCENT", rate: "0", inputAmount: "" });
+    expect(rows[2]).toMatchObject({ calcType: "AMOUNT", rate: "", inputAmount: "0" });
+  });
+  it("lists the document-wise terms for the header, with no line number", () => {
+    const rows = dialogTermRows(masters, [], { productwise: false });
+    expect(rows.map((r) => r.termId)).toEqual(["1"]);
+    expect(rows[0].lineNumber).toBe("");
+  });
+  it("keeps the values of a term already on the document and its row key", () => {
+    const saved = blankTerm({ termId: "3", lineNumber: "3", calcType: "AMOUNT", inputAmount: "250", finalAmount: "250.00" });
+    const rows = dialogTermRows(masters, [saved], { productwise: true, lineNumber: 3 });
+    expect(rows.map((r) => r.termId)).toEqual(["2", "6", "3"]);
+    expect(rows[2]).toBe(saved);
+  });
+  it("keeps a saved inactive term in its sequence slot, and a saved ADDITIONAL term (never offered) at the end", () => {
+    const inactive = blankTerm({ termId: "4", lineNumber: "1", rate: "5" });
+    const additional = blankTerm({ termId: "5", lineNumber: "1", rate: "2" });
+    const rows = dialogTermRows(masters, [inactive, additional], { productwise: true, lineNumber: 1 });
+    expect(rows.map((r) => r.termId)).toEqual(["4", "2", "6", "3", "5"]);
+    expect(rows[0]).toBe(inactive);
+    expect(rows[4]).toBe(additional);
+  });
+  it("treats an empty, zero or 0.00 value as zero, using the override when one is set", () => {
+    expect(isZeroTerm(blankTerm({ termId: "2", rate: "" }))).toBe(true);
+    expect(isZeroTerm(blankTerm({ termId: "2", rate: "0.00" }))).toBe(true);
+    expect(isZeroTerm(blankTerm({ termId: "2", rate: "5" }))).toBe(false);
+    expect(isZeroTerm(blankTerm({ termId: "3", calcType: "AMOUNT", inputAmount: "10" }))).toBe(false);
+    expect(isZeroTerm(blankTerm({ termId: "3", calcType: "AMOUNT", inputAmount: "10", isOverridden: true, overrideAmount: "0" }))).toBe(true);
+    expect(isZeroTerm(blankTerm({ termId: "3", calcType: "AMOUNT", inputAmount: "0", isOverridden: true, overrideAmount: "7" }))).toBe(false);
+  });
+  it("Apply drops zero rows and blanks, keeps filled rows, and keeps a mandatory term at 0", () => {
+    const rows = dialogTermRows(masters, [], { productwise: true, lineNumber: 1 }).map((r) => (r.termId === "3" ? { ...r, inputAmount: "250" } : r));
+    expect(dialogTermsToApply([...rows, blankTerm()], byId).map((r) => r.termId)).toEqual(["3"]);
+    const header = dialogTermRows(masters, [], { productwise: false });
+    const kept = dialogTermsToApply(header.map((r) => ({ ...r, rate: "" })), byId);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toMatchObject({ termId: "1", rate: "0" });
   });
 });

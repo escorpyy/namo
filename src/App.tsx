@@ -9,7 +9,7 @@ import OpeningBalanceScreen from "./screens/OpeningBalanceScreen";
 import StockOpeningScreen from "./screens/StockOpeningScreen";
 import PurchaseOrderScreen from "./screens/purchase/PurchaseOrderScreen";
 import PurchaseChallanScreen from "./screens/purchase/PurchaseChallanScreen";
-import PurchaseBillScreen from "./screens/purchase/PurchaseBillScreen";
+import PurchaseBillWorkspace from "./screens/purchase/PurchaseBillWorkspace";
 import ImportCostAssessmentScreen from "./screens/purchase/ImportCostAssessmentScreen";
 import { MASTERS } from "../shared/masters";
 
@@ -115,7 +115,7 @@ export default function App() {
           return screen === "purchase-orders" ? <PurchaseOrderScreen key={k} {...pp} />
             : screen === "purchase-challans" ? <PurchaseChallanScreen key={k} {...pp} onCreateBill={(id) => { setFromChallan({ id, n: Date.now() }); dirtyRef.current = false; setScreen("purchase-bills"); }} />
             : screen === "purchase-import-assessments" ? <ImportCostAssessmentScreen key={k} {...pp} />
-            : <PurchaseBillScreen key={k} {...pp} fromChallan={fromChallan} />;
+            : <PurchaseBillWorkspace key={k} {...pp} fromChallan={fromChallan} />;
         })() : screen === "stock-opening" ? (
           <StockOpeningScreen
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} fyId={fyId}

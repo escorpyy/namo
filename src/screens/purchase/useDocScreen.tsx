@@ -27,6 +27,23 @@ export interface DocConfig<F extends object> {
 const sig = (f: unknown) => JSON.stringify(f, (k, v) => (k === "key" || k === "link" || k === "finalAmount" ? undefined : v));
 const q = (sel: string) => document.querySelector<HTMLElement>(sel);
 
+// What a screen keeps of one document so it can be put back later (the bill workspace unmounts the entry of a tab you switch away from).
+export interface DocSnapshot<F extends object> { doc: PDoc | null; mode: Mode; form: F; baseSig: string; selectedId: number | null }
+
+// Optional hooks for a screen that is one tab among several (the purchase bill workspace). Order and challan screens pass none of them.
+export interface DocTabOptions<F extends object> {
+  sharedLookups?: PLookups;              // already loaded by the workspace: do not fetch again
+  skipList?: boolean;                    // the workspace owns the list
+  initialDocId?: number | null;          // open this saved document in view mode
+  initialForm?: F;                       // start a new document from this form (copy of a bill)
+  restore?: DocSnapshot<F> | null;       // put a document back exactly as it was left
+  snapshotRef?: MutableRefObject<DocSnapshot<F> | null>;
+  onNew?: () => void;                    // New (F3 / Ctrl+N): open another tab instead of resetting this one
+  onDeleted?: () => void;                // after a delete: close this tab instead of showing a blank form
+  onListChanged?: () => void;            // after a save / delete / workflow action: refresh the workspace list
+  beforeSave?: () => boolean;            // return false to stop a save (the screen handled the keypress itself)
+}
+
 export interface ActionSpec {
   action: string;
   title: string;
@@ -37,9 +54,10 @@ export interface ActionSpec {
   done: (doc: PDoc, result: Record<string, any>) => string;
 }
 
-export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extra: { setStatus: (s: StatusInfo) => void; dirtyRef: MutableRefObject<boolean>; externalMessage: { text: string; n: number } | null; hints: string[] }) {
+export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extra: { setStatus: (s: StatusInfo) => void; dirtyRef: MutableRefObject<boolean>; externalMessage: { text: string; n: number } | null; hints: string[] } & DocTabOptions<F>) {
   const { kind } = cfg;
-  const [lookups, setLookups] = useState<PLookups | null>(null);
+  const skipList = !!extra.skipList;
+  const [lookups, setLookups] = useState<PLookups | null>(extra.sharedLookups ?? null);
   const [rows, setRows] = useState<PListRow[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
@@ -73,29 +91,47 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
 
   // ---- loading ----
   const loadList = useCallback(async () => {
+    if (skipList) return;
     try {
       const r = await purchaseApi.list(kind, { companyId: ctx.companyId, branchId: ctx.branchId, fiscalYear: ctx.fyCode, status: statusFilter || undefined, search: search.trim() || undefined });
       setRows(r.rows); setTotal(r.total);
     } catch (e) { flash((e as Error).message, "err"); }
-  }, [kind, ctx.companyId, ctx.branchId, ctx.fyCode, statusFilter, search, flash]);
+  }, [kind, ctx.companyId, ctx.branchId, ctx.fyCode, statusFilter, search, flash, skipList]);
   useEffect(() => { const t = setTimeout(() => void loadList(), search ? 250 : 0); return () => clearTimeout(t); }, [loadList, search]);
 
   const show = (f: F, m: Mode) => { setFormState(f); setBaseSig(sig(f)); setMode(m); setErrors({}); };
 
   useEffect(() => {
     let live = true;
-    purchaseApi.lookups(ctx.companyId).then((l) => {
-      if (!live) return;
+    const init = async (l: PLookups) => {
       setLookups(l);
-      show(cfg.emptyForm(l), "new");
+      const snap = extra.restore;
+      if (snap) {
+        setSelectedId(snap.selectedId); setDoc(snap.doc); setFormState(snap.form); setBaseSig(snap.baseSig); setMode(snap.mode); setErrors({});
+        flash("Ready", "info");
+        return;
+      }
+      if (extra.initialDocId) {
+        try {
+          const d = await purchaseApi.get(kind, extra.initialDocId, ctx.companyId);
+          if (!live) return;
+          setSelectedId(d.id); setDoc(d); show(cfg.toForm(d, l), "view");
+          flash(`Opened ${cfg.singular.toLowerCase()}`, "info");
+        } catch (e) { if (live) flash((e as Error).message, "err"); }
+        return;
+      }
+      show(extra.initialForm ?? cfg.emptyForm(l), "new");
       flash("Ready", "info");
       setTimeout(() => q("[data-zone=form] [data-field]:not(:disabled)")?.focus(), 60);
-    }).catch((e: Error) => live && flash(e.message, "err"));
+    };
+    if (extra.sharedLookups) void init(extra.sharedLookups);
+    else purchaseApi.lookups(ctx.companyId).then((l) => { if (live) void init(l); }).catch((e: Error) => live && flash(e.message, "err"));
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx.companyId]);
 
   useEffect(() => { extra.dirtyRef.current = dirty; });
+  useEffect(() => { if (extra.snapshotRef && form) extra.snapshotRef.current = { doc, mode, form, baseSig, selectedId }; });
   useEffect(() => { if (extra.externalMessage) flash(extra.externalMessage.text, "info"); }, [extra.externalMessage, flash]);
   useEffect(() => extra.setStatus({ mode, count: total, shown: rows.length, message: msg.text, kind: msg.kind, hints: extra.hints }), [mode, total, rows.length, msg, extra.hints, extra.setStatus]);
   useEffect(() => {
@@ -107,6 +143,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
 
   const setForm = (f: F) => { setFormState(f); };
   const patch = (p: Partial<F>) => setFormState((f) => (f ? { ...f, ...p } : f));
+  const refreshList = () => { void loadList(); extra.onListChanged?.(); };
   const clearError = (...keys: string[]) => setErrors((e) => { const n = { ...e }; for (const k of keys) delete n[k]; return n; });
 
   // ---- guard ----
@@ -156,6 +193,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
   // ---- save ----
   const save = async (): Promise<boolean> => {
     if (mode === "view" || !form || !lookups || busy.current) return false;
+    if (extra.beforeSave && !extra.beforeSave()) return false;
     const errs = cfg.validate(form, lookups);
     const first = Object.keys(errs).find((k) => errs[k]);
     if (first) {
@@ -172,7 +210,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
         : await purchaseApi.create(kind, { ...body, companyId: ctx.companyId, branchId: ctx.branchId });
       open(r.document);
       flash(`${mode === "edit" ? "Updated" : "Saved"} ${cfg.label(r.document)}`, "ok");
-      void loadList();
+      refreshList();
       return true;
     } catch (e) {
       if (e instanceof ApiError && e.field) setErrors({ [e.field]: e.message });
@@ -197,10 +235,10 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
             setDialog(null);
             try {
               await purchaseApi.remove(kind, target.id, ctx.companyId, ctx.userId);
-              setSelectedId(null); setDoc(null);
-              if (lookups) show(cfg.emptyForm(lookups), "new");
+              if (extra.onDeleted) extra.onDeleted();
+              else { setSelectedId(null); setDoc(null); if (lookups) show(cfg.emptyForm(lookups), "new"); }
               flash(`Deleted ${cfg.label(target)}`, "ok");
-              void loadList();
+              refreshList();
             } catch (e) { flash((e as Error).message, "err"); }
           },
         },
@@ -225,7 +263,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
               const r = await purchaseApi.action(kind, target.id, ctx.companyId, spec.action, { ...spec.payload, userId: ctx.userId });
               open(r.document);
               flash(spec.done(r.document, r.result), "ok");
-              void loadList();
+              refreshList();
             } catch (e) { flash((e as Error).message, "err"); }
           },
         },
@@ -235,8 +273,8 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
   };
 
   // ---- shortcuts (one listener; the latest handlers come from a ref) ----
-  const H = useRef({ save, newDoc, edit, askDelete, cancel, moveSel, mode, dirty, dialogOpen: false, help: false, listCollapsed, setListCollapsed, listStorageKey, toggleList });
-  H.current = { save, newDoc, edit, askDelete, cancel, moveSel, mode, dirty, dialogOpen: !!dialog, help, listCollapsed, setListCollapsed, listStorageKey, toggleList };
+  const H = useRef({ save, newDoc, onNew: extra.onNew, edit, askDelete, cancel, moveSel, mode, dirty, dialogOpen: false, help: false, listCollapsed, setListCollapsed, listStorageKey, toggleList });
+  H.current = { save, newDoc, onNew: extra.onNew, edit, askDelete, cancel, moveSel, mode, dirty, dialogOpen: !!dialog, help, listCollapsed, setListCollapsed, listStorageKey, toggleList };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const h = H.current;
@@ -244,7 +282,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
       if (h.help) { if (e.key === "Escape" || e.key === "F1") { e.preventDefault(); setHelp(false); } return; }
       const k = e.key, kl = k.toLowerCase(), ctrl = e.ctrlKey || e.metaKey, typing = (e.target as HTMLElement).tagName === "INPUT" || (e.target as HTMLElement).tagName === "TEXTAREA";
       if (ctrl && kl === "s") { e.preventDefault(); void h.save(); }
-      else if ((ctrl && kl === "n") || k === "F3") { e.preventDefault(); h.newDoc(); }
+      else if ((ctrl && kl === "n") || k === "F3") { e.preventDefault(); if (h.onNew) h.onNew(); else h.newDoc(); }
       else if (k === "F2") { e.preventDefault(); h.edit(); }
       else if ((ctrl && k === "Delete") || (e.altKey && kl === "d")) { e.preventDefault(); h.askDelete(); }
       else if (k === "F4" || (ctrl && kl === "f") || (k === "/" && !typing)) { e.preventDefault(); searchRef.current?.focus(); }
@@ -271,7 +309,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
   const err = useMemo(() => (k: string) => errors[k], [errors]);
 
   return {
-    lookups, rows, total, search, setSearch, statusFilter, setStatusFilter, selectedId, doc, mode, form, setForm, patch, errors, err, clearError, saving, dirty,
+    lookups, rows, total, search, setSearch, statusFilter, setStatusFilter, selectedId, doc, mode, form, setForm, patch, errors, setErrors, err, clearError, saving, dirty,
     listCollapsed, toggleList,
     dialog, setDialog, help, setHelp, searchRef, flash, newDoc, select, edit, cancel, save, askDelete, run, open, guard, reload: loadList,
     readOnly: mode === "view",

@@ -57,6 +57,21 @@ export function focusStep(el: Element, dir: 1 | -1) {
   return true;
 }
 
+// Enter / Shift+Enter walks the fields of a purchase form in document order (Ctrl+Enter from a multi-line field).
+export function formEnterKey(e: React.KeyboardEvent) {
+  const el = e.target as HTMLElement;
+  if (e.key !== "Enter" || el.getAttribute("role") === "combobox" || !el.hasAttribute("data-field")) return;
+  if (el instanceof HTMLTextAreaElement) {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    focusStep(el, e.shiftKey ? -1 : 1);
+    return;
+  }
+  if (!(el instanceof HTMLInputElement || el instanceof HTMLSelectElement)) return;
+  e.preventDefault();
+  focusStep(el, e.shiftKey ? -1 : 1);
+}
+
 interface ShellProps<F extends object> {
   s: DocScreen<F>;
   title: string;
@@ -77,19 +92,7 @@ interface ShellProps<F extends object> {
 // The frame every purchase document screen sits in: heading, the form (children), the buttons, and the document list on the right.
 export function DocShell<F extends object>({ s, title, singular, branchName, fyCode, statusOptions, pill, notice, canEdit, canDelete, actions, listRow, help, children }: ShellProps<F>) {
   const view = s.mode === "view";
-  const onFormKey = (e: React.KeyboardEvent) => {
-    const el = e.target as HTMLElement;
-    if (e.key !== "Enter" || el.getAttribute("role") === "combobox" || !el.hasAttribute("data-field")) return;
-    if (el instanceof HTMLTextAreaElement) {
-      if (!e.ctrlKey && !e.metaKey) return;
-      e.preventDefault();
-      focusStep(el, e.shiftKey ? -1 : 1);
-      return;
-    }
-    if (!(el instanceof HTMLInputElement || el instanceof HTMLSelectElement)) return;
-    e.preventDefault();
-    focusStep(el, e.shiftKey ? -1 : 1);
-  };
+  const onFormKey = formEnterKey;
   return (
     <>
       <main className="flex-1 min-w-0 flex min-h-0">

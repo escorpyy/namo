@@ -60,9 +60,10 @@ interface Props {
   rateLabel?: string;
   onOpenTerms?: (index: number) => void;
   termSummary?: (index: number) => { amount: string; count: number };
+  fill?: boolean; // take the height of the parent and scroll the rows inside it (the fixed bill entry screen)
 }
 
-export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, errors, calendar, clearError, contextKey, lockProducts, onOpenTerms, termSummary }: Props) {
+export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, errors, calendar, clearError, contextKey, lockProducts, onOpenTerms, termSummary, fill }: Props) {
   const unitCode = useMemo(() => new Map(lookups.units.map((u) => [u.id, u.code])), [lookups.units]);
   const productOpts = useMemo<ReferenceOption[]>(() => lookups.products.map((p) => ({ value: String(p.id), label: `${p.code} — ${p.description}`, code: p.code, name: p.description, detail: p.type.replaceAll("_", " "), searchText: `${p.type} ${p.tracksBatch ? "batch" : ""} ${p.tracksExpiry ? "expiry" : ""}`, isActive: p.isActive, badge: p.type === "STOCK" ? undefined : p.type.replace("_", " ").toLowerCase() })), [lookups.products]);
   const locOpts = useMemo<ReferenceOption[]>(() => lookups.locations.map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, isActive: l.isActive })), [lookups.locations]);
@@ -178,12 +179,12 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
   const live = lines.filter((l) => !isBlankLine(l)).length;
 
   return (
-    <div className="border border-slate-400 bg-white/60">
-      <div className="overflow-x-auto outline-none" data-grid="lines" data-nav="lines-grid" onKeyDown={onKey} onKeyDownCapture={onKeyCapture} tabIndex={0} aria-label={`${kind} line items`}
+    <div className={`border border-slate-400 bg-white/60 ${fill ? "flex min-h-0 flex-1 flex-col" : ""}`}>
+      <div className={`${fill ? "min-h-0 flex-1 overflow-auto" : "overflow-x-auto"} outline-none`} data-grid="lines" data-nav="lines-grid" onKeyDown={onKey} onKeyDownCapture={onKeyCapture} tabIndex={0} aria-label={`${kind} line items`}
         onFocus={(e) => { if (e.target === e.currentTarget) setRowSel(Math.max(0, Math.min(lastRow.current, lines.length - 1))); else { const r = rowOf(e.target as Element); if (r >= 0) lastRow.current = r; } }}
         onBlur={(e) => { if (e.target === e.currentTarget) setRowSel(null); }}>
         <div className="min-w-max">
-          <div style={{ gridTemplateColumns: layout.template }} className="grid gap-x-1 px-2 py-1 text-[11px] font-semibold text-slate-600 border-b border-slate-300 bg-slate-100">
+          <div style={{ gridTemplateColumns: layout.template }} className="sticky top-0 z-10 grid gap-x-1 px-2 py-1 text-[11px] font-semibold text-slate-600 border-b border-slate-300 bg-slate-100">
             {layout.heads.map((h, i) => <span key={i} className={RIGHT_HEAD.has(h) ? "text-right pr-2" : ""}>{h}</span>)}
           </div>
           {lines.map((l, i) => {
@@ -249,7 +250,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
         </div>
       </div>
       {errors.lines && <p className="px-3 py-1 text-[12px] text-red-700">{errors.lines}</p>}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 py-1.5 bg-slate-50 border-t border-slate-300">
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-2 py-1.5 bg-slate-50 border-t border-slate-300">
         {!readOnly && <button type="button" data-nav="add-line" className="btn h-7" onClick={() => addRow()}><Plus size={13} /> Add line {kind === "bill" && <span className="kbd">F6</span>}</button>}
         <span className="flex-1" />
         <span className="text-[12px]">Lines <b className="tabular-nums">{live}</b></span>

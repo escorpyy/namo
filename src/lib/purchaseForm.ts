@@ -188,6 +188,48 @@ export function pickableTerms<T extends { category: string; isProductwise: boole
   return terms.filter((t) => (!f.category || t.category === f.category) && (!f.excludeCategory || t.category !== f.excludeCategory) && (f.productwiseOnly === undefined || t.isProductwise === f.productwiseOnly));
 }
 
+const zeroTermRow = (m: Term, lineNumber?: number): TermRow => blankTerm({
+  termId: String(m.id), calcType: m.defaultCalcType, rate: m.defaultCalcType === "PERCENT" ? "0" : "", inputAmount: m.defaultCalcType === "AMOUNT" ? "0" : "",
+  lineNumber: m.isProductwise ? String(lineNumber ?? 1) : "",
+});
+
+// The rows the terms dialog opens with: every active term of its kind (line-wise for a line, document-wise for the header) in the master's
+// sequence order. A term already on the document keeps its values; every other term starts at zero, so the user only types the ones that apply.
+// Terms already on the document that the picker would no longer offer (inactive, ADDITIONAL) stay visible at the end instead of vanishing.
+export function dialogTermRows(masters: Term[], existing: TermRow[], scope: { productwise: boolean; lineNumber?: number }): TermRow[] {
+  const offered = pickableTerms(masters, { excludeCategory: "ADDITIONAL", productwiseOnly: scope.productwise })
+    .filter((m) => m.isActive || existing.some((t) => t.termId === String(m.id)))
+    .sort((a, b) => a.sequence - b.sequence || a.code.localeCompare(b.code));
+  const used = new Set<string>();
+  const rows = offered.map((m) => {
+    const found = existing.find((t) => t.termId === String(m.id) && !used.has(t.key));
+    if (!found) return zeroTermRow(m, scope.lineNumber);
+    used.add(found.key);
+    return found;
+  });
+  return [...rows, ...existing.filter((t) => !used.has(t.key))];
+}
+
+// A term row that adds or takes nothing: the value it would use (override, rate or amount) is empty or zero.
+export function isZeroTerm(t: TermRow): boolean {
+  const v = (t.isOverridden ? t.overrideAmount : t.calcType === "PERCENT" ? t.rate : t.inputAmount).trim();
+  if (v === "") return true;
+  const x = parseDec(v);
+  return !!x && x.n === 0n;
+}
+
+// What "Apply" keeps from the dialog: rows left at zero are dropped (they would only clutter the bill), except a mandatory term, which must stay on
+// the document even at zero, so its empty value is written as 0.
+export function dialogTermsToApply(draft: TermRow[], masters: Map<string, Term>): TermRow[] {
+  return draft.flatMap((t) => {
+    if (isBlankTerm(t)) return [];
+    if (!isZeroTerm(t)) return [t];
+    if (!masters.get(t.termId)?.isMandatory) return [];
+    const zero = (v: string) => (v.trim() === "" ? "0" : v);
+    return [t.isOverridden ? { ...t, overrideAmount: zero(t.overrideAmount) } : t.calcType === "PERCENT" ? { ...t, rate: zero(t.rate) } : { ...t, inputAmount: zero(t.inputAmount) }];
+  });
+}
+
 // The form for a NEW draft bill copied from an existing one: the same vendor, lines and charges, but nothing that identifies the original or links
 // it to other documents. The vendor invoice no./date, due date and customs declaration no./date are cleared (a repeated vendor invoice no. or a
 // repeated declaration no. is refused on save), the order and challan links are dropped, the invoice date is today's, and every row gets a new key.
