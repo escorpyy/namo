@@ -38,4 +38,75 @@
   .purchase-tab-badge { @apply grid h-6 min-w-6 shrink-0 place-items-center rounded-full bg-slate-100 px-1.5 text-[11px] font-semibold tabular-nums text-slate-600; }
   .purchase-tab-badge-alert { @apply bg-red-100 text-red-700; }
   .purchase-tab-panel { @apply min-w-0 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4; }
+
+  /* ===================================================================================================================
+     Ledger — the surface of the purchase documents (bills, orders, challans, cost assessments).
+     Cool canvas, white cards, deep ink, one cobalt action colour; the net amount on the dark totals bar is the only brass.
+     Everything is scoped under .ledger, and written with :where() so ordinary utility classes in the markup (h-7, pl-7 ...) still win.
+     =================================================================================================================== */
+  .ledger { @apply bg-canvas font-ledger text-[13px] text-ink; font-feature-settings: "calt", "kern"; }
+  .ledger .font-mono { @apply font-ledger-mono; letter-spacing: 0; }
+  .ledger ::selection { background: #cbd9ff; }
+
+  :where(.ledger) .fld {
+    @apply h-8 rounded-md border-slate-300 bg-white px-2.5 text-[13px] text-ink transition-[border-color,box-shadow] duration-100
+      placeholder:text-slate-400 hover:border-slate-400 focus:border-cobalt-700 focus:ring-[3px] focus:ring-cobalt-700/20;
+  }
+  :where(.ledger) .fld:disabled { @apply bg-slate-50 text-slate-500 hover:border-slate-300; }
+  :where(.ledger) .fld-err { @apply border-rose-500 hover:border-rose-500 focus:border-rose-600 focus:ring-rose-500/20; }
+
+  :where(.ledger) .btn {
+    @apply h-8 gap-2 rounded-md border-slate-300 bg-white px-3 font-medium text-ink shadow-[0_1px_0_rgba(17,26,47,0.04)]
+      transition-colors hover:border-slate-400 hover:bg-slate-50 active:bg-slate-100 disabled:opacity-45 disabled:hover:bg-white;
+  }
+  :where(.ledger) .btn-primary { @apply border-cobalt-800 bg-cobalt-700 text-white hover:border-cobalt-800 hover:bg-cobalt-800 active:bg-cobalt-800 disabled:hover:bg-cobalt-700; }
+  :where(.ledger) .btn-danger { @apply border-rose-800 bg-rose-700 text-white hover:bg-rose-800 disabled:hover:bg-rose-700; }
+  :where(.ledger) .kbd { @apply rounded border-slate-200 bg-slate-50 px-1 font-ledger-mono text-[10px] text-slate-500; }
+
+  /* cards and the pieces they are made of */
+  .lg-card { @apply min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white; }
+  .lg-card-head { @apply flex min-h-[42px] shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-100 px-4 py-2; }
+  .lg-card-title { @apply text-[13px] font-semibold text-ink; }
+  .lg-card-hint { @apply text-[12px] text-slate-500; }
+  .lg-title { @apply text-[21px] font-semibold leading-tight tracking-[-0.01em] text-ink; }
+  .lg-chip { @apply inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-full border border-slate-200 bg-white px-2.5 text-[12px] text-slate-600; }
+  .lg-chip b { @apply font-semibold text-ink; }
+  .lg-label { @apply text-[12px] font-medium text-slate-500; }
+  .lg-count { @apply inline-grid h-[18px] min-w-[18px] place-items-center rounded-full bg-slate-100 px-1.5 text-[11px] font-semibold tabular-nums text-slate-600; }
+
+  /* status pill: a dot plus the word, so the state reads without relying on colour alone */
+  .lg-pill { @apply inline-flex h-[22px] items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-[11.5px] font-semibold leading-none ring-1 ring-inset; }
+  .lg-pill::before { content: ""; @apply h-1.5 w-1.5 rounded-full bg-current opacity-80; }
+
+  /* lists */
+  .lg-th { @apply sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-[12px] font-semibold text-slate-500; }
+  .lg-row { @apply relative w-full border-b border-slate-100 text-left transition-colors duration-100 last:border-b-0 hover:bg-cobalt-50/70 focus:bg-cobalt-50 focus:outline-none; }
+  .lg-row:focus { box-shadow: inset 3px 0 0 0 theme("colors.cobalt.700"); }
+  .lg-row[aria-selected="true"] { @apply bg-cobalt-50; box-shadow: inset 3px 0 0 0 theme("colors.cobalt.700"); }
+
+  /* editable cells in a grid are quiet until you hover or focus them, so a full table reads as a ledger and not a wall of boxes */
+  .lg-grid .fld:not(:focus):not(.fld-err) { @apply border-transparent bg-transparent shadow-none; }
+  .lg-grid .fld:not(:focus):not(:disabled):not(.fld-err):hover { @apply border-slate-300 bg-white; }
+  .lg-grid .fld:disabled { @apply text-slate-400; }
+
+  /* the dark totals bar at the foot of an entry screen */
+  .tape { @apply bg-ink-deep text-white; }
+  .tape .btn { @apply border-white/15 bg-white/[0.07] text-white shadow-none hover:border-white/30 hover:bg-white/[0.14] active:bg-white/20 disabled:hover:bg-white/[0.07]; }
+  .tape .btn-primary { @apply border-cobalt-600 bg-cobalt-600 hover:border-cobalt-600 hover:bg-[#3a60e6] disabled:hover:bg-cobalt-600; }
+  .tape .btn-danger { @apply border-rose-600 bg-rose-600 hover:bg-rose-500; }
+  .tape .kbd { @apply border-white/20 bg-white/10 text-white/70; }
+  .tape-sep { @apply h-6 w-px bg-white/15; }
+
+  /* a changed figure settles in instead of snapping (re-triggered by giving the element a new key) */
+  @keyframes lg-settle { from { opacity: 0.35; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+  .lg-settle { animation: lg-settle 220ms ease-out; }
+
+  .lg-scroll { scrollbar-width: thin; scrollbar-color: #c3cbd9 transparent; }
+  .lg-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+  .lg-scroll::-webkit-scrollbar-thumb { background: #c9d1de; border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
+  .lg-scroll::-webkit-scrollbar-thumb:hover { background: #a9b4c7; background-clip: content-box; border: 2px solid transparent; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ledger *, .ledger *::before, .ledger *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+  }
 }

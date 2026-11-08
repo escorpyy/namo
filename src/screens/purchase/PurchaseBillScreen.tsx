@@ -4,7 +4,7 @@ import { purchaseApi, type PDoc, type PListRow, type PLookups } from "../../api"
 import { Combobox, type ComboOption } from "../../components/Combobox";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
-import { COMMON_HELP, Field, FormSection, HINTS, Pill, focusStep, formEnterKey, money } from "../../components/purchase/Bits";
+import { COMMON_HELP, DocHeader, Field, FormSection, HINTS, Pill, focusStep, formEnterKey, money } from "../../components/purchase/Bits";
 import { EmptyPanel, HeaderSummary, SidePanel, VendorPanel, usePanelState } from "../../components/purchase/BillPanels";
 import { DateField, TextField, VendorFields } from "../../components/purchase/HeadFields";
 import { LinesGrid, TermsGrid } from "../../components/purchase/LinesGrid";
@@ -431,10 +431,10 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   );
 
   const notice = doc && (
-    <div className="mt-2 space-y-1">
-      {state === "POSTED" && <p className="text-[12px] text-green-800 bg-green-50 border border-green-300 px-2 py-1">Posted{doc.journalVoucher ? <> as voucher <b className="font-mono">{doc.journalVoucher.voucherNumber}</b> dated {doc.journalVoucher.voucherDate}</> : ""}. A posted bill cannot be edited; reverse it to correct it.</p>}
-      {state === "REVERSED" && <p className="text-[12px] text-amber-800 bg-amber-50 border border-amber-300 px-2 py-1">Reversed by <b className="font-mono">{doc.reversedBy?.invoiceNumber}</b>.</p>}
-      {state === "REVERSAL" && <p className="text-[12px] text-blue-800 bg-blue-50 border border-blue-300 px-2 py-1">This is the reversal of <b className="font-mono">{doc.reversalOf?.invoiceNumber}</b>.</p>}
+    <div className="mx-5 mt-3 space-y-1">
+      {state === "POSTED" && <p className="text-[12px] rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-900">Posted{doc.journalVoucher ? <> as voucher <b className="font-mono">{doc.journalVoucher.voucherNumber}</b> dated {doc.journalVoucher.voucherDate}</> : ""}. A posted bill cannot be edited; reverse it to correct it.</p>}
+      {state === "REVERSED" && <p className="text-[12px] rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">Reversed by <b className="font-mono">{doc.reversedBy?.invoiceNumber}</b>.</p>}
+      {state === "REVERSAL" && <p className="text-[12px] rounded-lg border border-cobalt-200 bg-cobalt-50 px-3 py-2 text-cobalt-800">This is the reversal of <b className="font-mono">{doc.reversalOf?.invoiceNumber}</b>.</p>}
     </div>
   );
 
@@ -517,15 +517,11 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   return (
     <>
       <section data-purchase-document className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-300 px-3 py-1.5">
-          <h1 className="text-[17px] font-semibold">Purchase Bill{doc && <span className="ml-2 font-mono text-[15px]">{String(doc.invoiceNumber)}</span>}</h1>
-          <span className="text-slate-600">Branch: <b>{p.branchName}</b> · FY <b>{p.fyCode}</b></span>
-          {state && <Pill text={state} tone={STATE_TONE[state]} />}
-          {s.dirty && <span className="text-[11px] text-amber-700">• unsaved changes</span>}
-          <span className="flex-1" />
-          <span className="text-[11px] text-slate-500">F1 help</span>
-        </div>
-        {notice && <div className="shrink-0 px-3 pb-1">{notice}</div>}
+        <DocHeader title="Purchase bill" number={doc ? String(doc.invoiceNumber) : undefined} pill={state ? <Pill text={state} tone={STATE_TONE[state]} /> : undefined}
+          branchName={p.branchName} fyCode={p.fyCode} dirty={s.dirty}
+          steps={doc ? undefined : { labels: ["Header", "Lines"], current: stage === "header" ? 0 : 1 }}
+          right={<span className="text-[12px] text-slate-500">F1 help</span>} />
+        {notice && <div className="shrink-0 px-5 pt-3">{notice}</div>}
 
         <div className="flex min-h-0 flex-1">
           <SidePanel side="left" title="Header" collapsed={leftCollapsed} onToggle={toggleLeft} shortcut="Alt+[">
@@ -534,12 +530,11 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
               : <EmptyPanel>The header you enter in the middle appears here.</EmptyPanel>}
           </SidePanel>
 
-          <div data-zone="form" onKeyDown={formEnterKey} className={`min-w-0 flex-1 px-3 py-2 ${stage === "header" ? "overflow-y-auto" : "flex min-h-0 flex-col gap-2 overflow-hidden"}`}>
+          <div data-zone="form" onKeyDown={formEnterKey} className={`min-w-0 flex-1 px-5 py-4 ${stage === "header" ? "lg-scroll overflow-y-auto" : "flex min-h-0 flex-col gap-3 overflow-hidden"}`}>
             {stage === "header" ? (
-              <div className="space-y-2">
-                {!doc && <p className="text-[12px] text-slate-600"><b>Step 1 of 2</b> — enter the bill header. The lines open when it is complete.</p>}
+              <div className="mx-auto max-w-[1080px] space-y-4">
           <FormSection title="Bill Header" hint="Invoice, supplier, payment and document links">
-            <div className="grid min-w-0 grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-2 gap-y-1">
+            <div className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3.5 xl:grid-cols-3 2xl:grid-cols-4">
               <Field label="Invoice No"><input disabled className="fld bg-slate-100 text-slate-600" value={doc?.invoiceNumber ?? ""} placeholder="(next number)" aria-label="Invoice number" /></Field>
               <DateField label="Invoice Date" name="invoiceDate" value={f.invoiceDate} onChange={(v) => {
                 // with due days entered, the due date follows the invoice date
@@ -587,16 +582,16 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
           </FormSection>
 
           {f.invoiceType === "IMPORT" && (
-            <section className="rounded-sm border border-slate-300 bg-white/70">
-              <button type="button" className="flex w-full items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-left" onClick={() => setImportOpen((v) => !v)} aria-expanded={importOpen}>
+            <section className="lg-card">
+              <button type="button" className="flex min-h-[42px] w-full items-center gap-2 px-4 py-2 text-left hover:bg-slate-50" onClick={() => setImportOpen((v) => !v)} aria-expanded={importOpen}>
                 {importOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                <span className="text-[12px] font-semibold text-slate-800">Import details</span>
-                <span className="text-[11px] text-slate-500">{impFilled ? `${impFilled} field${impFilled === 1 ? "" : "s"} filled` : "Optional — expand to enter customs, LC, transport, FX"}</span>
+                <span className="lg-card-title">Import details</span>
+                <span className="lg-card-hint">{impFilled ? `${impFilled} field${impFilled === 1 ? "" : "s"} filled` : "Optional — expand to enter customs, LC, transport, FX"}</span>
               </button>
               {importOpen && (
-                <div className="px-3 py-2">
-                  <p className="mb-2 text-[11px] text-slate-600">Customs declaration number is needed to post an import bill. Other fields are optional.</p>
-                  <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-x-3 gap-y-2">
+                <div className="border-t border-slate-100 px-4 py-3.5">
+                  <p className="mb-3 text-[12px] text-slate-600">Customs declaration number is needed to post an import bill. Other fields are optional.</p>
+                  <div className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-3.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                     {IMPORT_FIELDS.map((k) => k.kind === "date"
                       ? <DateField key={k.key} label={k.label} name={`imp.${k.key}`} value={f.imp[k.key] ?? ""} onChange={(v) => { s.patch({ imp: { ...f.imp, [k.key]: v } }); s.clearError(`imp.${k.key}`); }} calendar={p.calendar} readOnly={ro} error={s.err(`imp.${k.key}`)} />
                       : k.kind === "mode"
@@ -611,10 +606,10 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
           <FormSection title="Remarks" hint="Optional note for this bill" className="w-full">
             <textarea data-field="remarks" maxLength={1024} disabled={ro} value={f.remarks} onChange={(e) => s.patch({ remarks: e.target.value })}
               placeholder="Add remarks…" className={`fld h-20 min-h-20 resize-y py-2 ${s.err("remarks") ? "fld-err" : ""}`} aria-label="Remarks" />
-            {s.err("remarks") && <span className="block text-[12px] text-red-700 mt-0.5">{s.err("remarks")}</span>}
+            {s.err("remarks") && <span className="mt-1 block text-[12px] text-rose-700">{s.err("remarks")}</span>}
           </FormSection>
 
-                <div className="flex justify-end pb-1">
+                <div className="flex justify-end pb-2">
                   <button type="button" data-nav="header-continue" className="btn btn-primary" onClick={confirmHeader}>
                     {doc ? "Done — back to lines" : "Continue to lines"} <ArrowRight size={14} />{!doc && <span className="kbd">Ctrl+S</span>}
                   </button>
@@ -622,38 +617,38 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
               </div>
             ) : (
               <>
-                <section className="flex min-h-0 flex-1 flex-col rounded-sm border border-slate-300 bg-white/70">
-                  <header className="flex shrink-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-slate-200 bg-slate-50 px-3 py-1">
-                    <h2 className="text-[12px] font-semibold tracking-wide text-slate-800">Lines</h2>
-                    <p className="text-[11px] text-slate-500">Product, quantity and rate — click a line's term amount to assess its terms</p>
+                <section className="lg-card flex min-h-0 flex-1 flex-col">
+                  <header className="lg-card-head">
+                    <h2 className="lg-card-title">Lines</h2>
+                    <p className="lg-card-hint">Product, quantity and rate. Click a line's term amount to assess its terms.</p>
                   </header>
-                  <div className="flex min-h-0 flex-1 flex-col p-2">
+                  <div className="flex min-h-0 flex-1 flex-col">
                     <LinesGrid fill kind="bill" lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
                       onOpenTerms={(index) => openTerms({ scope: "line", lineNumber: lineNumberAt(index), lineIndex: index })} termSummary={lineTermsSummary} />
                   </div>
                 </section>
-          <section className="flex shrink-0 flex-wrap items-center gap-2 border border-slate-400 bg-white px-3 py-2" aria-label="Header terms and conditions">
+          <section className="lg-card flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3" aria-label="Header terms and conditions">
             <div className="min-w-0 flex-1">
-              <h2 className="text-[12px] font-semibold text-slate-800">Header Terms &amp; Conditions</h2>
-              <p className="text-[11px] text-slate-600">Document-level charges, discounts and taxes. Product-specific charges are available from each line.</p>
+              <h2 className="lg-card-title">Header terms and conditions</h2>
+              <p className="lg-card-hint mt-0.5">Document-level charges, discounts and taxes. Product-specific charges are available from each line.</p>
             </div>
-            <span className="text-[12px] text-slate-600">{f.terms.filter((term) => !isBlankTerm(term) && !masters.get(term.termId)?.isProductwise).length} terms</span>
-            <b className="min-w-[92px] text-right text-[13px] tabular-nums">{headerTermsTotal.startsWith("-") ? `− ${money(headerTermsTotal.slice(1))}` : (money(headerTermsTotal) || "0.00")}</b>
+            <span className="lg-chip">{f.terms.filter((term) => !isBlankTerm(term) && !masters.get(term.termId)?.isProductwise).length} terms</span>
+            <b className="min-w-[100px] text-right text-[15px] font-semibold tabular-nums">{headerTermsTotal.startsWith("-") ? `− ${money(headerTermsTotal.slice(1))}` : (money(headerTermsTotal) || "0.00")}</b>
             <button type="button" data-nav="header-terms" className="btn" onClick={() => openTerms({ scope: "header" })}>
               {ro ? "View terms" : "Assess terms"}
             </button>
-            {s.err("terms") && <p className="w-full text-[12px] text-red-700" role="alert">{s.err("terms")}</p>}
+            {s.err("terms") && <p className="w-full text-[12px] text-rose-700" role="alert">{s.err("terms")}</p>}
           </section>
           {ro && doc && doc.lines.some((l) => Number(l.landedAmount) !== 0) && (
             <p className="text-[12px] text-slate-600">Landed cost per line: {doc.lines.map((l) => `${l.lineNumber}: ${money(l.landedAmount)}`).join(" · ")}</p>
           )}
                 <div className="max-h-[35%] shrink-0 overflow-y-auto">
           {!!doc && String(doc.purchaseType ?? "").startsWith("GOODS_PURCHASE_") && (
-            <section className="shrink-0 rounded-sm border border-sky-300 bg-sky-50/40">
-              <button type="button" className="flex w-full items-center gap-2 border-b border-sky-200 bg-sky-50 px-3 py-1.5 text-left" onClick={() => setLandedOpen((v) => !v)} aria-expanded={landedOpen}>
+            <section className="lg-card shrink-0 border-sky-200 bg-sky-50/50">
+              <button type="button" className="flex min-h-[42px] w-full items-center gap-2 px-4 py-2 text-left hover:bg-sky-50" onClick={() => setLandedOpen((v) => !v)} aria-expanded={landedOpen}>
                 {landedOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                <span className="text-[12px] font-semibold text-sky-950">Linked service costs & landed value</span>
-                <span className="text-[11px] text-sky-800/80">{(doc.importCostSources ?? []).length ? `${(doc.importCostSources ?? []).length} linked` : "No service invoices linked yet"}</span>
+                <span className="lg-card-title">Linked service costs and landed value</span>
+                <span className="lg-card-hint">{(doc.importCostSources ?? []).length ? `${(doc.importCostSources ?? []).length} linked` : "No service invoices linked yet"}</span>
               </button>
               {landedOpen && (
                 <div className="px-3 py-2">
@@ -696,9 +691,9 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
           </SidePanel>
         </div>
 
-        <footer className="shrink-0 space-y-1.5 border-t border-slate-400 bg-slate-50 py-1.5">
-          <PurchaseInvoiceTotals compact preview={invoicePreview} savedDoc={doc} readOnly={ro} hasLines={liveLines > 0} />
-          <div className="flex flex-wrap items-center justify-center gap-2 px-3">
+        <footer className="tape flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2.5 px-5 py-3">
+          <div className="min-w-0 flex-1"><PurchaseInvoiceTotals compact preview={invoicePreview} savedDoc={doc} readOnly={ro} hasLines={liveLines > 0} /></div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {!ro ? (
               <>
                 <button data-nav className="btn btn-primary" disabled={s.saving || (stage === "header" && !doc)} title={stage === "header" && !doc ? "Finish the header first (Continue to lines)" : undefined} onClick={() => void s.save()}><Save size={14} /> {s.mode === "edit" ? "Update" : "Save"} <span className="kbd">Ctrl+S</span></button>
@@ -709,7 +704,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
                 <button data-nav className="btn" onClick={() => p.onNew()}><Plus size={14} /> New <span className="kbd">F3</span></button>
                 <button data-nav className="btn" disabled={!doc || !cfg.editable(doc)} onClick={s.edit}><Pencil size={14} /> Edit <span className="kbd">F2</span></button>
                 <button data-nav className="btn" disabled={!doc || !cfg.deletable(doc)} onClick={s.askDelete}><Trash2 size={14} /> Delete <span className="kbd">Ctrl+Del</span></button>
-                {actions && <><span className="mx-1 h-6 w-px bg-slate-300" />{actions}</>}
+                {actions && <><span className="tape-sep mx-1" />{actions}</>}
               </>
             )}
           </div>

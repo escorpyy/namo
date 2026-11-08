@@ -62,16 +62,22 @@ export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, hasLines, c
 
   if (compact) {
     return (
-      <section aria-label="Purchase invoice totals" title={message} className="flex flex-wrap items-baseline justify-center gap-x-5 gap-y-0.5 px-3">
-        {entries.map((entry) => (
-          <div key={entry.label} className="flex min-w-0 items-baseline gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">{entry.label}</span>
-            <span aria-live={entry.total ? "polite" : undefined} aria-atomic={entry.total ? true : undefined}
-              className={`tabular-nums font-semibold ${entry.total ? "rounded-sm bg-blue-50 px-2 text-[15px] text-blue-950" : "text-[13px] text-slate-900"}`}>{entry.value}</span>
+      <section aria-label="Purchase invoice totals" title={message} className="flex flex-wrap items-end gap-x-7 gap-y-2">
+        {entries.map((entry) => entry.total ? (
+          <div key={entry.label} className="flex min-w-0 items-end gap-3 border-l border-white/15 pl-7">
+            <div className="min-w-0">
+              <div className="text-[12px] font-medium text-white/65">{entry.label}</div>
+              <div key={entry.value} aria-live="polite" aria-atomic className="lg-settle truncate text-[26px] font-semibold leading-tight tabular-nums text-brass">{entry.value}</div>
+            </div>
+          </div>
+        ) : (
+          <div key={entry.label} className="min-w-0">
+            <div className="text-[12px] font-medium text-white/65">{entry.label}</div>
+            <div className="truncate text-[15px] font-semibold leading-tight tabular-nums text-white">{entry.value}</div>
           </div>
         ))}
         {(calculationAlert || (!showSaved && hasLines && preview.status !== "ready")) && (
-          <span role={calculationAlert ? "alert" : "status"} className={`max-w-[34ch] truncate text-[11px] ${calculationAlert ? "text-amber-800" : "text-slate-500"}`}>{message}</span>
+          <span role={calculationAlert ? "alert" : "status"} className={`max-w-[34ch] truncate pb-0.5 text-[12px] ${calculationAlert ? "text-amber-300" : "text-white/60"}`}>{message}</span>
         )}
       </section>
     );

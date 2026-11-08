@@ -5,7 +5,7 @@ import { MasterReferencePicker, type ReferenceOption } from "../../components/Ma
 import { AssessmentAllocationGrid, type AssessmentAllocationCellUpdate } from "../../components/purchase/AssessmentAllocationGrid";
 import { AssessmentInsights, AssessmentSummary } from "../../components/purchase/AssessmentPanels";
 import { EmptyPanel, SidePanel, usePanelState } from "../../components/purchase/BillPanels";
-import { formEnterKey, FormSection, Pill } from "../../components/purchase/Bits";
+import { DocHeader, formEnterKey, FormSection, Pill } from "../../components/purchase/Bits";
 import { allocationCsv, openAssessmentsFor, readiness } from "../../lib/assessmentInsights";
 import { defaultDate } from "../../lib/purchaseForm";
 import { formatImportCost } from "../../../shared/import-costing";
@@ -41,7 +41,7 @@ export interface AssessmentEntryProps extends PurchaseScreenProps {
 }
 const HEADER_KEYS = new Set(["importBillId", "assessmentDate"]);
 
-const fieldClass = "fld min-w-0 h-7";
+const fieldClass = "fld min-w-0";
 export const blankTerm = (): AssessmentTerm => ({
   key: Math.random().toString(36).slice(2), termId: "", calcType: "AMOUNT", rate: "", inputAmount: "", allocationBasis: "VALUE",
   capitalizable: true, isOverridden: false, overrideAmount: "", againstLedgerId: "", againstSubLedgerId: "", allocationMode: "AUTO", manual: {},
@@ -397,13 +397,9 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
 
   return (
     <section data-assessment-document className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-300 px-3 py-1.5">
-        <h1 className="text-[17px] font-semibold">Cost Assessment{doc && <span className="ml-2 font-mono text-[15px]">{doc.assessmentNumber}</span>}</h1>
-        <span className="text-slate-600">Branch: <b>{p.branchName}</b> · FY <b>{p.fyCode}</b></span>
-        {doc && <Pill text={doc.state} tone={stateTone(doc.state)} />}
-        {dirty && <span className="text-[11px] text-amber-700">• unsaved changes</span>}
-        <span className="min-w-0 flex-1 truncate text-right text-[11px] text-slate-600" role="status" title={message}>{message}</span>
-      </div>
+      <DocHeader title="Cost assessment" number={doc ? String(doc.assessmentNumber) : undefined} pill={doc ? <Pill text={doc.state} tone={stateTone(doc.state)} /> : undefined}
+        branchName={p.branchName} fyCode={p.fyCode} dirty={dirty} steps={doc ? undefined : { labels: ["Header", "Charges"], current: stage === "header" ? 0 : 1 }}
+        right={<span className="max-w-[40ch] truncate text-[12px] text-slate-500" role="status" title={message}>{message}</span>} />
 
       <div className="flex min-h-0 flex-1">
         <SidePanel side="left" title="Header" collapsed={leftCollapsed} onToggle={toggleLeft} shortcut="Alt+[">
@@ -412,17 +408,18 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
             : <EmptyPanel>The header you enter in the middle appears here.</EmptyPanel>}
         </SidePanel>
 
-        <div data-zone="form" onKeyDown={formEnterKey} className={`min-w-0 flex-1 px-3 py-2 ${stage === "header" ? "overflow-y-auto" : "flex min-h-0 flex-col gap-2 overflow-hidden"}`}>
+        <div data-zone="form" onKeyDown={formEnterKey} className={`lg-scroll min-w-0 flex-1 px-5 py-4 ${stage === "header" ? "overflow-y-auto" : "flex min-h-0 flex-col gap-4 overflow-hidden"}`}>
           {stage === "header" ? (
-            <div className="space-y-2">
-              {!doc && <p className="text-[12px] text-slate-600"><b>Step 1 of 2</b> — choose the goods bill and set the date. The charges open when the header is complete.</p>}
+            <div className="space-y-4">
+              {!doc && <p className="text-[12.5px] text-slate-500">Choose the goods bill and set the date. The charges open when the header is complete.</p>}
               <FormSection title="Header" hint="Source bill and assessment details">
-                <div className="grid grid-cols-1 gap-x-3 gap-y-1.5 md:grid-cols-2">
-                  <label className="block text-[11px] font-semibold text-slate-600">Assessment date
+                <div className="grid grid-cols-1 gap-x-4 gap-y-3.5 md:grid-cols-2">
+                  <label className="block lg-label [&>input]:mt-1 [&>textarea]:mt-1">Assessment date
                     <input data-assessment-field data-field="assessmentDate" type="date" className={fieldClass} disabled={!editing || busy} value={form.assessmentDate} aria-invalid={!!errors.assessmentDate} onChange={(e) => setForm({ ...form, assessmentDate: e.target.value })} />
-                    {errors.assessmentDate && <span className="block text-[11px] font-normal text-red-700" role="alert">{errors.assessmentDate}</span>}
+                    {errors.assessmentDate && <span className="block text-[11.5px] font-normal text-rose-700" role="alert">{errors.assessmentDate}</span>}
                   </label>
                   <div data-assessment-field>
+                    <span className="lg-label mb-1 block">Posted goods bill (local or import)</span>
                     <MasterReferencePicker
                       fieldName="importBillId" required label="Posted goods bill (local or import)" value={form.importBillId} options={importOptions}
                       onChange={(v) => {
@@ -435,14 +432,14 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                     />
                     {errors.importBillId && <p className="mt-0.5 text-[11px] text-red-700" role="alert">{errors.importBillId}</p>}
                   </div>
-                  <label className="block text-[11px] font-semibold text-slate-600">Customs / reference no
+                  <label className="block lg-label [&>input]:mt-1 [&>textarea]:mt-1">Customs / reference no
                     <input data-assessment-field data-field="referenceNo" className={fieldClass} maxLength={60} disabled={!editing || busy} value={form.referenceNo} onChange={(e) => setForm({ ...form, referenceNo: e.target.value })} />
                   </label>
-                  <label className="block text-[11px] font-semibold text-slate-600">Linked goods invoice
+                  <label className="block lg-label [&>input]:mt-1 [&>textarea]:mt-1">Linked goods invoice
                     <input className={`${fieldClass} bg-slate-100`} readOnly aria-readonly="true" value={billLabel || "Choose a posted goods bill"} />
                   </label>
-                  <label className="block text-[11px] font-semibold text-slate-600 md:col-span-2">Remarks
-                    <textarea id="assessment-remarks" data-assessment-field data-field="remarks" className="fld min-h-9 w-full resize-y" rows={2} maxLength={1024}
+                  <label className="block lg-label [&>input]:mt-1 [&>textarea]:mt-1 md:col-span-2">Remarks
+                    <textarea id="assessment-remarks" data-assessment-field data-field="remarks" className="fld min-h-[64px] w-full resize-y py-2" rows={2} maxLength={1024}
                       disabled={!editing || busy} value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} placeholder="Add a note for this assessment" />
                   </label>
                 </div>
@@ -455,29 +452,29 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
             </div>
           ) : (
             <>
-              <section className="flex max-h-[44%] min-h-[120px] shrink-0 flex-col rounded-sm border border-slate-300 bg-white/70">
-                <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-1">
-                  <div className="flex flex-wrap items-baseline gap-x-2">
-                    <h2 className="text-[12px] font-semibold tracking-wide text-slate-800">Charges</h2>
-                    <p className="text-[11px] text-slate-500">Dr own ledger / Cr against ledger · uncheck stock for tax or P&amp;L charges</p>
+              <section className="lg-card flex max-h-[46%] min-h-[140px] shrink-0 flex-col">
+                <header className="lg-card-head justify-between">
+                  <div className="flex flex-wrap items-baseline gap-x-3">
+                    <h2 className="lg-card-title">Charges</h2>
+                    <p className="lg-card-hint">Dr own ledger / Cr against ledger · uncheck stock for tax or P&amp;L charges</p>
                   </div>
-                  <button type="button" data-nav="add-charge" className="btn h-7" disabled={!editing || busy} onClick={addCharge}>
+                  <button type="button" data-nav="add-charge" className="btn" disabled={!editing || busy} onClick={addCharge}>
                     <Plus size={13} /> Add charge <span className="kbd">F6</span>
                   </button>
                 </header>
-                <div className="flex min-h-0 flex-1 flex-col p-2">
-                <div className="min-h-0 flex-1 overflow-auto overscroll-contain border border-slate-200">
-                  <table className="w-full min-w-[900px] table-fixed text-[10px]">
-                    <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 shadow-sm">
+                <div className="flex min-h-0 flex-1 flex-col">
+                <div className="lg-scroll lg-grid min-h-0 flex-1 overflow-auto overscroll-contain">
+                  <table className="w-full min-w-[700px] table-fixed text-[12px]">
+                    <thead className="lg-th">
                       <tr>
-                        <th className="w-[170px] p-1 text-left">Charge term</th>
-                        <th className="w-[96px] p-1 text-left">Calculation</th>
-                        <th className="w-[150px] p-1 text-left">Rate / amount</th>
-                        <th className="w-[132px] p-1 text-left">Allocate by</th>
-                        <th className="w-[170px] p-1 text-left">Against ledger</th>
-                        <th className="w-[64px] p-1 text-center">Stock</th>
-                        <th className="w-[80px] p-1 text-right">Calculated</th>
-                        <th className="w-[32px] p-1" aria-label="Remove" />
+                        <th className="w-[132px] px-2 py-2 text-left">Charge term</th>
+                        <th className="w-[92px] px-2 py-2 text-left">Calculation</th>
+                        <th className="w-[100px] px-2 py-2 text-left">Rate / amount</th>
+                        <th className="w-[100px] px-2 py-2 text-left">Allocate by</th>
+                        <th className="w-[132px] px-2 py-2 text-left">Against ledger</th>
+                        <th className="w-[48px] px-2 py-2 text-center">Stock</th>
+                        <th className="w-[84px] px-2 py-2 text-right">Calculated</th>
+                        <th className="w-[34px] p-1" aria-label="Remove" />
                       </tr>
                     </thead>
                     <tbody>
@@ -488,22 +485,22 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                         const subs = (lookups?.subLedgers ?? []).filter((x) => String(x.generalLedgerId) === t.againstLedgerId);
                         return (
                           <Fragment key={t.key}>
-                            <tr className="border-t border-slate-200 align-top">
-                              <td className="p-1">
+                            <tr className="border-t border-slate-100 align-top transition-colors hover:bg-cobalt-50/40">
+                              <td className="px-2 py-2">
                                 <MasterReferencePicker fieldName={`terms.${i}.termId`} label={`Charge ${i + 1}`} required value={t.termId} options={termOptions}
                                   onChange={(v) => selectTerm(i, v)} disabled={!editing || busy} scopeKey="purchase-terms"
                                   contextKey={`${p.companyId}:${p.branchId}`} placeholder="Choose charge…" hasError={!!errors.terms && !t.termId} />
                               </td>
-                              <td className="p-1">
+                              <td className="px-2 py-2">
                                 <select data-field={`terms.${i}.calcType`} className={fieldClass} disabled={!editing || busy || !t.termId} aria-label={`Calculation type for charge ${i + 1}`}
                                   value={t.calcType} onChange={(e) => updateTerm(i, { calcType: e.target.value as AssessmentTerm["calcType"] })}>
                                   <option value="PERCENT">Percent</option>
                                   <option value="AMOUNT">Fixed amount</option>
                                 </select>
-                                <div className="mt-0.5 truncate text-[9px] text-slate-500" title={`${m?.nature ?? "Charge"} · ${m?.calcBase ?? "CIF / running total"}`}>{m?.nature ?? "Charge"} · {m?.calcBase ?? "CIF / running total"}</div>
+                                <div className="mt-1 truncate text-[11px] text-slate-500" title={`${m?.nature ?? "Charge"} · ${m?.calcBase ?? "CIF / running total"}`}>{m?.nature ?? "Charge"} · {m?.calcBase ?? "CIF / running total"}</div>
                               </td>
-                              <td className="p-1">
-                                <div className="flex gap-2">
+                              <td className="px-2 py-2">
+                                <div className="flex gap-1.5">
                                   <input data-field={`terms.${i}.amount`} aria-label={t.calcType === "PERCENT" ? `Rate for charge ${i + 1}` : `Amount for charge ${i + 1}`}
                                     className={fieldClass} disabled={!editing || busy || !t.termId}
                                     value={t.calcType === "PERCENT" ? t.rate : t.inputAmount} inputMode="decimal"
@@ -514,26 +511,26 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                                       value={t.overrideAmount} inputMode="decimal" onChange={(e) => updateTerm(i, { overrideAmount: e.target.value })} placeholder="Final override" />
                                   )}
                                 </div>
-                                <label className="mt-0.5 inline-flex items-center gap-1 text-[9px] text-slate-600">
+                                <label className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-slate-500">
                                   <input data-field={`terms.${i}.isOverridden`} type="checkbox" disabled={!editing || busy || !t.termId} checked={t.isOverridden} onChange={(e) => updateTerm(i, { isOverridden: e.target.checked })} />
                                   <span>Override calculated amount</span>
                                 </label>
                               </td>
-                              <td className="p-1">
+                              <td className="px-2 py-2">
                                 <select data-field={`terms.${i}.allocationBasis`} className={fieldClass} disabled={!editing || busy || !t.capitalizable} aria-label={`Allocation basis for charge ${i + 1}`}
                                   value={t.allocationBasis} onChange={(e) => updateTerm(i, { allocationBasis: e.target.value as Basis })}>
                                   <option value="VALUE">Product value</option>
                                   <option value="QUANTITY">Quantity</option>
                                 </select>
                                 {t.capitalizable && (
-                                  <select data-field={`terms.${i}.allocationMode`} className={`${fieldClass} mt-0.5`} disabled={!editing || busy} aria-label={`Allocation mode for charge ${i + 1}`}
+                                  <select data-field={`terms.${i}.allocationMode`} className={`${fieldClass} mt-1.5`} disabled={!editing || busy} aria-label={`Allocation mode for charge ${i + 1}`}
                                     value={t.allocationMode} onChange={(e) => updateTerm(i, { allocationMode: e.target.value as "AUTO" | "MANUAL", manual: e.target.value === "MANUAL" ? t.manual : {} })}>
                                     <option value="AUTO">Auto split</option>
                                     <option value="MANUAL">Manual split</option>
                                   </select>
                                 )}
                               </td>
-                              <td className="p-1">
+                              <td className="px-2 py-2">
                                 <select data-field={`terms.${i}.againstLedgerId`} className={fieldClass} disabled={!editing || busy || !t.termId} aria-label={`Against ledger for charge ${i + 1}`}
                                   aria-invalid={!!errors.terms && !!t.termId && !t.againstLedgerId} value={t.againstLedgerId}
                                   onChange={(e) => updateTerm(i, { againstLedgerId: e.target.value, againstSubLedgerId: "" })}>
@@ -543,24 +540,24 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                                   ))}
                                 </select>
                                 {subs.length > 0 && (
-                                  <select data-field={`terms.${i}.againstSubLedgerId`} className={`${fieldClass} mt-0.5`} disabled={!editing || busy} aria-label={`Sub-ledger for charge ${i + 1}`}
+                                  <select data-field={`terms.${i}.againstSubLedgerId`} className={`${fieldClass} mt-1.5`} disabled={!editing || busy} aria-label={`Sub-ledger for charge ${i + 1}`}
                                     value={t.againstSubLedgerId} onChange={(e) => updateTerm(i, { againstSubLedgerId: e.target.value })}>
                                     <option value="">Sub-ledger…</option>
                                     {subs.map((x) => <option key={x.id} value={x.id}>{x.code} — {x.name}</option>)}
                                   </select>
                                 )}
-                                <div className="mt-0.5 truncate text-[9px] text-slate-500" title={`Own ledger: ${m ? ((lookups?.vendors ?? []).find((l) => l.id === m.generalLedgerId)?.name ?? "—") : "—"}`}>Own ledger: {m ? ((lookups?.vendors ?? []).find((l) => l.id === m.generalLedgerId)?.name ?? "—") : "—"}</div>
+                                <div className="mt-1 truncate text-[11px] text-slate-500" title={`Own ledger: ${m ? ((lookups?.vendors ?? []).find((l) => l.id === m.generalLedgerId)?.name ?? "—") : "—"}`}>Own ledger: {m ? ((lookups?.vendors ?? []).find((l) => l.id === m.generalLedgerId)?.name ?? "—") : "—"}</div>
                               </td>
-                              <td className="p-1 text-center">
+                              <td className="px-2 py-2 text-center">
                                 <label className="inline-flex items-center gap-1.5">
                                   <input data-field={`terms.${i}.capitalizable`} aria-label={`Capitalize charge ${i + 1} into inventory`} type="checkbox" disabled={!editing || busy}
                                     checked={t.capitalizable} onChange={(e) => updateTerm(i, { capitalizable: e.target.checked })} />
                                   <span className="sr-only">In stock value</span>
                                 </label>
                               </td>
-                              <td className="p-1 text-right tabular-nums">{result ? safeMoney(result.finalAmount ?? result.amount) : "—"}</td>
-                              <td className="p-1 text-right">
-                                <button type="button" className="btn btn-compact" disabled={!editing || busy || form.terms.length === 1}
+                              <td className="px-2 py-2 text-right font-medium tabular-nums">{result ? safeMoney(result.finalAmount ?? result.amount) : "—"}</td>
+                              <td className="p-1 pt-2 text-right">
+                                <button type="button" className="btn h-8 w-8 justify-center px-0 text-slate-500 hover:text-rose-700" disabled={!editing || busy || form.terms.length === 1}
                                   aria-label={`Remove charge ${i + 1}`} onClick={() => setForm({ ...form, terms: form.terms.filter((_, n) => n !== i) })}>
                                   <Trash2 size={13} />
                                 </button>
@@ -572,25 +569,25 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                     </tbody>
                   </table>
                 </div>
-                  {errors.terms && <p className="mt-1 shrink-0 text-xs text-red-700" role="alert">{errors.terms}</p>}
+                  {errors.terms && <p className="shrink-0 px-4 pb-2 text-[12px] text-rose-700" role="alert">{errors.terms}</p>}
                 </div>
               </section>
 
-              <section className="flex min-h-0 flex-1 flex-col rounded-sm border border-slate-300 bg-white/70">
-                <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-1">
-                  <div className="flex flex-wrap items-baseline gap-x-2">
-                    <h2 className="text-[12px] font-semibold tracking-wide text-slate-800">Product allocation &amp; landed cost</h2>
-                    <p className="text-[11px] text-slate-500">{manualColumns.length ? "Edit manual splits inline · paste spreadsheet ranges" : "Choose Manual split on a charge to edit allocations inline"}</p>
+              <section className="lg-card flex min-h-0 flex-1 flex-col">
+                <header className="lg-card-head justify-between">
+                  <div className="flex flex-wrap items-baseline gap-x-3">
+                    <h2 className="lg-card-title">Product allocation &amp; landed cost</h2>
+                    <p className="lg-card-hint">{manualColumns.length ? "Edit manual splits inline · paste spreadsheet ranges" : "Choose Manual split on a charge to edit allocations inline"}</p>
                   </div>
-                  <button type="button" data-nav="download-csv" className="btn h-7" disabled={!lineRows.length} onClick={downloadCsv} title="Download the landed cost of every product line as a spreadsheet file"><Download size={13} /> CSV</button>
+                  <button type="button" data-nav="download-csv" className="btn" disabled={!lineRows.length} onClick={downloadCsv} title="Download the landed cost of every product line as a spreadsheet file"><Download size={13} /> CSV</button>
                 </header>
-                <div className="flex min-h-0 flex-1 flex-col p-2">
+                <div className="flex min-h-0 flex-1 flex-col">
                   {form.importBillId ? (
                     <AssessmentAllocationGrid fill lines={lineRows} terms={manualColumns} editing={editing} busy={busy}
                       previewReady={previewOk && !previewPending} onCellsChange={updateManualCells} onMessage={setMessage} />
                   ) : (
-                    <div className="rounded-sm border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-[12px] text-slate-600">
-                      Select a posted goods bill to unlock product allocation and landed-cost impact. <button type="button" className="ml-1 font-semibold text-blue-700 underline underline-offset-2" onClick={editHeader}>Choose a goods bill</button>.
+                    <div className="m-4 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-[12.5px] text-slate-600">
+                      Select a posted goods bill to unlock product allocation and landed-cost impact. <button type="button" className="ml-1 font-semibold text-cobalt-700 underline underline-offset-2" onClick={editHeader}>Choose a goods bill</button>.
                     </div>
                   )}
                 </div>
@@ -608,19 +605,24 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
         </SidePanel>
       </div>
 
-      <footer className="shrink-0 space-y-1.5 border-t border-slate-400 bg-slate-50 py-1.5">
+      <footer className="tape flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2.5 px-5 py-3">
         {!!form.importBillId && (
-          <section aria-label="Cost assessment summary" aria-live="polite" aria-busy={previewPending} className="flex flex-wrap items-baseline justify-center gap-x-5 gap-y-0.5 px-3">
-            {stats.map(([label, value], i) => (
-              <div key={label} className="flex min-w-0 items-baseline gap-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">{label}</span>
-                <span className={`tabular-nums font-semibold ${i === stats.length - 1 ? "rounded-sm bg-blue-50 px-2 text-[15px] text-blue-950" : "text-[13px] text-slate-900"}`}>{value == null ? "—" : safeMoney(value)}</span>
+          <section aria-label="Cost assessment summary" aria-live="polite" aria-busy={previewPending} className="flex min-w-0 flex-1 flex-wrap items-end gap-x-6 gap-y-2">
+            {stats.slice(0, -1).map(([label, value]) => (
+              <div key={label} className="min-w-0">
+                <div className="text-[12px] text-white/60">{label}</div>
+                <div className="text-[15px] font-semibold tabular-nums">{value == null ? "—" : safeMoney(value)}</div>
               </div>
             ))}
-            {previewError && <span role="alert" className="max-w-[40ch] truncate text-[11px] text-red-800" title={previewError}>{previewError}</span>}
+            <span className="tape-sep mb-1 self-end" aria-hidden />
+            <div className="min-w-0">
+              <div className="text-[12px] text-white/60">Final landed value</div>
+              <div key={String(stats[stats.length - 1][1])} className="lg-settle truncate text-[26px] font-semibold leading-tight tabular-nums text-brass">{stats[stats.length - 1][1] == null ? "—" : safeMoney(stats[stats.length - 1][1])}</div>
+            </div>
+            {previewError && <span role="alert" className="max-w-[40ch] truncate text-[12px] text-rose-300" title={previewError}>{previewError}</span>}
           </section>
         )}
-        <div className="flex flex-wrap items-center justify-center gap-2 px-3">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {editing ? (
             <>
               <button type="button" className="btn btn-primary" disabled={busy || (stage === "header" && !doc)} title={stage === "header" && !doc ? "Finish the header first (Continue to charges)" : undefined} onClick={() => void save()}><Save size={14} /> Save draft <span className="kbd">Ctrl+S</span></button>
@@ -636,7 +638,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
               {isApplied && <button type="button" className="btn" disabled={busy} onClick={() => void reverseAssessment()}><RotateCcw size={14} /> Reverse</button>}
             </>
           )}
-          {doc?.reversedAt && <span className="text-xs text-amber-800">Reversed: {doc.reversalReason}</span>}
+          {doc?.reversedAt && <span className="text-[12px] text-amber-300">Reversed: {doc.reversalReason}</span>}
         </div>
       </footer>
     </section>

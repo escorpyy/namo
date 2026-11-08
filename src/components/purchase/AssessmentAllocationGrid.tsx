@@ -96,52 +96,52 @@ export function AssessmentAllocationGrid({ lines, terms, editing, busy, previewR
   const columnCount = 9 + terms.length;
   return (
     <div className={fill ? "flex min-h-0 flex-1 flex-col" : undefined}>
-      <div className="mb-1 flex shrink-0 flex-wrap items-center justify-between gap-2">
-        <p className="text-[10px] text-slate-600">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2">
+        <p className="text-[12px] text-slate-500">
           {terms.length
             ? "Edit cells inline · paste an Excel/Sheets range · Enter/Tab moves across cells · ↑/↓ moves by product."
             : "Choose Manual split on a charge to edit product allocations here."}
         </p>
-        {terms.length > 0 && <button type="button" className="btn h-7" disabled={!editing || busy || !previewReady || !targetsReady || !lines.length} onClick={autoFill} title="Fill all manual charge columns using each charge’s selected value or quantity basis">
+        {terms.length > 0 && <button type="button" className="btn" disabled={!editing || busy || !previewReady || !targetsReady || !lines.length} onClick={autoFill} title="Fill all manual charge columns using each charge’s selected value or quantity basis">
           Auto-fill splits
         </button>}
       </div>
-      <div className={`${fill ? "min-h-0 flex-1" : "max-h-[40vh]"} overflow-auto overscroll-contain border border-slate-200`} aria-label="Product allocation and landed cost grid">
-        <table className="w-full min-w-[900px] table-fixed text-[10px]">
-          <thead className="sticky top-0 z-20 bg-slate-50 text-slate-600 shadow-sm">
+      <div className={`${fill ? "min-h-0 flex-1" : "max-h-[40vh]"} lg-scroll lg-grid overflow-auto overscroll-contain`} aria-label="Product allocation and landed cost grid">
+        <table className="w-full min-w-[960px] table-fixed text-[12px]">
+          <thead className="lg-th !z-20">
             <tr>
-              <th className="sticky left-0 z-30 w-[180px] border-r border-slate-200 bg-slate-50 p-1 text-left">Product</th>
-              <th className="w-[60px] p-1 text-right">Qty</th>
-              <th className="w-[90px] p-1 text-right">Goods value</th>
-              <th className="w-[90px] p-1 text-right">Customs value</th>
-              <th className="w-[90px] p-1 text-right">Invoiced services</th>
-              <th className="w-[90px] p-1 text-right">Bill terms</th>
-              {terms.map((term, index) => <th key={term.key} className="w-[112px] p-1 text-right" title={`${term.code} — ${term.name}; basis: ${term.allocationBasis.toLowerCase()}`}>
-                <span className="block truncate text-blue-800">{term.code || `Charge ${index + 1}`}</span>
+              <th className="sticky left-0 z-30 w-[180px] border-r border-slate-200 bg-slate-50 px-3 py-2 text-left">Product</th>
+              <th className="w-[96px] px-3 py-2 text-right">Qty</th>
+              <th className="w-[90px] px-3 py-2 text-right">Goods value</th>
+              <th className="w-[90px] px-3 py-2 text-right">Customs value</th>
+              <th className="w-[90px] px-3 py-2 text-right">Invoiced services</th>
+              <th className="w-[90px] px-3 py-2 text-right">Bill terms</th>
+              {terms.map((term, index) => <th key={term.key} className="w-[112px] px-3 py-2 text-right" title={`${term.code} — ${term.name}; basis: ${term.allocationBasis.toLowerCase()}`}>
+                <span className="block truncate text-cobalt-800">{term.code || `Charge ${index + 1}`}</span>
                 <span className="block truncate font-normal">{term.name}</span>
               </th>)}
-              <th className="w-[95px] p-1 text-right">Assessed costs</th>
-              <th className="w-[95px] p-1 text-right">Landed value</th>
-              <th className="w-[100px] p-1 text-right">Landed unit cost</th>
+              <th className="w-[95px] px-3 py-2 text-right">Assessed costs</th>
+              <th className="w-[95px] px-3 py-2 text-right">Landed value</th>
+              <th className="w-[100px] px-3 py-2 text-right">Landed unit cost</th>
             </tr>
           </thead>
           <tbody>
             {lines.map((line, rowIndex) => {
               const id = lineKey(line);
-              return <tr key={id} className="border-t border-slate-200 odd:bg-white even:bg-slate-50/50">
-                <td className="sticky left-0 z-10 border-r border-slate-200 bg-inherit p-1" title={line.description ?? line.productCode ?? ""}>
+              return <tr key={id} className="border-t border-slate-100 bg-white hover:bg-cobalt-50/40">
+                <td className="sticky left-0 z-10 border-r border-slate-200 bg-inherit px-3 py-2" title={line.description ?? line.productCode ?? ""}>
                   <span className="block truncate font-medium">{line.lineNumber}. {line.productCode ?? line.description ?? `Product line ${line.lineNumber}`}</span>
                 </td>
-                <td className="p-1 text-right tabular-nums">{line.quantity ?? "—"}</td>
-                <td className="p-1 text-right tabular-nums">{money(line.goodsValue)}</td>
-                <td className="p-1 text-right tabular-nums">{money(line.customsValue)}</td>
-                <td className="p-1 text-right tabular-nums">{money(line.capitalizedSources)}</td>
-                <td className="p-1 text-right tabular-nums">{money(line.existingPurchaseTermCosts)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{line.quantity != null ? line.quantity.toString().replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") : "—"}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{money(line.goodsValue)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{money(line.customsValue)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{money(line.capitalizedSources)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{money(line.existingPurchaseTermCosts)}</td>
                 {terms.map((term, columnIndex) => <td key={term.key} className="p-0">
                   <input
                     data-field={`manual.${term.formIndex}.${id}`}
                     data-matrix-cell={`${rowIndex}:${columnIndex}`}
-                    className="fld h-5 w-full px-1 text-right text-[10px] tabular-nums"
+                    className="fld h-7 w-full rounded px-1.5 text-right text-[12px] tabular-nums"
                     inputMode="decimal"
                     autoComplete="off"
                     disabled={!editing || busy}
@@ -159,27 +159,27 @@ export function AssessmentAllocationGrid({ lines, terms, editing, busy, previewR
                     }}
                   />
                 </td>)}
-                <td className="p-1 text-right tabular-nums">{money(line.capitalizedAssessments)}</td>
-                <td className="p-1 text-right tabular-nums font-semibold">{money(line.landedValue)}</td>
-                <td className="p-1 text-right tabular-nums font-semibold">{money(line.landedRate)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{money(line.capitalizedAssessments)}</td>
+                <td className="px-3 py-2 text-right tabular-nums font-semibold">{money(line.landedValue)}</td>
+                <td className="px-3 py-2 text-right tabular-nums font-semibold">{money(line.landedRate)}</td>
               </tr>;
             })}
             {!lines.length && <tr><td colSpan={columnCount} className="p-3 text-center text-slate-500">Choose a posted goods bill to load product lines.</td></tr>}
           </tbody>
-          {terms.length > 0 && <tfoot className="sticky bottom-0 z-20 border-t border-slate-300 bg-slate-50 font-semibold text-slate-700">
+          {terms.length > 0 && <tfoot className="sticky bottom-0 z-20 border-t border-slate-200 bg-slate-50 font-semibold text-slate-700">
             <tr>
-              <td colSpan={6} className="p-1 text-right">Entered / target · remaining</td>
+              <td colSpan={6} className="px-3 py-2 text-right">Entered / target · remaining</td>
               {terms.map((term) => {
                 const { amount: entered, valid } = totalEntered(term);
                 const targetKnown = term.result?.finalAmount != null || term.result?.amount != null;
                 const target = (() => { try { return toMicro(resultAmount(term)); } catch { return 0n; } })();
                 const gap = target - entered;
-                return <td key={term.key} className={`p-1 text-right tabular-nums ${targetKnown && valid && gap === 0n ? "text-green-800" : "text-red-700"}`}>
+                return <td key={term.key} className={`p-1 text-right tabular-nums ${targetKnown && valid && gap === 0n ? "text-emerald-800" : "text-rose-700"}`}>
                   <span className="block">{formatImportCost(entered, 2)} / {formatImportCost(target, 2)}</span>
-                  <span className="block text-[9px]">{!valid ? "Check number format" : !targetKnown ? "Waiting for preview" : gap === 0n ? "Balanced" : `Gap ${formatImportCost(gap, 2)}`}</span>
+                  <span className="block text-[11px] font-normal">{!valid ? "Check number format" : !targetKnown ? "Waiting for preview" : gap === 0n ? "Balanced" : `Gap ${formatImportCost(gap, 2)}`}</span>
                 </td>;
               })}
-              <td colSpan={3} className="p-1 text-right">{lines.length} product lines</td>
+              <td colSpan={3} className="px-3 py-2 text-right">{lines.length} product lines</td>
             </tr>
           </tfoot>}
         </table>

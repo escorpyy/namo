@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { Eye, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil } from "lucide-react";
 import { purchaseApi, type PListRow, type PLookups } from "../../api";
 import { adToBs } from "../../lib/nepaliDate";
-import { money } from "./Bits";
+import { Pill, money } from "./Bits";
 
-// The two side panels of the purchase bill entry screen. Each takes 20% of the width, or folds to a thin strip so the lines get the room.
+// The two side panels of the purchase bill entry screen. Each takes about a sixth of the width (never less than 208px), or folds to a thin strip so the lines get the room.
 
 export function SidePanel({ side, title, collapsed, onToggle, shortcut, children }: {
   side: "left" | "right"; title: string; collapsed: boolean; onToggle: () => void; shortcut: string; children: ReactNode;
@@ -13,35 +13,35 @@ export function SidePanel({ side, title, collapsed, onToggle, shortcut, children
   const label = `${collapsed ? "Expand" : "Collapse"} ${title.toLowerCase()} (${shortcut})`;
   const toggle = (
     <button type="button" data-panel-toggle={side} onClick={onToggle} aria-expanded={!collapsed} aria-label={label} title={label}
-      className="grid h-7 w-7 shrink-0 place-items-center rounded-sm hover:bg-slate-200 focus-visible:outline-2 focus-visible:outline-blue-700">
+      className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-ink focus-visible:outline-2 focus-visible:outline-cobalt-700">
       <Icon size={16} />
     </button>
   );
   return (
     <aside aria-label={title} data-side-panel={side}
-      className={`flex min-h-0 shrink-0 flex-col overflow-hidden bg-white/50 transition-[width] duration-150 ${side === "left" ? "border-r" : "border-l"} border-slate-400 ${collapsed ? "w-9" : "w-[20%] min-w-[200px]"}`}>
+      className={`flex min-h-0 shrink-0 flex-col overflow-hidden bg-white transition-[width] duration-150 ${side === "left" ? "border-r" : "border-l"} border-slate-200 ${collapsed ? "w-10" : "w-[clamp(188px,14vw,248px)]"}`}>
       {collapsed ? (
-        <div className="flex flex-col items-center gap-2 pt-1.5">
+        <div className="flex flex-col items-center gap-3 pt-2.5">
           {toggle}
-          <span className="text-[11px] font-semibold text-slate-600 [writing-mode:vertical-rl]">{title}</span>
+          <span className="text-[12px] font-semibold text-slate-500 [writing-mode:vertical-rl]">{title}</span>
         </div>
       ) : (
         <>
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-300 bg-slate-50 px-2.5 py-1">
-            <h2 className="text-[12px] font-semibold text-slate-700">{title}</h2>
+          <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-slate-100 pl-4 pr-2.5">
+            <h2 className="text-[13px] font-semibold text-ink">{title}</h2>
             {toggle}
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-2.5 py-2">{children}</div>
+          <div className="lg-scroll min-h-0 flex-1 overflow-y-auto px-4 py-3.5">{children}</div>
         </>
       )}
     </aside>
   );
 }
 
-// Whether a side panel is folded, remembered per panel (first visit: folded on a narrow window).
-export const usePanelState = (key: string) => {
+// Whether a side panel is folded, remembered per panel. Until the user has chosen, it starts folded on a window narrower than `collapseBelow` px.
+export const usePanelState = (key: string, collapseBelow = 1200) => {
   const [collapsed, setCollapsed] = useState(() => {
-    try { const saved = localStorage.getItem(key); return saved === null ? window.innerWidth < 1200 : saved === "1"; } catch { return false; }
+    try { const saved = localStorage.getItem(key); return saved === null ? window.innerWidth < collapseBelow : saved === "1"; } catch { return false; }
   });
   const toggle = useCallback(() => setCollapsed((current) => {
     try { localStorage.setItem(key, current ? "0" : "1"); } catch { /* the panel still toggles without storage */ }
@@ -51,17 +51,19 @@ export const usePanelState = (key: string) => {
 };
 
 export function EmptyPanel({ children }: { children: ReactNode }) {
-  return <p className="rounded-sm border border-dashed border-slate-300 px-2.5 py-3 text-[12px] leading-snug text-slate-500">{children}</p>;
+  return <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50/60 px-3 py-3.5 text-[12.5px] leading-relaxed text-slate-500">{children}</p>;
 }
 
 export function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="border-b border-slate-200 py-1 last:border-0">
-      <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</dt>
-      <dd className="break-words text-[12.5px] text-slate-900">{children || <span className="text-slate-400">—</span>}</dd>
+    <div className="border-b border-slate-100 py-2.5 first:pt-0 last:border-0 last:pb-0">
+      <dt className="text-[12px] text-slate-500">{label}</dt>
+      <dd className="mt-0.5 break-words text-[13px] font-medium leading-snug text-ink">{children || <span className="font-normal text-slate-400">—</span>}</dd>
     </div>
   );
 }
+
+const STATE_TONE: Record<string, "slate" | "green" | "amber" | "blue"> = { DRAFT: "slate", POSTED: "green", REVERSED: "amber", REVERSAL: "blue" };
 
 const PURCHASE_TYPE: Record<string, string> = {
   GOODS_PURCHASE_OTHERS: "Goods — Others", GOODS_PURCHASE_CAPITAL: "Goods — Capital", SERVICE_PURCHASE_OTHERS: "Service — Others", SERVICE_PURCHASE_CAPITAL: "Service — Capital",
@@ -90,7 +92,7 @@ export function HeaderSummary({ form, invoiceNumber, calendar, readOnly, onEdit 
         {form.invoiceType === "IMPORT" && form.imp.customsDeclarationNo && <Row label="Customs declaration">{form.imp.customsDeclarationNo}</Row>}
         {form.remarks.trim() && <Row label="Remarks"><span className="whitespace-pre-wrap">{form.remarks}</span></Row>}
       </dl>
-      <button type="button" className="btn mt-2 h-7 w-full justify-center" onClick={onEdit}>
+      <button type="button" className="btn mt-4 w-full justify-center" onClick={onEdit}>
         {readOnly ? <><Eye size={12} /> View full header</> : <><Pencil size={12} /> Edit header</>}
       </button>
     </div>
@@ -119,24 +121,24 @@ export function VendorPanel({ lookups, companyId, branchId, vendorGLId, subLedge
   return (
     <div>
       <dl>
-        <Row label="Vendor ledger">{vendor ? <><span className="font-mono text-[11px] text-slate-600">{vendor.code}</span> {vendor.name}{!vendor.isActive && <span className="ml-1 text-[11px] text-amber-700">(inactive)</span>}</> : ""}</Row>
+        <Row label="Vendor ledger">{vendor ? <><span className="font-mono text-[11.5px] font-normal text-slate-500">{vendor.code}</span> {vendor.name}{!vendor.isActive && <span className="ml-1 text-[11.5px] font-normal text-amber-700">(inactive)</span>}</> : ""}</Row>
         <Row label="Sub ledger">{sub ? `${sub.code} — ${sub.name}` : vendor?.requiresSubLedger ? <span className="text-red-700">Required — not chosen</span> : ""}</Row>
         <Row label="Agent">{agent ? `${agent.code} — ${agent.name}` : ""}</Row>
       </dl>
       {duplicate && (
-        <p role="alert" className="mt-2 border border-amber-300 bg-amber-50 px-2 py-1 text-[11.5px] text-amber-900">
+        <p role="alert" className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] leading-snug text-amber-900">
           Vendor invoice <b>{vendorInvoiceNo.trim()}</b> is already on bill <b className="font-mono">{duplicate.invoiceNumber}</b>. A repeated vendor invoice number is refused on save.
         </p>
       )}
-      <h3 className="mt-3 mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Recent bills from this vendor</h3>
+      <h3 className="mb-2 mt-5 text-[12px] font-semibold text-ink">Recent bills from this vendor</h3>
       {bills === null ? <p className="text-[12px] text-slate-500">Loading…</p>
         : others.length === 0 ? <p className="text-[12px] text-slate-500">No earlier bills.</p>
         : (
-          <ul className="divide-y divide-slate-200 border border-slate-200 bg-white">
+          <ul className="overflow-hidden rounded-lg border border-slate-200">
             {others.slice(0, 5).map((b) => (
-              <li key={b.id} className="px-2 py-1 text-[12px]">
-                <div className="flex justify-between gap-2"><span className="font-mono">{b.invoiceNumber}</span><span className="tabular-nums">{money(b.totalAmount)}</span></div>
-                <div className="flex justify-between gap-2 text-[11px] text-slate-500"><span>{date(b.invoiceDate)}</span><span>{String(b.state ?? "").toLowerCase()}</span></div>
+              <li key={b.id} className="border-b border-slate-100 px-3 py-2 last:border-b-0">
+                <div className="flex items-baseline justify-between gap-2"><span className="font-mono text-[12.5px] font-semibold text-cobalt-800">{b.invoiceNumber}</span><span className="text-[12.5px] font-medium tabular-nums text-ink">{money(b.totalAmount)}</span></div>
+                <div className="mt-1 flex items-center justify-between gap-2 text-[11.5px] text-slate-500"><span className="tabular-nums">{date(b.invoiceDate)}</span><Pill text={String(b.state ?? "")} tone={STATE_TONE[String(b.state)]} /></div>
               </li>
             ))}
           </ul>

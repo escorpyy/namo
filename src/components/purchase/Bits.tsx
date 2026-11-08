@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Pencil, PanelRightClose, PanelRightOpen, Plus, Save, Search, Trash2, X } from "lucide-react";
+import { CalendarDays, Check, MapPin, Pencil, PanelRightClose, PanelRightOpen, Plus, Save, Search, Trash2, X } from "lucide-react";
 import type { PListRow } from "../../api";
 import { fmtPaise, toPaise } from "../../lib/money";
 import type { DocScreen } from "../../screens/purchase/useDocScreen";
@@ -9,34 +9,93 @@ import { ShortcutsOverlay } from "../ShortcutsOverlay";
 export const money = (s: unknown) => (s == null || s === "" ? "" : fmtPaise(toPaise(String(s))));
 export const num = (s: unknown) => (s == null || s === "" ? "" : String(s).includes(".") ? String(s).replace(/0+$/, "").replace(/\.$/, "") : String(s));
 
+/** Indian digit grouping (12,34,567.80) for a plain decimal string, without going through floating point. Anything that is not a plain number is returned unchanged. */
+export const groupIN = (s: string): string => {
+  const m = /^(-?)(\d+)(\.\d+)?$/.exec(String(s).trim());
+  if (!m) return String(s);
+  const [, sign, int, frac = ""] = m;
+  const tail = int.slice(-3), head = int.slice(0, -3);
+  return sign + (head ? `${head.replace(/\B(?=(\d{2})+(?!\d))/g, ",")},${tail}` : tail) + frac;
+};
+/** A date column that arrives as a full timestamp ("2026-03-15T00:00:00.000Z") shown as the date only. */
+export const dateOnly = (v: unknown) => String(v ?? "").slice(0, 10);
+
 const TONES: Record<string, string> = {
-  green: "bg-green-100 text-green-800 border-green-300", amber: "bg-amber-100 text-amber-800 border-amber-300",
-  red: "bg-red-100 text-red-800 border-red-300", slate: "bg-slate-100 text-slate-700 border-slate-300", blue: "bg-blue-100 text-blue-800 border-blue-300",
+  green: "bg-emerald-50 text-emerald-800 ring-emerald-200", amber: "bg-amber-50 text-amber-800 ring-amber-200",
+  red: "bg-rose-50 text-rose-800 ring-rose-200", slate: "bg-slate-100 text-slate-700 ring-slate-200", blue: "bg-cobalt-50 text-cobalt-800 ring-cobalt-200",
 };
 export function Pill({ text, tone = "slate" }: { text: string; tone?: keyof typeof TONES }) {
-  return <span className={`text-[10px] font-semibold px-1.5 py-px border rounded-sm whitespace-nowrap ${TONES[tone]}`}>{text}</span>;
+  return <span className={`lg-pill ${TONES[tone]}`}>{text.charAt(0).toUpperCase() + text.slice(1).toLowerCase()}</span>;
 }
 
 export function Field({ label, error, children, className = "", required }: { label: string; error?: string; children: ReactNode; className?: string; required?: boolean }) {
   return (
     <label className={`block min-w-0 ${className}`}>
-      <span className="block text-[11px] font-semibold leading-snug text-slate-600 mb-0.5 break-words">{label}{required && <span className="text-red-600"> *</span>}</span>
+      <span className="mb-1 block break-words text-[12px] font-medium leading-snug text-slate-600">{label}{required && <span className="text-rose-600"> *</span>}</span>
       {children}
-      {error && <span className="block text-[12px] text-red-700 mt-0.5">{error}</span>}
+      {error && <span className="mt-1 block text-[12px] text-rose-700">{error}</span>}
     </label>
   );
 }
 
-/** Light visual grouping for dense purchase document headers. */
+/** Grouping card for a dense document header: a quiet title bar, then the fields. */
 export function FormSection({ title, hint, children, className = "" }: { title: string; hint?: string; children: ReactNode; className?: string }) {
   return (
-    <section className={`min-w-0 rounded-sm border border-slate-300 bg-white/70 ${className}`}>
-      <header className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-slate-200 bg-slate-50 px-3 py-1.5">
-        <h2 className="text-[12px] font-semibold tracking-wide text-slate-800">{title}</h2>
-        {hint && <p className="text-[11px] text-slate-500">{hint}</p>}
+    <section className={`lg-card ${className}`}>
+      <header className="lg-card-head">
+        <h2 className="lg-card-title">{title}</h2>
+        {hint && <p className="lg-card-hint">{hint}</p>}
       </header>
-      <div className="px-3 py-2">{children}</div>
+      <div className="px-4 py-3.5">{children}</div>
     </section>
+  );
+}
+
+/** Branch and fiscal year the document belongs to, as two small chips. */
+export function ContextChips({ branchName, fyCode }: { branchName: string; fyCode: string }) {
+  return (
+    <>
+      <span className="lg-chip" title="Branch"><MapPin size={12} className="text-slate-400" /><b>{branchName}</b></span>
+      <span className="lg-chip" title="Fiscal year"><CalendarDays size={12} className="text-slate-400" />FY <b>{fyCode}</b></span>
+    </>
+  );
+}
+
+/** The title band of a document: what it is, its number and state, where it belongs, and (for a new one) how far along the entry is. */
+export function DocHeader({ title, number, pill, branchName, fyCode, dirty, steps, right }: {
+  title: string; number?: string; pill?: ReactNode; branchName: string; fyCode: string; dirty?: boolean;
+  steps?: { labels: string[]; current: number }; right?: ReactNode;
+}) {
+  return (
+    <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-slate-200 bg-white px-5 py-3">
+      <h1 className="lg-title">{title}{number && <span className="ml-2.5 font-mono text-[19px] font-semibold text-cobalt-800">{number}</span>}</h1>
+      {pill}
+      <ContextChips branchName={branchName} fyCode={fyCode} />
+      {dirty && <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-amber-700"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" />Unsaved changes</span>}
+      <span className="min-w-0 flex-1" />
+      {steps && <Stepper labels={steps.labels} current={steps.current} />}
+      {right}
+    </header>
+  );
+}
+
+/** A real sequence (header first, then the lines or charges), so the steps are numbered. */
+export function Stepper({ labels, current }: { labels: string[]; current: number }) {
+  return (
+    <ol aria-label="Entry progress" className="flex items-center gap-2 text-[12px]">
+      {labels.map((label, i) => {
+        const done = i < current, active = i === current;
+        return (
+          <li key={label} aria-current={active ? "step" : undefined} className="flex items-center gap-2">
+            {i > 0 && <span aria-hidden className={`h-px w-7 ${done || active ? "bg-cobalt-700" : "bg-slate-300"}`} />}
+            <span className={`grid h-5 w-5 place-items-center rounded-full text-[11px] font-semibold ${done ? "bg-cobalt-700 text-white" : active ? "bg-cobalt-50 text-cobalt-800 ring-1 ring-cobalt-700" : "bg-slate-100 text-slate-500"}`}>
+              {done ? <Check size={11} strokeWidth={3} /> : i + 1}
+            </span>
+            <span className={active ? "font-semibold text-ink" : done ? "text-slate-700" : "text-slate-500"}>{label}</span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -95,22 +154,14 @@ export function DocShell<F extends object>({ s, title, singular, branchName, fyC
   const onFormKey = formEnterKey;
   return (
     <>
-      <main className="flex-1 min-w-0 flex min-h-0">
-        <section data-purchase-document className="flex-1 min-w-0 flex flex-col min-h-0">
-          <div className="px-4 pt-3 pb-2 shrink-0">
-            <div className="flex items-end gap-3 flex-wrap">
-              <h1 className="text-[22px] font-semibold">{title}</h1>
-              <span className="pb-1 text-slate-600">Branch: <b>{branchName}</b> · FY <b>{fyCode}</b></span>
-              {pill && <span className="mb-1">{pill}</span>}
-              {s.dirty && <span className="pb-1 text-[11px] text-amber-700">• unsaved changes</span>}
-            </div>
-            <div className="double-rule mt-1" />
-            {notice}
+      <main className="ledger flex min-h-0 min-w-0 flex-1">
+        <section data-purchase-document className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <DocHeader title={title} pill={pill} branchName={branchName} fyCode={fyCode} dirty={s.dirty} />
+          {notice && <div className="shrink-0 px-5 pt-3">{notice}</div>}
+          <div data-zone="form" onKeyDown={onFormKey} className="lg-scroll min-h-0 flex-1 overflow-y-auto px-5 py-4">
+            {!s.lookups || !s.form ? <p className="p-2 text-slate-500">Loading…</p> : children}
           </div>
-          <div data-zone="form" onKeyDown={onFormKey} className="flex-1 min-h-0 overflow-y-auto px-4 pb-3">
-            {!s.lookups || !s.form ? <p className="text-slate-500 p-2">Loading…</p> : children}
-          </div>
-          <div className="shrink-0 border-t border-slate-400 bg-slate-50 px-4 py-2 flex items-center gap-2 flex-wrap">
+          <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-slate-200 bg-white px-5 py-2.5">
             {!view ? (
               <>
                 <button data-nav className="btn btn-primary" disabled={s.saving} onClick={() => void s.save()}><Save size={14} /> {s.mode === "edit" ? "Update" : "Save"} <span className="kbd">Ctrl+S</span></button>
@@ -121,34 +172,34 @@ export function DocShell<F extends object>({ s, title, singular, branchName, fyC
                 <button data-nav className="btn" onClick={() => s.newDoc()}><Plus size={14} /> New <span className="kbd">F3</span></button>
                 <button data-nav className="btn" disabled={!canEdit} onClick={s.edit}><Pencil size={14} /> Edit <span className="kbd">F2</span></button>
                 <button data-nav className="btn" disabled={!canDelete} onClick={s.askDelete}><Trash2 size={14} /> Delete <span className="kbd">Ctrl+Del</span></button>
-                {actions && <><span className="w-px h-6 bg-slate-300 mx-1" />{actions}</>}
+                {actions && <><span className="mx-1 h-6 w-px bg-slate-200" />{actions}</>}
               </>
             )}
           </div>
         </section>
 
-        <aside id="purchase-document-list" data-zone="list" aria-label={`${title} document list`} className={`${s.listCollapsed ? "w-11" : "w-[min(340px,32vw)] min-w-[250px]"} shrink-0 border-l border-slate-400 bg-white/50 flex flex-col min-h-0 overflow-hidden transition-[width] duration-150`}>
+        <aside id="purchase-document-list" data-zone="list" aria-label={`${title} document list`} className={`${s.listCollapsed ? "w-11" : "w-[min(340px,32vw)] min-w-[250px]"} flex min-h-0 shrink-0 flex-col overflow-hidden border-l border-slate-200 bg-white transition-[width] duration-150`}>
           {s.listCollapsed ? (
-            <div className="flex flex-col items-center gap-2 pt-2">
+            <div className="flex flex-col items-center gap-2 pt-2.5">
               <button data-list-toggle type="button" onClick={s.toggleList} aria-expanded={false} aria-controls="purchase-document-list" aria-label={`Expand ${singular.toLowerCase()} list (Alt+4)`} title={`Expand ${singular.toLowerCase()} list (Alt+4)`}
-                className="h-8 w-8 grid place-items-center rounded-sm hover:bg-slate-200 focus-visible:outline-2 focus-visible:outline-blue-700">
+                className="grid h-8 w-8 place-items-center rounded-md text-slate-600 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-cobalt-700">
                 <PanelRightOpen size={17} />
               </button>
-              <span className="text-[10px] text-slate-600 tabular-nums [writing-mode:vertical-rl]" title={`${s.total} ${singular.toLowerCase()}s`}>{s.total}</span>
+              <span className="text-[11px] font-medium tabular-nums text-slate-500 [writing-mode:vertical-rl]" title={`${s.total} ${singular.toLowerCase()}s`}>{s.total}</span>
             </div>
           ) : (
             <>
-              <div className="p-2 border-b border-slate-300 space-y-1.5 shrink-0">
+              <div className="shrink-0 space-y-2 border-b border-slate-100 p-3">
                 <div className="flex items-center justify-between gap-2">
-                  <h2 className="text-[12px] font-semibold text-slate-700">{title} list <span className="font-normal text-slate-500">({s.total})</span></h2>
+                  <h2 className="flex items-center gap-2 text-[13px] font-semibold text-ink">{title} list <span className="lg-count">{s.total}</span></h2>
                   <button data-list-toggle type="button" onClick={s.toggleList} aria-expanded={true} aria-controls="purchase-document-list" aria-label={`Collapse ${singular.toLowerCase()} list (Alt+4)`} title={`Collapse ${singular.toLowerCase()} list (Alt+4)`}
-                    className="h-7 w-7 shrink-0 grid place-items-center rounded-sm hover:bg-slate-200 focus-visible:outline-2 focus-visible:outline-blue-700">
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-slate-600 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-cobalt-700">
                     <PanelRightClose size={16} />
                   </button>
                 </div>
                 <div className="relative">
-                  <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" />
-                  <input ref={s.searchRef} value={s.search} onChange={(e) => s.setSearch(e.target.value)} placeholder={`Search ${singular.toLowerCase()}s…  (F4)`} aria-label={`Search ${singular.toLowerCase()}s`} className="fld min-w-0 pl-7"
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input ref={s.searchRef} value={s.search} onChange={(e) => s.setSearch(e.target.value)} placeholder={`Search ${singular.toLowerCase()}s…  (F4)`} aria-label={`Search ${singular.toLowerCase()}s`} className="fld min-w-0 pl-8"
                     onFocus={(e) => e.currentTarget.select()}
                     onKeyDown={(e) => { if (e.key === "ArrowDown" || e.key === "Enter") { e.preventDefault(); document.querySelector<HTMLElement>("[data-zone=list] [data-row]")?.focus(); } else if (e.key === "Escape") { e.stopPropagation(); (e.target as HTMLElement).blur(); } }} />
                 </div>
@@ -157,21 +208,20 @@ export function DocShell<F extends object>({ s, title, singular, branchName, fyC
                   {statusOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </div>
-              <div className="flex-1 min-h-0 overflow-y-auto" onKeyDown={(e) => {
+              <div className="lg-scroll min-h-0 flex-1 overflow-y-auto" onKeyDown={(e) => {
                 const rows = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("[data-row]")), i = rows.indexOf(e.target as HTMLElement);
                 if (e.key === "ArrowDown") { e.preventDefault(); rows[Math.min(i + 1, rows.length - 1)]?.focus(); }
                 else if (e.key === "ArrowUp") { e.preventDefault(); if (i <= 0) s.searchRef.current?.focus(); else rows[i - 1].focus(); }
                 else if (e.key === "Escape") { e.stopPropagation(); document.querySelector<HTMLElement>("[data-zone=form] [data-field]:not(:disabled)")?.focus(); }
               }}>
-                {s.rows.length === 0 && <p className="p-3 text-slate-600 text-[12px]">No {singular.toLowerCase()}s found.</p>}
+                {s.rows.length === 0 && <p className="p-4 text-[12px] text-slate-500">No {singular.toLowerCase()}s found.</p>}
                 {s.rows.map((r) => (
-                  <button key={r.id} data-row aria-selected={r.id === s.selectedId} onClick={() => s.select(r.id)}
-                    className={`w-full min-w-0 text-left px-2.5 py-2 border-b border-slate-200 hover:bg-blue-50 focus:outline-none focus:bg-blue-100 break-words ${r.id === s.selectedId ? "bg-blue-100" : ""}`}>
+                  <button key={r.id} data-row aria-selected={r.id === s.selectedId} onClick={() => s.select(r.id)} className="lg-row min-w-0 break-words px-3.5 py-2.5">
                     {listRow(r)}
                   </button>
                 ))}
               </div>
-              <div className="shrink-0 px-2.5 py-1 border-t border-slate-300 text-[11px] text-slate-600 break-words">{s.rows.length === s.total ? `${s.total} ${singular.toLowerCase()}(s)` : `Showing ${s.rows.length} of ${s.total}`}</div>
+              <div className="shrink-0 break-words border-t border-slate-100 px-3.5 py-1.5 text-[12px] text-slate-500">{s.rows.length === s.total ? `${s.total} ${singular.toLowerCase()}(s)` : `Showing ${s.rows.length} of ${s.total}`}</div>
             </>
           )}
         </aside>

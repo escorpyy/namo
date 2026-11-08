@@ -14,9 +14,9 @@ const QTY = /^\d{0,12}(\.\d{0,6})?$/, RATE = /^\d{0,12}(\.\d{0,6})?$/, INT = /^\
 
 type ColKey = "n" | "p" | "aq" | "au" | "q" | "u" | "r" | "amt" | "terms" | "net" | "xd" | "lc" | "b" | "mf" | "ex" | "link" | "rm";
 const COL_SIZE: Record<ColKey, string> = {
-  n: "36px", p: "minmax(230px,1.6fr)", aq: "84px", au: "100px", q: "96px", u: "72px", r: "100px", amt: "124px",
-  terms: "112px", net: "124px",
-  xd: "140px", lc: "130px", b: "130px", mf: "150px", ex: "150px", link: "minmax(140px,1fr)", rm: "32px",
+  n: "24px", p: "minmax(150px,1.6fr)", aq: "64px", au: "84px", q: "78px", u: "44px", r: "84px", amt: "100px",
+  terms: "92px", net: "104px",
+  xd: "132px", lc: "120px", b: "112px", mf: "128px", ex: "128px", link: "minmax(130px,1fr)", rm: "30px",
 };
 const COL_HEAD: Record<ColKey, string> = {
   n: "#", p: "Product", aq: "Alt Qty", au: "Alt Unit", q: "Quantity", u: "Unit", r: "Rate", amt: "Amount",
@@ -179,12 +179,12 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
   const live = lines.filter((l) => !isBlankLine(l)).length;
 
   return (
-    <div className={`border border-slate-400 bg-white/60 ${fill ? "flex min-h-0 flex-1 flex-col" : ""}`}>
-      <div className={`${fill ? "min-h-0 flex-1 overflow-auto" : "overflow-x-auto"} outline-none`} data-grid="lines" data-nav="lines-grid" onKeyDown={onKey} onKeyDownCapture={onKeyCapture} tabIndex={0} aria-label={`${kind} line items`}
+    <div className={`lg-card lg-grid ${fill ? "flex min-h-0 flex-1 flex-col" : ""}`}>
+      <div className={`${fill ? "min-h-0 flex-1 overflow-auto" : "overflow-x-auto"} lg-scroll outline-none`} data-grid="lines" data-nav="lines-grid" onKeyDown={onKey} onKeyDownCapture={onKeyCapture} tabIndex={0} aria-label={`${kind} line items`}
         onFocus={(e) => { if (e.target === e.currentTarget) setRowSel(Math.max(0, Math.min(lastRow.current, lines.length - 1))); else { const r = rowOf(e.target as Element); if (r >= 0) lastRow.current = r; } }}
         onBlur={(e) => { if (e.target === e.currentTarget) setRowSel(null); }}>
         <div className="min-w-max">
-          <div style={{ gridTemplateColumns: layout.template }} className="sticky top-0 z-10 grid gap-x-1 px-2 py-1 text-[11px] font-semibold text-slate-600 border-b border-slate-300 bg-slate-100">
+          <div style={{ gridTemplateColumns: layout.template }} className="lg-th grid gap-x-1.5 px-3 py-2.5">
             {layout.heads.map((h, i) => <span key={i} className={RIGHT_HEAD.has(h) ? "text-right pr-2" : ""}>{h}</span>)}
           </div>
           {lines.map((l, i) => {
@@ -198,8 +198,8 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
             const errMsgs = Object.entries(errors).filter(([k, v]) => k.startsWith(`L.${i}.`) && v).map(([, v]) => v!);
             const qtyShown = useAlt ? derivedQty(l, p) : l.qty;
             return (
-              <div key={l.key} data-row={i} className={`border-b border-slate-200 ${rowSel === i ? "bg-blue-100 ring-2 ring-inset ring-blue-600" : errMsgs.length ? "bg-red-50" : ""}`}>
-                <div style={{ gridTemplateColumns: layout.template }} className={`grid gap-x-1 px-2 ${kind === "bill" ? "py-0.5" : "py-1"} items-center`}>
+              <div key={l.key} data-row={i} className={`border-b border-slate-100 transition-colors ${rowSel === i ? "bg-cobalt-50 ring-2 ring-inset ring-cobalt-700" : errMsgs.length ? "bg-rose-50" : "hover:bg-slate-50/80"}`}>
+                <div style={{ gridTemplateColumns: layout.template }} className={`grid gap-x-1.5 px-3 ${kind === "bill" ? "py-1" : "py-1.5"} items-center`}>
                   <span className="text-slate-500 tabular-nums">{i + 1}</span>
                   <MasterReferencePicker fieldName={`L.${i}.p`} label="Product" required scopeKey="products" contextKey={contextKey} placeholder="Choose product…" value={l.productId} hasError={bad("p")} options={productOpts} disabled={off || (lockProducts && !!l.link)} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
                   {layout.showAlt && (
@@ -219,7 +219,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                     return <>
                       <button type="button" data-nav={`line-terms-${i}`} disabled={!l.productId}
                         onClick={() => onOpenTerms(i)} title={`Edit terms for line ${i + 1}${summary.count ? ` · ${summary.count} term${summary.count === 1 ? "" : "s"}` : ""}`}
-                        className={`${kind === "bill" ? "h-7" : "h-8"} w-full px-1 text-right tabular-nums text-blue-700 underline underline-offset-2 hover:bg-blue-50 disabled:text-slate-500 disabled:no-underline`}>
+                        className={`${kind === "bill" ? "h-7" : "h-8"} w-full px-1 text-right tabular-nums text-cobalt-700 underline decoration-cobalt-200 underline-offset-4 hover:bg-cobalt-50 disabled:text-slate-500 disabled:no-underline`}>
                         {summary.amount.startsWith("-") ? `− ${money(summary.amount.slice(1))}` : money(summary.amount || "0")}{summary.count > 0 && <span className="ml-1 text-[10px] text-slate-500 no-underline">({summary.count})</span>}
                       </button>
                       <span className="text-right pr-2 tabular-nums font-medium">{lineNet(lineAmount(l, p), summary.amount)}</span>
@@ -241,27 +241,27 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                     </>
                   )}
                   {layout.showLink && <span className="text-[11px] text-slate-600 break-words leading-tight" title={l.link}>{l.link || "—"}</span>}
-                  <button type="button" data-nav="remove-line" disabled={off} onClick={() => remove(i)} title="Remove line (Shift+Delete)" aria-label="Remove line" className={`${kind === "bill" ? "h-7 w-7" : "h-8 w-8"} grid place-items-center text-slate-500 hover:text-red-700 focus-visible:outline-2 focus-visible:outline-blue-700 disabled:opacity-30`}><X size={14} /></button>
+                  <button type="button" data-nav="remove-line" disabled={off} onClick={() => remove(i)} title="Remove line (Shift+Delete)" aria-label="Remove line" className={`${kind === "bill" ? "h-7 w-7" : "h-8 w-8"} grid place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-2 focus-visible:outline-cobalt-700 disabled:opacity-30`}><X size={14} /></button>
                 </div>
-                {errMsgs.length > 0 && <p className="px-3 pb-1 text-[12px] text-red-700">{errMsgs[0]}</p>}
+                {errMsgs.length > 0 && <p className="px-3 pb-1 text-[12px] text-rose-700">{errMsgs[0]}</p>}
               </div>
             );
           })}
         </div>
       </div>
-      {errors.lines && <p className="px-3 py-1 text-[12px] text-red-700">{errors.lines}</p>}
-      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-2 py-1.5 bg-slate-50 border-t border-slate-300">
-        {!readOnly && <button type="button" data-nav="add-line" className="btn h-7" onClick={() => addRow()}><Plus size={13} /> Add line {kind === "bill" && <span className="kbd">F6</span>}</button>}
+      {errors.lines && <p className="px-3 py-1.5 text-[12px] text-rose-700">{errors.lines}</p>}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200 bg-slate-50 px-3 py-2.5">
+        {!readOnly && <button type="button" data-nav="add-line" className="btn" onClick={() => addRow()}><Plus size={13} /> Add line {kind === "bill" && <span className="kbd">F6</span>}</button>}
         <span className="flex-1" />
-        <span className="text-[12px]">Lines <b className="tabular-nums">{live}</b></span>
-        <span className="text-[12px]">Basic Amount <b className="tabular-nums ml-1">{fmtPaise(total)}</b></span>
+        <span className="text-[12.5px] text-slate-600">Lines <b className="font-semibold tabular-nums text-ink">{live}</b></span>
+        <span className="text-[12.5px] text-slate-600">Basic amount <b className="ml-1 text-[14px] font-semibold tabular-nums text-ink">{fmtPaise(total)}</b></span>
       </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
-const TCOLS = "36px minmax(220px,1.5fr) 84px 120px 120px 92px 120px 120px 32px";
+const TCOLS = "28px minmax(210px,1.5fr) 72px 112px 112px 88px 112px 112px 30px";
 
 interface TProps {
   terms: TermRow[];
@@ -320,10 +320,10 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
   };
 
   return (
-    <div className="border border-slate-400 bg-white/60">
-      <div className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-blue-700" data-grid="terms" onKeyDown={onKey} tabIndex={0} aria-label="Billing terms; scroll horizontally to see all columns">
+    <div className="lg-card lg-grid">
+      <div className="lg-scroll overflow-x-auto focus-visible:outline-2 focus-visible:outline-cobalt-700" data-grid="terms" onKeyDown={onKey} tabIndex={0} aria-label="Billing terms; scroll horizontally to see all columns">
         <div className="min-w-max">
-          <div style={{ gridTemplateColumns: TCOLS }} className="grid gap-x-1 px-2 py-1 text-[11px] font-semibold text-slate-600 border-b border-slate-300 bg-slate-100">
+          <div style={{ gridTemplateColumns: TCOLS }} className="lg-th grid gap-x-2 px-3 py-2.5">
             <span>#</span><span>Term</span><span>Line</span><span>Calculated as</span><span className="text-right pr-2">Rate % / Amount</span><span>Override</span><span className="text-right pr-2">Use amount</span><span className="text-right pr-2">{calculationPreview === undefined ? "Saved amount" : "Live amount"}</span><span />
           </div>
           {terms.length === 0 && <p className="px-3 py-2 text-[12px] text-slate-500">No billing terms. {!readOnly && "Add a discount, VAT, freight … if the document has any."}</p>}
@@ -334,8 +334,8 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
             const cls = (c: string, extra = "") => `fld h-8 ${extra} ${bad(c) ? "fld-err" : ""} ${off ? "bg-slate-100 text-slate-600" : ""}`;
             const msg = Object.entries(errors).find(([k, v]) => k.startsWith(`T.${i}.`) && v)?.[1];
             return (
-              <div key={t.key} className={`border-b border-slate-200 ${msg ? "bg-red-50" : ""}`}>
-                <div style={{ gridTemplateColumns: TCOLS }} className="grid gap-x-1 px-2 py-1 items-center">
+              <div key={t.key} className={`border-b border-slate-100 transition-colors ${msg ? "bg-rose-50" : "hover:bg-slate-50/80"}`}>
+                <div style={{ gridTemplateColumns: TCOLS }} className="grid gap-x-2 px-3 py-1.5 items-center">
                   <span className="text-slate-500 tabular-nums">{i + 1}</span>
                   <MasterReferencePicker fieldName={`T.${i}.t`} label="Billing term" required scopeKey="purchase-terms" contextKey={contextKey} placeholder="Choose term…" value={t.termId} hasError={bad("t")} options={opts} disabled={off} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
                   <input data-field={`T.${i}.l`} disabled={off || !m?.isProductwise || fixedLineNumber !== undefined} inputMode="numeric" value={fixedLineNumber === undefined ? t.lineNumber : String(fixedLineNumber)} placeholder={m?.isProductwise ? "Line" : "—"} onChange={decOnly(INT, (v) => patch(i, { lineNumber: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("l", "text-right tabular-nums")} aria-label={fixedLineNumber === undefined ? `Line number (1-${lineCount})` : `Line ${fixedLineNumber}`} />
@@ -357,15 +357,15 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
                     const shown = amount !== undefined && amount !== "" ? `${nature === "DEDUCTIVE" ? "− " : "+ "}${money(amount)}` : "—";
                     return <span className="text-right pr-2 tabular-nums text-slate-700" title={formula} aria-label={`${m?.name ?? "Billing term"}: ${shown}. ${formula}`}>{shown}</span>;
                   })()}
-        <button type="button" data-nav="remove-term" disabled={off} onClick={() => remove(i)} title="Remove term (Shift+Delete)" aria-label="Remove term" className="h-8 w-8 grid place-items-center text-slate-500 hover:text-red-700 focus-visible:outline-2 focus-visible:outline-blue-700 disabled:opacity-30"><X size={14} /></button>
+        <button type="button" data-nav="remove-term" disabled={off} onClick={() => remove(i)} title="Remove term (Shift+Delete)" aria-label="Remove term" className="h-8 w-8 grid place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-2 focus-visible:outline-cobalt-700 disabled:opacity-30"><X size={14} /></button>
                 </div>
-                {msg && <p className="px-3 pb-1 text-[12px] text-red-700">{msg}</p>}
+                {msg && <p className="px-3 pb-1.5 text-[12px] text-rose-700">{msg}</p>}
               </div>
             );
           })}
         </div>
       </div>
-      {!readOnly && <div className="px-2 py-1.5 bg-slate-50 border-t border-slate-300"><button type="button" data-nav="add-term" className="btn h-7" onClick={add}><Plus size={13} /> Add term</button></div>}
+      {!readOnly && <div className="border-t border-slate-200 bg-slate-50 px-3 py-2.5"><button type="button" data-nav="add-term" className="btn" onClick={add}><Plus size={13} /> Add term</button></div>}
     </div>
   );
 }
