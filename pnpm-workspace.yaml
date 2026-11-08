@@ -1,2 +1,5 @@
 allowBuilds:
   esbuild: true
+overrides:
+  # express 4.22.3 resolves body-parser 1.20.8, which has a DoS advisory (fixed in 1.20.9). Drop this once express pulls 1.20.9+ itself.
+  body-parser: "^1.20.9"

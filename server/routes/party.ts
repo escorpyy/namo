@@ -2,7 +2,7 @@ import { Router } from "express";
 import { and, asc, eq, getTableName, ne, sql } from "drizzle-orm";
 import { db } from "../db";
 import * as S from "../db/schema";
-import { HttpError, wrap } from "./_util";
+import { HttpError, idParam, sameCompany, wrap } from "./_util";
 import { buildSchema } from "./masterFactory";
 import { assertAgent, assertSubArea, assertSubGroup, normalBalanceFor } from "./links";
 import type { MasterDef } from "../../shared/masters";
@@ -24,7 +24,7 @@ export function partyRouter(def: MasterDef) {
   const selectRows = (o: { companyId?: number; id?: number }) =>
     db
       .select({
-        id: P.id, generalLedgerId: P.generalLedgerId,
+        id: P.id, companyId: P.companyId, generalLedgerId: P.generalLedgerId,
         code: GL.code, name: GL.name, accountSubGroupId: GL.accountSubGroupId, glType: GL.glType, isActive: GL.isActive,
         subAreaId: P.subAreaId, agentId: P.agentId,
         address: P.address, city: P.city, state: P.state, country: P.country, phone: P.phone, mobile: P.mobile,
@@ -111,9 +111,10 @@ export function partyRouter(def: MasterDef) {
   }));
 
   r.put("/:id", wrap(async (req, res) => {
-    const id = Number(req.params.id);
+    const id = idParam(req.params.id, "Party");
     const [ex] = await db.select().from(P).where(eq(P.id, id));
     if (!ex) throw new HttpError(404, "Party not found.");
+    sameCompany(req.query.companyId, ex.companyId, "Party");
     const [glRow] = await db.select().from(GL).where(eq(GL.id, ex.generalLedgerId));
     const d = parse(req.body);
     const groupType = await validate(d, ex.companyId, id, ex.generalLedgerId);
@@ -131,9 +132,10 @@ export function partyRouter(def: MasterDef) {
   }));
 
   r.delete("/:id", wrap(async (req, res) => {
-    const id = Number(req.params.id);
+    const id = idParam(req.params.id, "Party");
     const [row] = await selectRows({ id });
     if (!row) throw new HttpError(404, "Party not found.");
+    sameCompany(req.query.companyId, (row as any).companyId, "Party");
     for (const c of def.counts ?? []) {
       const n = (row as any)[c.key] as number;
       if (n > 0) throw new HttpError(409, `Cannot delete: ${n} ${c.label} linked to this Party.`);

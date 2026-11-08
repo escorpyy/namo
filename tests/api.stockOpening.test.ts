@@ -184,9 +184,7 @@ describe.skipIf(!DB_READY)("Stock Opening (API)", () => {
       expect(r.body.message).toMatch(/appears twice/);
     });
 
-    // KNOWN ISSUE (PROJECT_TRACKER ERP-017): the 5000-row cap in stockOpening.ts is unreachable, because express.json() has its default 100 KB limit
-    // (about 1,300 rows) and the error handler answers that with 500. `it.fails` keeps CI green and starts FAILING once this is fixed: then change it to a plain `it`.
-    it.fails("rejects more than 5000 rows with a clear 400 (today the 100 KB body limit answers 500 first)", async () => {
+    it("rejects more than 5000 rows with a clear 400 (the body limit is 5 MB, ERP-017)", async () => {
       const many = await put({ upserts: Array.from({ length: 5001 }, () => row(sd.pcs, 1, 1, "1.00")) });
       expect(many.status).toBe(400);
       expect(many.body.message).toMatch(/Too many rows/);

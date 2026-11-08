@@ -2,7 +2,7 @@ import { Router } from "express";
 import { and, asc, eq, getTableColumns, getTableName, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { HttpError, wrap } from "./_util";
+import { HttpError, idParam, sameCompany, wrap } from "./_util";
 import type { FieldDef, MasterDef } from "../../shared/masters";
 
 type CountSrc = { table: any; column: string };
@@ -182,10 +182,11 @@ export function masterRouter(def: MasterDef, cfg: ServerCfg) {
   }));
 
   r.put("/:id", wrap(async (req, res) => {
-    const id = Number(req.params.id);
+    const id = idParam(req.params.id, def.singular);
     const [existing] = await db.select().from(t).where(eq(t.id, id));
     if (!existing) throw new HttpError(404, `${def.singular} not found.`);
     const companyId: number = global ? id : cfg.parent ? (await parentCompany(existing[cfg.parent.column]))! : existing.companyId;
+    if (!global) sameCompany(req.query.companyId, companyId, def.singular);
     const data = parse(req.body);
     if (cfg.parent && (await parentCompany(data[def.parent!.field])) !== companyId)
       throw new HttpError(400, `${def.parent!.label} must belong to the same company.`, def.parent!.field);
@@ -198,9 +199,10 @@ export function masterRouter(def: MasterDef, cfg: ServerCfg) {
 
   r.delete("/:id", wrap(async (req, res) => {
     if (def.noDelete) throw new HttpError(409, def.noDelete);
-    const id = Number(req.params.id);
+    const id = idParam(req.params.id, def.singular);
     const [row] = await selectRows({ id });
     if (!row) throw new HttpError(404, `${def.singular} not found.`);
+    if (!global) sameCompany(req.query.companyId, cfg.parent ? await parentCompany((row as any)[cfg.parent.column]) : (row as any).companyId, def.singular);
     for (const c of def.counts ?? []) {
       const n = (row as any)[c.key] as number;
       if (n > 0) throw new HttpError(409, `Cannot delete: ${n} ${c.label} linked to this ${def.singular}.`);

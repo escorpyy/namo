@@ -16,15 +16,20 @@ import { periodLockRouter } from "./routes/periodLock";
 import { HttpError, pgError } from "./routes/_util";
 
 export const app = express();
-app.use(cors());
-app.use(express.json());
+// CORS: off by default. The React app is served by this server in production and proxied by Vite in development, so it is same-origin and
+// needs none. To allow another origin, list it: CORS_ORIGIN=https://erp.example.com,https://other.example.com
+const corsOrigins = (process.env.CORS_ORIGIN ?? "").split(",").map((o) => o.trim()).filter(Boolean);
+if (corsOrigins.length) app.use(cors({ origin: corsOrigins }));
+// 5 MB: a stock opening save may carry up to 5000 rows (the 100 KB default refused a few thousand; ERP-017).
+app.use(express.json({ limit: "5mb" }));
 
 app.get("/api/health", async (_req, res) => {
   try {
     await db.execute(sql`select 1`);
     res.json({ ok: true });
   } catch (e) {
-    res.status(500).json({ ok: false, message: (e as Error).message });
+    console.error(e); // details stay in the server log, not in the answer
+    res.status(500).json({ ok: false, message: "Database not reachable" });
   }
 });
 app.use("/api/context", contextRouter);
@@ -43,6 +48,11 @@ if (fs.existsSync(dist)) {
 }
 
 export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
+  // The body parser's own errors carry a type: too large -> 413, not valid JSON -> 400 (they used to fall through to a 500).
+  const parserType = (err as { type?: unknown } | null)?.type;
+  if (parserType === "entity.too.large") return res.status(413).json({ message: "The request is too large." });
+  if (parserType === "entity.parse.failed" || parserType === "encoding.unsupported" || parserType === "charset.unsupported")
+    return res.status(400).json({ message: "The request body is not valid JSON." });
   if (err instanceof HttpError) return res.status(err.status).json({ message: err.message, field: err.field, code: err.code });
   // A rule the DATABASE refused. Routes normally pre-check, so this is the safety net (races, new code paths). The answer is built from
   // the Postgres code, never from drizzle's wrapper message (that one is the SQL text and its parameters).

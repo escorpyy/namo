@@ -2,7 +2,7 @@ import { Router } from "express";
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../db";
 import * as S from "../db/schema";
-import { HttpError, wrap } from "./_util";
+import { HttpError, idParam, sameCompany, wrap } from "./_util";
 import { applyConditions, buildSchema } from "./masterFactory";
 import type { MasterDef } from "../../shared/masters";
 
@@ -172,9 +172,10 @@ export function productRouter(def: MasterDef) {
   }));
 
   r.put("/:id", wrap(async (req, res) => {
-    const id = Number(req.params.id);
+    const id = idParam(req.params.id, "Product");
     const [ex] = await db.select().from(P).where(eq(P.id, id));
     if (!ex) throw new HttpError(404, "Product not found.");
+    sameCompany(req.query.companyId, ex.companyId, "Product");
     const d = parse(req.body);
     if (d.type !== ex.type) throw new HttpError(409, "Product type cannot be changed after creation (create a new product instead).", "type");
     await check(d, ex.companyId, id);
@@ -186,7 +187,10 @@ export function productRouter(def: MasterDef) {
   }));
 
   r.delete("/:id", wrap(async (req, res) => {
-    const id = Number(req.params.id);
+    const id = idParam(req.params.id, "Product");
+    const [pc] = await db.select({ companyId: P.companyId }).from(P).where(eq(P.id, id));
+    if (!pc) throw new HttpError(404, "Product not found.");
+    sameCompany(req.query.companyId, pc.companyId, "Product");
     const [row] = await selectRows({ id });
     if (!row) throw new HttpError(404, "Product not found.");
     for (const c of def.counts ?? []) {

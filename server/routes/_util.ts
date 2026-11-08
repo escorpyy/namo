@@ -33,3 +33,21 @@ export function pgError(e: unknown): PgError | null {
   }
   return null;
 }
+
+// A record id from the URL: a positive whole number that fits a Postgres integer. Anything else (abc, 1.5, -3, 99999999999) is "not found",
+// never a database error.
+export function idParam(v: unknown, what: string): number {
+  if (typeof v !== "string" || !/^\d{1,10}$/.test(v)) throw new HttpError(404, `${what} not found.`);
+  const n = Number(v);
+  if (n < 1 || n > 2_147_483_647) throw new HttpError(404, `${what} not found.`);
+  return n;
+}
+
+// Guard for edit / delete by id: when the request names a company (?companyId=), the record must belong to it, else "not found" (never
+// "forbidden", so another company's ids are not confirmed). With no ?companyId nothing is checked, for older callers.
+// This is a consistency guard, NOT access control: without login (ERP-002) a caller can still name any company.
+export function sameCompany(companyIdQuery: unknown, ownerCompanyId: number | null | undefined, what: string): void {
+  if (companyIdQuery === undefined) return;
+  const c = typeof companyIdQuery === "string" && /^\d{1,10}$/.test(companyIdQuery) ? Number(companyIdQuery) : NaN;
+  if (c !== ownerCompanyId) throw new HttpError(404, `${what} not found.`);
+}

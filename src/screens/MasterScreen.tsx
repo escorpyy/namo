@@ -177,7 +177,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
     savingRef.current = true; setSaving(true);
     const wasEdit = mode === "edit" && selectedId != null;
     try {
-      const rec = wasEdit ? await api.update(selectedId!, payload) : await api.create(companyId, payload);
+      const rec = wasEdit ? await api.update(selectedId!, companyId, payload) : await api.create(companyId, payload);
       setItems((prev) => sortRows(def, [...prev.filter((i) => i.id !== rec.id), rec]));
       setSelectedId(rec.id); setMode("view"); setForm(toForm(def, rec)); setErrors({});
       flash(`${wasEdit ? "Updated" : "Saved"} ${recordLabel(def, rec)}`, "ok");
@@ -250,7 +250,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
           onClick: async () => {
             setDialog(null);
             try {
-              await api.remove(target.id);
+              await api.remove(target.id, companyId);
               setItems((p) => p.filter((i) => i.id !== target.id));
               resetToNew();
               flash(`Deleted ${recordLabel(def, target)}`, "ok");

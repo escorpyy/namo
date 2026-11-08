@@ -77,6 +77,18 @@
 - **Accounting policy (confirmed by owner, November 2026):** use periodic inventory accounting. Purchase bills continue to post Dr Purchase A/c / Cr Supplier; no perpetual Dr Inventory entry is added. Product-wise landed unit values are valuation snapshots for inventory/period-end use. Customs assessments create no supplier payable or GL voucher. Linked service bills remain normal supplier documents; eligible tax-exclusive costs may enter CIF while their input tax follows the bill's existing tax treatment. `LANDED_ONLY` sources affect final landed value but not pre-customs CIF.
 - **Unverified (session 6/7):** migrations 0003-0006 on (a) the owner's existing dev DB (owner must run `pnpm db:migrate`), (b) a legacy `db:push` DB, (c) a DB containing rows that violate the new rules. Only the fresh-DB path was run.
 
+## Audit 2026-11-08 (patch, not yet committed)
+
+- Master / Party / Product `PUT` and `DELETE` now answer 404 when `?companyId=` names a different company than the record's (the UI sends it now). Without `?companyId` nothing is checked (older callers). **A consistency guard only; real access control still needs ERP-002.** Non-numeric or out-of-range ids answer 404 instead of 500.
+- ERP-017 fixed: `express.json` limit is 5 MB; malformed JSON answers 400, an oversize body 413. The `it.fails` stock-opening test became a plain test.
+- CORS is off unless `CORS_ORIGIN` (comma list) is set; the app is same-origin in production and proxied by Vite in development.
+- `/api/health` no longer returns the raw database error (logged on the server instead).
+- drizzle-orm 0.44.7 -> 0.45.4 (SQL-identifier advisory); `body-parser` pinned to ^1.20.9 by a pnpm override (DoS advisory).
+- **Open:** `zod` 3.x advisory (memory use on oversized arrays; fix needs zod >= 4.6.6, a major upgrade, not done); CI pins `pnpm` version 12, confirm it runs green.
+- Verified on this patch: typecheck, build, no migration drift, 628/628 tests on PostgreSQL 16 (11 new in `tests/api.hardening.test.ts`, shown to fail without the server fixes).
+
+---
+
 ## C. Module inventory
 
 | Module | Status | Evidence / files | Known defects | Remaining |

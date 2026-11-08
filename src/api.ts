@@ -39,8 +39,8 @@ export const masterApi = (key: string) => ({
   list: (companyId: number) => req<Row[]>(`/api/masters/${key}?companyId=${companyId}`),
   create: (companyId: number, v: Record<string, unknown>) =>
     req<Row>(`/api/masters/${key}?companyId=${companyId}`, { method: "POST", body: JSON.stringify(v) }),
-  update: (id: number, v: Record<string, unknown>) => req<Row>(`/api/masters/${key}/${id}`, { method: "PUT", body: JSON.stringify(v) }),
-  remove: (id: number) => req<{ ok: true }>(`/api/masters/${key}/${id}`, { method: "DELETE" }),
+  update: (id: number, companyId: number, v: Record<string, unknown>) => req<Row>(`/api/masters/${key}/${id}?companyId=${companyId}`, { method: "PUT", body: JSON.stringify(v) }),
+  remove: (id: number, companyId: number) => req<{ ok: true }>(`/api/masters/${key}/${id}?companyId=${companyId}`, { method: "DELETE" }),
 });
 
 // Opening Balance: grid screen ka alag API (company + branch + fiscal year ke saare ledgers)

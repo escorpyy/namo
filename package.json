@@ -23,7 +23,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "drizzle-orm": "^0.44.0",
+    "drizzle-orm": "^0.45.4",
     "express": "^4.21.0",
     "lucide-react": "^0.469.0",
     "nepali-date-converter": "^3.4.0",
