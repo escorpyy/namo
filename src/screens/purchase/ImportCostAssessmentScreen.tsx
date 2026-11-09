@@ -2,11 +2,17 @@ import { Fragment, useEffect, useMemo, useRef, useState, type MutableRefObject }
 import { ArrowRight, Copy, Download, FileCheck2, Pencil, Plus, RotateCcw, Save, Trash2, X } from "lucide-react";
 import { ApiError, importAssessmentApi, type ImportAssessmentPreview, type ImportAssessmentTermInput, type PLookups } from "../../api";
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
-import { AssessmentAllocationGrid, type AssessmentAllocationCellUpdate } from "../../components/purchase/AssessmentAllocationGrid";
+import { LedgerTab } from "../../components/purchase/AssessmentLedgerTab";
+import { MatrixTab } from "../../components/purchase/AssessmentMatrixTab";
+import { ProductsTab } from "../../components/purchase/AssessmentProductsTab";
 import { AssessmentInsights, AssessmentSummary } from "../../components/purchase/AssessmentPanels";
 import { EmptyPanel, SidePanel, usePanelState } from "../../components/purchase/BillPanels";
 import { DocHeader, formEnterKey, FormSection, Pill } from "../../components/purchase/Bits";
 import { allocationCsv, openAssessmentsFor, readiness } from "../../lib/assessmentInsights";
+import {
+  allocationsByTerm, buildMatrix, cents, ledgerCheck, lineId, manualGapCents, manualSeed,
+  type LedgerCheckTerm, type PreviewLineLike,
+} from "../../lib/assessmentTabs";
 import { defaultDate } from "../../lib/purchaseForm";
 import { formatImportCost } from "../../../shared/import-costing";
 import { toMicro } from "../../../shared/purchase-calculation";
@@ -18,7 +24,10 @@ type AssessmentTerm = {
   capitalizable: boolean; isOverridden: boolean; overrideAmount: string; againstLedgerId: string; againstSubLedgerId: string;
   allocationMode: "AUTO" | "MANUAL"; manual: Record<string, string>;
 };
-export type Form = { importBillId: string; assessmentDate: string; referenceNo: string; remarks: string; terms: AssessmentTerm[] };
+// splitMode SAME: one split (sameBasis) for every charge and no split column; DIFFERENT: each charge has its own, starting from its term master.
+export type Form = { importBillId: string; assessmentDate: string; referenceNo: string; remarks: string; splitMode: "SAME" | "DIFFERENT"; sameBasis: Basis; terms: AssessmentTerm[] };
+type WorkTab = "charges" | "products" | "matrix" | "ledger";
+const WORK_TABS: [WorkTab, string][] = [["charges", "Charge terms"], ["products", "Product-wise"], ["matrix", "Full matrix"], ["ledger", "Ledger check"]];
 type Doc = Record<string, any> & { id: number; isPosted: boolean; state: string; terms: Record<string, any>[] };
 export type ImportOption = Record<string, any> & { id: number; invoiceNumber: string; invoiceDate: string };
 export type Stage = "header" | "work";
@@ -47,25 +56,24 @@ export const blankTerm = (): AssessmentTerm => ({
   capitalizable: true, isOverridden: false, overrideAmount: "", againstLedgerId: "", againstSubLedgerId: "", allocationMode: "AUTO", manual: {},
 });
 const safeMoney = (v: unknown) => { try { return formatImportCost(toMicro(String(v ?? "0")), 2); } catch { return "0.00"; } };
-export const asForm = (d: Doc): Form => ({
-  importBillId: String(d.importBillId ?? ""), assessmentDate: String(d.assessmentDate ?? "").slice(0, 10), referenceNo: d.referenceNo ?? "", remarks: d.remarks ?? "",
-  terms: (d.terms ?? []).map((t: any) => ({
+export const asForm = (d: Doc): Form => {
+  const terms: AssessmentTerm[] = (d.terms ?? []).map((t: any) => ({
     key: String(t.id ?? Math.random()), termId: String(t.termId), calcType: t.calcType ?? "AMOUNT", rate: t.rate ?? "", inputAmount: t.inputAmount ?? "",
     allocationBasis: t.allocationBasis === "QUANTITY" ? "QUANTITY" : "VALUE", capitalizable: !!t.capitalizable, isOverridden: !!t.isOverridden,
     overrideAmount: t.overrideAmount ?? "", againstLedgerId: t.againstLedgerId ? String(t.againstLedgerId) : "", againstSubLedgerId: t.againstSubLedgerId ? String(t.againstSubLedgerId) : "",
     allocationMode: t.allocationMode === "MANUAL" ? "MANUAL" : "AUTO",
     manual: Object.fromEntries((t.manualAmounts ?? []).map((m: any) => [String(m.purchaseBillLineId), String(m.amount)])),
-  })),
-});
+  }));
+  // The split mode is not stored: charges that all split the same way reopen as "same for all", otherwise each keeps its own.
+  const bases = new Set(terms.map((t) => t.allocationBasis));
+  return {
+    importBillId: String(d.importBillId ?? ""), assessmentDate: String(d.assessmentDate ?? "").slice(0, 10), referenceNo: d.referenceNo ?? "", remarks: d.remarks ?? "",
+    splitMode: bases.size > 1 ? "DIFFERENT" : "SAME", sameBasis: bases.size === 1 ? [...bases][0] : "VALUE", terms,
+  };
+};
 
-export const blankForm = (l: PLookups, fyCode: string): Form => ({ importBillId: "", assessmentDate: defaultDate(l.fiscalYears.find((y) => y.code === fyCode)), referenceNo: "", remarks: "", terms: [blankTerm()] });
+export const blankForm = (l: PLookups, fyCode: string): Form => ({ importBillId: "", assessmentDate: defaultDate(l.fiscalYears.find((y) => y.code === fyCode)), referenceNo: "", remarks: "", splitMode: "SAME", sameBasis: "VALUE", terms: [blankTerm()] });
 const chargeValue = (t: AssessmentTerm) => (t.isOverridden ? t.overrideAmount : t.calcType === "PERCENT" ? t.rate : t.inputAmount).trim();
-
-function termGap(t: AssessmentTerm, result: any): number {
-  const typed = Object.values(t.manual).reduce((a, v) => { try { return a + Number(v || 0); } catch { return a; } }, 0);
-  const target = Number(result?.finalAmount ?? result?.amount ?? 0);
-  return Math.round((target - typed) * 100) / 100;
-}
 
 export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
   const { lookups, imports } = p;
@@ -75,6 +83,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
   const [form, setForm] = useState<Form | null>(restored.current?.form ?? first.current);
   const [editing, setEditing] = useState(restored.current?.editing ?? !p.docId);
   const [stage, setStage] = useState<Stage>(restored.current?.stage ?? (p.docId ? "work" : "header"));
+  const [workTab, setWorkTab] = useState<WorkTab>("charges");
   const [preview, setPreview] = useState<ImportAssessmentPreview | null>(restored.current?.preview ?? null);
   const [previewError, setPreviewError] = useState("");
   const [previewPending, setPreviewPending] = useState(false);
@@ -137,7 +146,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
     againstSubLedgerId: t.againstSubLedgerId ? Number(t.againstSubLedgerId) : null,
     allocationMode: t.capitalizable ? t.allocationMode : "AUTO",
     manualAmounts: t.capitalizable && t.allocationMode === "MANUAL"
-      ? Object.entries(t.manual).filter(([, v]) => v !== "").map(([line, amount]) => ({ purchaseBillLineId: Number(line), amount }))
+      ? Object.entries(t.manual).map(([line, amount]) => ({ purchaseBillLineId: Number(line), amount: amount.endsWith(".") ? amount.slice(0, -1) : amount })).filter((m) => m.amount !== "" && m.amount !== ".")
       : undefined,
   }));
 
@@ -166,7 +175,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
     if (!doc) return;
     const source = asForm(doc);
     p.onNew({
-      ...blankForm(lookups, p.fyCode),
+      ...blankForm(lookups, p.fyCode), splitMode: source.splitMode, sameBasis: source.sameBasis,
       terms: source.terms.length ? source.terms.map((t) => ({ ...t, key: Math.random().toString(36).slice(2), allocationMode: "AUTO" as const, manual: {} })) : [blankTerm()],
     });
   };
@@ -174,18 +183,28 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
   const addCharge = () => {
     if (!form || !editing || busy || stage !== "work") return;
     const index = form.terms.length;
+    setWorkTab("charges");
     setForm({ ...form, terms: [...form.terms, blankTerm()] });
     focusLater(`[data-field="terms.${index}.termId"]`, 0);
   };
+  const masterBasis = (id: string): Basis | null => { const b = (termById.get(id) as any)?.allocationBasis; return b === "QUANTITY" || b === "VALUE" ? b : null; };
+  // Split mode: SAME gives every charge one split; DIFFERENT starts each charge from its term master and lets the user change it per charge.
+  const setSplitMode = (mode: Form["splitMode"]) => setForm((f) => f && ({
+    ...f, splitMode: mode,
+    terms: f.terms.map((t) => ({ ...t, allocationBasis: mode === "SAME" ? f.sameBasis : (t.termId ? masterBasis(t.termId) ?? t.allocationBasis : t.allocationBasis) })),
+  }));
+  const setSameBasis = (basis: Basis) => setForm((f) => f && ({ ...f, sameBasis: basis, terms: f.terms.map((t) => ({ ...t, allocationBasis: basis })) }));
   const selectTerm = (i: number, id: string) => {
     const m: any = termById.get(id);
+    const against = m?.lastAgainstLedgerId ?? m?.defaultAgainstLedgerId;
     updateTerm(i, {
       termId: id,
-      calcType: (m?.calcType as AssessmentTerm["calcType"]) || "AMOUNT",
-      rate: m?.defaultRate != null ? String(m.defaultRate) : "",
+      calcType: (m?.defaultCalcType as AssessmentTerm["calcType"]) || "AMOUNT",
+      rate: m?.defaultCalcType === "PERCENT" && m?.defaultValue != null ? String(m.defaultValue) : "",
       inputAmount: "",
-      capitalizable: m?.distributeToLines !== false,
-      againstLedgerId: m?.defaultAgainstLedgerId ? String(m.defaultAgainstLedgerId) : "",
+      capitalizable: m?.affectsStockValue !== false,
+      allocationBasis: form?.splitMode === "SAME" ? form.sameBasis : masterBasis(id) ?? "VALUE",
+      againstLedgerId: against ? String(against) : "",
       againstSubLedgerId: "",
       allocationMode: "AUTO",
       manual: {},
@@ -212,8 +231,10 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
   };
   const editHeader = () => { setStage("header"); focusLater("[data-assessment-field]", 40); };
   const jump = (field: string) => {
+    if (field.startsWith("tab:")) { setStage("work"); setWorkTab(field.slice(4) as WorkTab); return; }
     const inHeader = HEADER_KEYS.has(field);
     setStage(inHeader ? "header" : "work");
+    if (!inHeader) setWorkTab("charges");
     focusLater(`[data-field="${field}"]`, 80);
   };
 
@@ -231,7 +252,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
       setMessage(Object.values(e)[0]);
       if (Object.keys(e).some((k) => HEADER_KEYS.has(k))) { setStage("header"); focusLater(`[data-field="${Object.keys(e).find((k) => HEADER_KEYS.has(k))}"]`, 80); }
       else {
-        setStage("work");
+        setStage("work"); setWorkTab("charges");
         focusLater('[data-field^="terms."][aria-invalid="true"], [data-field^="terms."]', 80);
       }
       return;
@@ -315,7 +336,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
     else if (e.key === "F3") { e.preventDefault(); p.onNew(); }
     else if (e.key === "F2" && doc && !editing) { e.preventDefault(); beginEdit(); }
     else if (e.key === "F6" && editing && !busy && !target.closest('[role="dialog"]')) { e.preventDefault(); addCharge(); }
-    else if (e.key === "Escape" && editing && !typing) cancel();
+    else if (e.key === "Escape" && editing && !typing && !target.closest('[role="dialog"]')) cancel();
   };
   useEffect(() => {
     const handler = (e: KeyboardEvent) => keys.current()(e);
@@ -331,24 +352,66 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
   const resultFor = (t: AssessmentTerm) => preview?.termResults?.find?.((x: any) => x.termId === Number(t.termId) || x.termId === t.termId)
     ?? preview?.terms?.find?.((x: any) => x.termId === Number(t.termId));
   const activeTerms = form?.terms.filter((t) => t.termId) ?? [];
-  const manualColumns = (form?.terms ?? []).flatMap((term, formIndex) => {
-    if (!term.termId || !term.capitalizable || term.allocationMode !== "MANUAL") return [];
-    const master: any = termById.get(term.termId);
-    return [{
-      key: term.key, formIndex, termId: term.termId, allocationBasis: term.allocationBasis, manual: term.manual,
-      code: String(master?.code ?? `Charge ${formIndex + 1}`), name: String(master?.name ?? `Charge ${formIndex + 1}`), result: resultFor(term),
-    }];
-  });
   const previewOk = !!preview && !previewError;
   const chargeLabel = (t: AssessmentTerm, i: number) => { const m: any = termById.get(t.termId); return m ? String(m.code) : `Charge ${i + 1}`; };
   const checks = useMemo(() => readiness({
     hasBill: !!form?.importBillId, hasDate: !!form?.assessmentDate && !form.assessmentDate.startsWith("?"), previewOk, previewPending,
     charges: (form?.terms ?? []).map((t, index) => ({
       index, hasTerm: !!t.termId, hasLedger: !!t.againstLedgerId, hasValue: chargeValue(t) !== "", label: chargeLabel(t, index),
-      manualGap: t.capitalizable && t.allocationMode === "MANUAL" ? termGap(t, resultFor(t)) : 0,
+      manualGap: t.capitalizable && t.allocationMode === "MANUAL" ? manualGapCents(cents((resultFor(t) as any)?.finalAmount ?? (resultFor(t) as any)?.amount ?? 0), t.manual) / 100 : 0,
     })),
   }), [form, preview, previewOk, previewPending]);
-  const firstProblem = checks.find((c) => !c.ok);
+  // The charges as the tabs see them, what each adds to each product, the matrix and the postings: all read from the same preview Save and Apply use.
+  const termViews = useMemo<LedgerCheckTerm[]>(() => (form?.terms ?? []).flatMap((t, i) => {
+    if (!t.termId) return [];
+    const m: any = termById.get(t.termId), r: any = resultFor(t);
+    const saved = !editing ? doc?.terms?.find((x: any) => String(x.termId) === t.termId) : undefined;
+    const amount = cents(r?.finalAmount ?? r?.amount ?? 0);
+    const manual = t.capitalizable && t.allocationMode === "MANUAL";
+    return [{
+      formKey: t.key, termId: t.termId, code: String(m?.code ?? `Charge ${i + 1}`), name: String(m?.name ?? ""),
+      nature: (r?.nature ?? m?.nature ?? "ADDITIVE") as "ADDITIVE" | "DEDUCTIVE", capitalizable: t.capitalizable, basis: t.allocationBasis,
+      mode: manual ? "MANUAL" as const : "AUTO" as const, amount, manual: manual ? t.manual : undefined, gap: manual ? manualGapCents(amount, t.manual) : 0,
+      ownLedgerId: saved?.generalLedgerId ?? m?.generalLedgerId ?? null,
+      againstLedgerId: t.againstLedgerId ? Number(t.againstLedgerId) : null, againstSubLedgerId: t.againstSubLedgerId ? Number(t.againstSubLedgerId) : null,
+    }];
+  }), [form, preview, doc, editing, termById]);
+  const alloc = useMemo(() => allocationsByTerm(preview ?? doc?.preview ?? null, doc?.isPosted ? doc.allocations as any : undefined), [preview, doc]);
+  const matrix = useMemo(() => buildMatrix(lineRows as PreviewLineLike[], termViews, alloc), [lineRows, termViews, alloc]);
+  const ledgerTotals = useMemo(() => {
+    const src: any = preview ?? doc?.preview;
+    if (!src) return null;
+    const sumOf = (pick: (l: PreviewLineLike) => unknown) => (lineRows as PreviewLineLike[]).reduce((a, l) => a + cents(pick(l)), 0);
+    return {
+      goods: cents(src.goodsValue), services: cents(src.invoicedCapitalizedCosts), earlier: cents(src.existingPurchaseTermCosts), assessed: cents(src.capitalizedAssessments), landed: cents(src.totalLandedValue),
+      lineLanded: sumOf((l) => l.landedValue), lineAssessed: sumOf((l) => l.capitalizedAssessments),
+    };
+  }, [preview, doc, lineRows]);
+  const ledgerResult = useMemo(() => ledgerCheck(termViews, lookups.vendors, alloc, ledgerTotals), [termViews, lookups.vendors, alloc, ledgerTotals]);
+  // Apply waits for the readiness checks and for every ledger check; a passing ledger check adds nothing to the side panel.
+  const allChecks = useMemo(() => [...checks.map((c) => (c.id === "splits" ? { ...c, focus: "tab:products" } : c)), ...ledgerResult.checks.filter((c) => !c.ok)], [checks, ledgerResult]);
+  const firstProblem = allChecks.find((c) => !c.ok);
+  const gapCount = termViews.filter((t) => t.capitalizable && (t.gap ?? 0) !== 0).length;
+  const ledgerFails = ledgerResult.checks.some((c) => !c.ok);
+  const readyToShow = previewOk && !previewPending;
+  const editProductAmount = (termId: string, line: number, value: string) => setForm((f) => !f ? f : ({
+    ...f,
+    terms: f.terms.map((t) => {
+      if (t.termId !== termId) return t;
+      // the first typed amount turns the charge to a manual split; every other product keeps the amount automatic gave it
+      const base = t.allocationMode === "MANUAL" ? t.manual : manualSeed(termId, alloc, (lineRows as PreviewLineLike[]).map(lineId));
+      return { ...t, allocationMode: "MANUAL" as const, manual: { ...base, [String(line)]: value } };
+    }),
+  }));
+  const resetToAuto = (termId: string) => setForm((f) => !f ? f : ({ ...f, terms: f.terms.map((t) => (t.termId === termId ? { ...t, allocationMode: "AUTO" as const, manual: {} } : t)) }));
+  const tabKeys = (e: React.KeyboardEvent) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const at = WORK_TABS.findIndex(([id]) => id === workTab);
+    const next = WORK_TABS[(at + (e.key === "ArrowRight" ? 1 : -1) + WORK_TABS.length) % WORK_TABS.length][0];
+    setWorkTab(next);
+    focusLater(`#atab-${next}`, 0);
+  };
   const canApply = !!doc && !doc.isPosted && !doc.reversedAt && !editing && !dirty;
   const insightCharges = (form?.terms ?? []).flatMap((t, i) => {
     if (!t.termId) return [];
@@ -358,22 +421,6 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
   });
   const duplicates = openAssessmentsFor(p.assessments as { id: number; importBillId?: number | null; state?: string; assessmentNumber: string }[], form?.importBillId ? Number(form.importBillId) : null, doc?.id)
     .map((r) => ({ id: r.id, assessmentNumber: r.assessmentNumber, state: String(r.state ?? "") }));
-  const updateManualCells = (updates: AssessmentAllocationCellUpdate[]) => setForm((current) => {
-    if (!current) return current;
-    const byTerm = new Map<string, Map<string, string>>();
-    for (const update of updates) {
-      const lineChanges = byTerm.get(update.termKey) ?? new Map<string, string>();
-      lineChanges.set(update.lineKey, update.value);
-      byTerm.set(update.termKey, lineChanges);
-    }
-    return {
-      ...current,
-      terms: current.terms.map((term) => {
-        const changes = byTerm.get(term.key);
-        return changes ? { ...term, manual: { ...term.manual, ...Object.fromEntries(changes) } } : term;
-      }),
-    };
-  });
   const downloadCsv = () => {
     if (!lineRows.length) return;
     const blob = new Blob(["﻿" + allocationCsv(lineRows as any)], { type: "text/csv;charset=utf-8" });
@@ -452,17 +499,54 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
             </div>
           ) : (
             <>
-              <section className="lg-card flex max-h-[46%] min-h-[140px] shrink-0 flex-col">
-                <header className="lg-card-head justify-between">
-                  <div className="flex flex-wrap items-baseline gap-x-3">
-                    <h2 className="lg-card-title">Charges</h2>
-                    <p className="lg-card-hint">Dr own ledger / Cr against ledger · uncheck stock for tax or P&amp;L charges</p>
-                  </div>
-                  <button type="button" data-nav="add-charge" className="btn" disabled={!editing || busy} onClick={addCharge}>
-                    <Plus size={13} /> Add charge <span className="kbd">F6</span>
-                  </button>
-                </header>
-                <div className="flex min-h-0 flex-1 flex-col">
+              <div className="flex shrink-0 items-end justify-between gap-3 border-b border-slate-200">
+                <div role="tablist" aria-label="Assessment sections" className="flex gap-1">
+                  {WORK_TABS.map(([id, label]) => {
+                    const on = workTab === id;
+                    const flag = (id === "products" && gapCount > 0) || (id === "ledger" && ledgerFails);
+                    return (
+                      <button key={id} type="button" role="tab" id={`atab-${id}`} aria-selected={on} aria-controls="apanel" tabIndex={on ? 0 : -1} data-nav={`tab-${id}`}
+                        onClick={() => setWorkTab(id)} onKeyDown={tabKeys}
+                        className={`relative -mb-px flex h-9 items-center gap-1.5 border-b-2 px-3.5 text-[13px] transition-colors ${on ? "border-cobalt-700 font-semibold text-ink" : "border-transparent text-slate-600 hover:text-ink"}`}>
+                        {label}
+                        {id === "charges" && activeTerms.length > 0 && <span className="lg-count">{activeTerms.length}</span>}
+                        {flag && <span className="h-2 w-2 rounded-full bg-red-600" role="img" aria-label="needs attention" />}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button type="button" data-nav="download-csv" className="btn mb-1" disabled={!lineRows.length} onClick={downloadCsv} title="Download the landed cost of every product line as a spreadsheet file"><Download size={13} /> CSV</button>
+              </div>
+
+              <section id="apanel" role="tabpanel" aria-labelledby={`atab-${workTab}`} className="lg-card flex min-h-0 flex-1 flex-col">
+                {workTab === "charges" ? (
+                  <>
+                    <header className="lg-card-head justify-between">
+                      <div className="flex flex-wrap items-baseline gap-x-3">
+                        <h2 className="lg-card-title">Charges</h2>
+                        <p className="lg-card-hint">Dr own ledger / Cr against ledger · whether a charge enters stock value comes from its term master</p>
+                      </div>
+                      <button type="button" data-nav="add-charge" className="btn" disabled={!editing || busy} onClick={addCharge}>
+                        <Plus size={13} /> Add charge <span className="kbd">F6</span>
+                      </button>
+                    </header>
+                    <div role="group" aria-label="How charges are split over products" className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-slate-100 px-4 py-2.5 text-[12.5px]">
+                      <span className="font-semibold text-slate-600">Split over products</span>
+                      <label className="inline-flex items-center gap-1.5">
+                        <input type="radio" name={`split-mode-${p.tabId}`} data-field="splitMode.same" checked={form.splitMode === "SAME"} disabled={!editing || busy} onChange={() => setSplitMode("SAME")} /> Same for all charges
+                      </label>
+                      {form.splitMode === "SAME" && (
+                        <select data-field="sameBasis" className={`${fieldClass} h-8 w-[130px]`} aria-label="Split used for every charge" disabled={!editing || busy} value={form.sameBasis} onChange={(e) => setSameBasis(e.target.value as Basis)}>
+                          <option value="VALUE">Product value</option>
+                          <option value="QUANTITY">Quantity</option>
+                        </select>
+                      )}
+                      <label className="inline-flex items-center gap-1.5">
+                        <input type="radio" name={`split-mode-${p.tabId}`} data-field="splitMode.different" checked={form.splitMode === "DIFFERENT"} disabled={!editing || busy} onChange={() => setSplitMode("DIFFERENT")} /> Different for each charge
+                      </label>
+                      <span className="text-[11.5px] text-slate-500">Product amounts are worked out automatically; check or change them on the Product-wise tab.</span>
+                    </div>
+                    <div className="flex min-h-0 flex-1 flex-col">
                 <div className="lg-scroll lg-grid min-h-0 flex-1 overflow-auto overscroll-contain">
                   <table className="w-full min-w-[700px] table-fixed text-[12px]">
                     <thead className="lg-th">
@@ -470,9 +554,9 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                         <th className="w-[132px] px-2 py-2 text-left">Charge term</th>
                         <th className="w-[92px] px-2 py-2 text-left">Calculation</th>
                         <th className="w-[100px] px-2 py-2 text-left">Rate / amount</th>
-                        <th className="w-[100px] px-2 py-2 text-left">Allocate by</th>
+                        {form.splitMode === "DIFFERENT" && <th className="w-[110px] px-2 py-2 text-left">Split by</th>}
                         <th className="w-[132px] px-2 py-2 text-left">Against ledger</th>
-                        <th className="w-[48px] px-2 py-2 text-center">Stock</th>
+                        <th className="w-[78px] px-2 py-2 text-center" title="Taken from the purchase term master">Stock value</th>
                         <th className="w-[84px] px-2 py-2 text-right">Calculated</th>
                         <th className="w-[34px] p-1" aria-label="Remove" />
                       </tr>
@@ -516,20 +600,15 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                                   <span>Override calculated amount</span>
                                 </label>
                               </td>
-                              <td className="px-2 py-2">
-                                <select data-field={`terms.${i}.allocationBasis`} className={fieldClass} disabled={!editing || busy || !t.capitalizable} aria-label={`Allocation basis for charge ${i + 1}`}
-                                  value={t.allocationBasis} onChange={(e) => updateTerm(i, { allocationBasis: e.target.value as Basis })}>
-                                  <option value="VALUE">Product value</option>
-                                  <option value="QUANTITY">Quantity</option>
-                                </select>
-                                {t.capitalizable && (
-                                  <select data-field={`terms.${i}.allocationMode`} className={`${fieldClass} mt-1.5`} disabled={!editing || busy} aria-label={`Allocation mode for charge ${i + 1}`}
-                                    value={t.allocationMode} onChange={(e) => updateTerm(i, { allocationMode: e.target.value as "AUTO" | "MANUAL", manual: e.target.value === "MANUAL" ? t.manual : {} })}>
-                                    <option value="AUTO">Auto split</option>
-                                    <option value="MANUAL">Manual split</option>
+                              {form.splitMode === "DIFFERENT" && (
+                                <td className="px-2 py-2">
+                                  <select data-field={`terms.${i}.allocationBasis`} className={fieldClass} disabled={!editing || busy || !t.capitalizable || !t.termId} aria-label={`Split for charge ${i + 1}`}
+                                    value={t.allocationBasis} onChange={(e) => updateTerm(i, { allocationBasis: e.target.value as Basis })}>
+                                    <option value="VALUE">Product value</option>
+                                    <option value="QUANTITY">Quantity</option>
                                   </select>
-                                )}
-                              </td>
+                                </td>
+                              )}
                               <td className="px-2 py-2">
                                 <select data-field={`terms.${i}.againstLedgerId`} className={fieldClass} disabled={!editing || busy || !t.termId} aria-label={`Against ledger for charge ${i + 1}`}
                                   aria-invalid={!!errors.terms && !!t.termId && !t.againstLedgerId} value={t.againstLedgerId}
@@ -549,11 +628,9 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                                 <div className="mt-1 truncate text-[11px] text-slate-500" title={`Own ledger: ${m ? ((lookups?.vendors ?? []).find((l) => l.id === m.generalLedgerId)?.name ?? "—") : "—"}`}>Own ledger: {m ? ((lookups?.vendors ?? []).find((l) => l.id === m.generalLedgerId)?.name ?? "—") : "—"}</div>
                               </td>
                               <td className="px-2 py-2 text-center">
-                                <label className="inline-flex items-center gap-1.5">
-                                  <input data-field={`terms.${i}.capitalizable`} aria-label={`Capitalize charge ${i + 1} into inventory`} type="checkbox" disabled={!editing || busy}
-                                    checked={t.capitalizable} onChange={(e) => updateTerm(i, { capitalizable: e.target.checked })} />
-                                  <span className="sr-only">In stock value</span>
-                                </label>
+                                <span title="Set in the purchase term master (affects stock value)" className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-semibold ${!t.termId ? "text-slate-300" : t.capitalizable ? "bg-green-100 text-green-800" : "bg-slate-100 text-slate-600"}`}>
+                                  {!t.termId ? "—" : t.capitalizable ? "Stock" : "Not stock"}
+                                </span>
                               </td>
                               <td className="px-2 py-2 text-right font-medium tabular-nums">{result ? safeMoney(result.finalAmount ?? result.amount) : "—"}</td>
                               <td className="p-1 pt-2 text-right">
@@ -569,28 +646,22 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                     </tbody>
                   </table>
                 </div>
-                  {errors.terms && <p className="shrink-0 px-4 pb-2 text-[12px] text-rose-700" role="alert">{errors.terms}</p>}
-                </div>
-              </section>
-
-              <section className="lg-card flex min-h-0 flex-1 flex-col">
-                <header className="lg-card-head justify-between">
-                  <div className="flex flex-wrap items-baseline gap-x-3">
-                    <h2 className="lg-card-title">Product allocation &amp; landed cost</h2>
-                    <p className="lg-card-hint">{manualColumns.length ? "Edit manual splits inline · paste spreadsheet ranges" : "Choose Manual split on a charge to edit allocations inline"}</p>
-                  </div>
-                  <button type="button" data-nav="download-csv" className="btn" disabled={!lineRows.length} onClick={downloadCsv} title="Download the landed cost of every product line as a spreadsheet file"><Download size={13} /> CSV</button>
-                </header>
-                <div className="flex min-h-0 flex-1 flex-col">
-                  {form.importBillId ? (
-                    <AssessmentAllocationGrid fill lines={lineRows} terms={manualColumns} editing={editing} busy={busy}
-                      previewReady={previewOk && !previewPending} onCellsChange={updateManualCells} onMessage={setMessage} />
-                  ) : (
-                    <div className="m-4 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-[12.5px] text-slate-600">
-                      Select a posted goods bill to unlock product allocation and landed-cost impact. <button type="button" className="ml-1 font-semibold text-cobalt-700 underline underline-offset-2" onClick={editHeader}>Choose a goods bill</button>.
+                      {errors.terms && <p className="shrink-0 px-4 pb-2 text-[12px] text-rose-700" role="alert">{errors.terms}</p>}
                     </div>
-                  )}
-                </div>
+                  </>
+                ) : !form.importBillId ? (
+                  <div className="m-4 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-[12.5px] text-slate-600">
+                    Select a posted goods bill to unlock product allocation and landed-cost impact. <button type="button" className="ml-1 font-semibold text-cobalt-700 underline underline-offset-2" onClick={editHeader}>Choose a goods bill</button>.
+                  </div>
+                ) : workTab === "products" ? (
+                  <ProductsTab lines={lineRows as PreviewLineLike[]} terms={termViews} alloc={alloc} editing={editing} ready={readyToShow} hasLinked={matrix.hasLinked}
+                    splitSummary={form.splitMode === "SAME" ? `${form.sameBasis === "QUANTITY" ? "quantity" : "product value"} for every charge` : "set per charge"}
+                    onChangeSplit={() => setWorkTab("charges")} onEditAmount={editProductAmount} onResetAuto={resetToAuto} />
+                ) : workTab === "matrix" ? (
+                  <MatrixTab matrix={matrix} ready={readyToShow} />
+                ) : (
+                  <LedgerTab result={ledgerResult} ready={readyToShow} voucherNumber={doc?.voucherNumber} reversalVoucherNumber={doc?.reversalVoucherNumber} />
+                )}
               </section>
             </>
           )}
@@ -600,7 +671,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
           {headerReady
             ? <AssessmentInsights preview={preview ?? doc?.preview ?? null} previewError={previewError} previewPending={previewPending}
                 source={selectedImport ? { label: billLabel, cif: String(selectedImport.cifValue ?? "0"), lineCount: selectedImport.lines?.length ?? 0 } : undefined}
-                charges={insightCharges} duplicates={duplicates} checks={checks} showChecks={!isApplied && !doc?.reversedAt} onJump={jump} />
+                charges={insightCharges} duplicates={duplicates} checks={allChecks} showChecks={!isApplied && !doc?.reversedAt} onJump={jump} />
             : <EmptyPanel>What the charges do to the landed cost appears here once the header is complete.</EmptyPanel>}
         </SidePanel>
       </div>
