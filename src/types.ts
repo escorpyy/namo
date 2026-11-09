@@ -1,5 +1,6 @@
 export type Mode = "new" | "view" | "edit";
-export type MsgKind = "ok" | "err" | "info";
+/** ok / info stay in the status bar; warn and err also open a dialog (see the flash() of each screen). */
+export type MsgKind = "ok" | "err" | "warn" | "info";
 
 export interface StatusInfo {
   mode: Mode;

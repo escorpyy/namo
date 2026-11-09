@@ -5,7 +5,7 @@ import { emptyForm, recordLabel, recordTitle, sameForm, tabsOf, toForm, toPayloa
 import type { Mode, MsgKind, StatusInfo } from "../types";
 import { MasterForm } from "../components/MasterForm";
 import { MasterList } from "../components/MasterList";
-import { ConfirmDialog, type DialogSpec } from "../components/ConfirmDialog";
+import { Dialog, useDialog, type DialogSpec } from "../components/Dialog";
 import { ShortcutsOverlay } from "../components/ShortcutsOverlay";
 
 const q = (sel: string) => document.querySelector<HTMLElement>(sel);
@@ -46,7 +46,13 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
   const savingRef = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const flash = (text: string, kind: MsgKind = "info") => setMsg({ text, kind });
+  const dlg = useDialog();
+  // The status bar keeps every message; a warning or an error also stops the person with a dialog (title: optional heading for it).
+  const flash = (text: string, kind: MsgKind = "info", title?: string) => {
+    setMsg({ text, kind });
+    if (kind === "err") void dlg.error(text, { title });
+    else if (kind === "warn") void dlg.warning(text, { title });
+  };
   // Field kisi doosre tab me ho to pehle wo tab kholo, phir focus
   const focusField = (n: string) => {
     const f = def.fields.find((x) => x.name === n.split(".")[0]);
@@ -120,7 +126,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
     if (selectedId == null) { setScopedRows({}); return; }
     let live = true;
     Promise.all(fields.map((f) => masterApi(f.lookup!).list(selectedId).then((rows) => [f.name, rows] as const)))
-      .then((e) => live && setScopedRows(Object.fromEntries(e))).catch(() => {});
+      .then((e) => live && setScopedRows(Object.fromEntries(e))).catch((e: Error) => { if (live) flash(e.message, "err", "Could not load the list"); });
     return () => { live = false; };
   }, [selectedId, def]);
 
@@ -141,6 +147,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
     setDialog({
       title: "Discard changes?",
       body: "This form has unsaved changes.",
+      variant: "warning",
       buttons: [
         { label: "Save", kind: "primary", onClick: () => { setDialog(null); void save(); } },
         { label: "Discard", kind: "danger", onClick: () => { setDialog(null); action(); } },
@@ -202,7 +209,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
     const first = def.fields.find((f) => errs[f.name]);
     if (first) {
       setErrors(errs);
-      flash("Please correct the highlighted fields.", "err");
+      flash("Please correct the highlighted fields.", "warn");
       focusField(first.name);
       return false;
     }
@@ -214,6 +221,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
       setDialog({
         title: `Change ${def.fields.find((f) => f.name === w.field)?.label}?`,
         body: `${recordLabel(def, selected)} has ${n} ${cl}. ${w.text}`,
+        variant: "warning",
         buttons: [
           { label: "Cancel", kind: "neutral", autoFocus: true, onClick: () => setDialog(null) },
           { label: "Change", kind: "danger", onClick: () => { setDialog(null); void persist(payload); } },
@@ -227,18 +235,9 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
   // ---- delete ----
   const askDelete = () => {
     if (mode !== "view" || !selected) return;
-    if (def.noDelete) {
-      flash(def.noDelete, "err");
-      setDialog({ title: "Cannot delete", body: def.noDelete, buttons: [{ label: "OK", kind: "neutral", autoFocus: true, onClick: () => setDialog(null) }] });
-      return;
-    }
+    if (def.noDelete) return flash(def.noDelete, "err", "Cannot delete");
     const blocker = def.counts?.find((c) => (selected[c.key] ?? 0) > 0);
-    if (blocker) {
-      const text = `Cannot delete: ${selected[blocker.key]} ${blocker.label} linked to this ${def.singular}.`;
-      flash(text, "err");
-      setDialog({ title: "Cannot delete", body: text, buttons: [{ label: "OK", kind: "neutral", autoFocus: true, onClick: () => setDialog(null) }] });
-      return;
-    }
+    if (blocker) return flash(`Cannot delete: ${selected[blocker.key]} ${blocker.label} linked to this ${def.singular}.`, "err", "Cannot delete");
     const target = selected;
     setDialog({
       title: `Delete ${def.singular}?`,
@@ -357,7 +356,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
         def={def} items={filtered} total={items.length} selectedId={mode === "new" ? null : selectedId}
         search={search} onSearch={setSearch} onSelect={select} searchRef={searchRef} onSearchKeyDown={onSearchKey} lookups={lookups}
       />
-      {dialog && <ConfirmDialog spec={dialog} onClose={() => setDialog(null)} />}
+      {dialog && <Dialog spec={dialog} onClose={() => setDialog(null)} />}
       {help && <ShortcutsOverlay onClose={() => setHelp(false)} />}
     </>
   );

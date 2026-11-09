@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type MutableRefObject }
 import { ArrowRight, Copy, Download, FileCheck2, Pencil, Plus, RotateCcw, Save, Trash2, X } from "lucide-react";
 import { ApiError, importAssessmentApi, type ImportAssessmentPreview, type ImportAssessmentTermInput, type PLookups } from "../../api";
 import { DateInput } from "../../components/DateInput";
+import { useDialog } from "../../components/Dialog";
 import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
 import { LedgerTab } from "../../components/purchase/AssessmentLedgerTab";
@@ -107,6 +108,12 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(restored.current?.message ?? (p.docId ? "Loading…" : "New cost assessment"));
+  const dlg = useDialog();
+  // setMessage keeps the text in the header; a warning or an error also stops the person with a dialog.
+  const alertUser = (text: string, kind: "warn" | "err" = "err", title?: string) => {
+    setMessage(text);
+    void (kind === "err" ? dlg.error(text, { title }) : dlg.warning(text, { title }));
+  };
   const [leftCollapsed, toggleLeft] = usePanelState("assessment-left-collapsed");
   const [rightCollapsed, toggleRight] = usePanelState("assessment-right-collapsed");
   const baseSig = useRef(restored.current?.baseSig ?? (first.current ? JSON.stringify(first.current) : ""));
@@ -122,7 +129,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
       const d = r.document as Doc;
       setDoc(d); setForm(asForm(d)); setEditing(false); setPreview(d.preview ?? null); baseSig.current = JSON.stringify(asForm(d)); setStage("work");
       setMessage(`Opened assessment ${d.assessmentNumber}`);
-    }).catch((e: Error) => live && setMessage(e.message));
+    }).catch((e: Error) => live && alertUser(e.message, "err", "Could not open the assessment"));
     return () => { live = false; };
   }, []);
 
@@ -241,7 +248,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
     const e = headerErrors(form);
     setErrors((cur) => ({ ...Object.fromEntries(Object.entries(cur).filter(([k]) => !HEADER_KEYS.has(k))), ...e }));
     const [field, text] = Object.entries(e)[0] ?? [];
-    if (field) { setMessage(text); focusLater(`[data-field="${field}"]`, 30); return false; }
+    if (field) { alertUser(text, "warn"); focusLater(`[data-field="${field}"]`, 30); return false; }
     setStage("work");
     setMessage(doc ? "Header checked" : "Header complete — add the charges");
     focusLater('[data-field="terms.0.termId"]');
@@ -267,7 +274,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
     }
     setErrors(e);
     if (Object.keys(e).length) {
-      setMessage(Object.values(e)[0]);
+      alertUser(Object.values(e)[0], "warn");
       if (Object.keys(e).some((k) => HEADER_KEYS.has(k))) { setStage("header"); focusLater(`[data-field="${Object.keys(e).find((k) => HEADER_KEYS.has(k))}"]`, 80); }
       else {
         setStage("work"); setWorkTab("charges");
@@ -293,19 +300,20 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
         if (HEADER_KEYS.has(err.field)) setStage("header");
         focusLater(`[data-field="${err.field}"]`, 80);
       }
-      setMessage(err.message);
+      alertUser(err.message, "err", "Could not save the assessment");
     }
     finally { setBusy(false); }
   };
   const beginEdit = () => { if (doc && !doc.isPosted && !doc.reversedAt) { setEditing(true); setMessage("Editing draft"); baseSig.current = JSON.stringify(form); } };
-  const cancel = () => {
-    if (dirty && !window.confirm("Discard unsaved assessment changes?")) return;
+  const cancel = async () => {
+    if (dirty && !(await dlg.confirm("Discard unsaved assessment changes?", { title: "Discard changes?", variant: "warning", confirmLabel: "Discard", cancelLabel: "Keep editing" }))) return;
     if (!doc) { p.onClose(p.tabId); return; }
     setForm(asForm(doc)); setEditing(false); setPreview(doc.preview ?? null);
     setErrors({}); setMessage("Changes discarded");
   };
   const applyAssessment = async () => {
-    if (!doc || dirty || !window.confirm(`Apply assessment ${doc.assessmentNumber}? This freezes it, posts each charge to its own ledger against the chosen against ledger, and updates each product's landed cost.`)) return;
+    if (!doc || dirty) return;
+    if (!(await dlg.confirm(`Apply assessment ${doc.assessmentNumber}? This freezes it, posts each charge to its own ledger against the chosen against ledger, and updates each product's landed cost.`, { title: "Apply assessment?", variant: "warning", confirmLabel: "Apply" }))) return;
     setBusy(true);
     try {
       const r = await importAssessmentApi.apply(doc.id, p.companyId, p.userId);
@@ -313,30 +321,31 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
       setDoc(d); setForm(asForm(d)); setPreview(d.preview ?? null);
       setMessage(`Applied assessment ${d.assessmentNumber}; landed valuation updated.`);
       p.onChanged();
-    } catch (e) { setMessage((e as Error).message); }
+    } catch (e) { alertUser((e as Error).message, "err", "Could not apply the assessment"); }
     finally { setBusy(false); }
   };
   const reverseAssessment = async () => {
     if (!doc || dirty) return;
-    const reason = window.prompt(`Reason for reversing assessment ${doc.assessmentNumber}:`);
-    if (!reason?.trim()) return;
+    const reason = await dlg.prompt(`Reason for reversing assessment ${doc.assessmentNumber}:`, { title: "Reverse assessment", required: true, confirmLabel: "Reverse" });
+    if (!reason) return;
     setBusy(true);
     try {
-      const r = await importAssessmentApi.reverse(doc.id, p.companyId, p.userId, reason.trim());
+      const r = await importAssessmentApi.reverse(doc.id, p.companyId, p.userId, reason);
       const d = r.document as Doc;
       setDoc(d); setForm(asForm(d)); setPreview(d.preview ?? null);
       setMessage(`Reversed assessment ${d.assessmentNumber}; valuation recalculated.`);
       p.onChanged();
-    } catch (e) { setMessage((e as Error).message); }
+    } catch (e) { alertUser((e as Error).message, "err", "Could not reverse the assessment"); }
     finally { setBusy(false); }
   };
   const deleteDraft = async () => {
-    if (!doc || doc.isPosted || !window.confirm(`Delete draft assessment ${doc.assessmentNumber}?`)) return;
+    if (!doc || doc.isPosted) return;
+    if (!(await dlg.confirm(`Delete draft assessment ${doc.assessmentNumber}? This cannot be undone.`, { title: "Delete draft?", variant: "danger", confirmLabel: "Delete" }))) return;
     setBusy(true);
     try {
       await importAssessmentApi.remove(doc.id, p.companyId, p.userId);
       p.onChanged(); p.onClose(p.tabId);
-    } catch (e) { setMessage((e as Error).message); setBusy(false); }
+    } catch (e) { alertUser((e as Error).message, "err", "Could not delete the draft"); setBusy(false); }
   };
 
   // ---- shortcuts: the same ones the screen always had, plus the panels ----

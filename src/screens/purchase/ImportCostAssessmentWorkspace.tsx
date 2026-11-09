@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Calculator, Plus, Search } from "lucide-react";
 import { importAssessmentApi, purchaseApi, type PLookups } from "../../api";
+import { useDialog } from "../../components/Dialog";
 import { ContextChips, Pill, money } from "../../components/purchase/Bits";
 import { EmptyList, WorkspaceTabs } from "../../components/purchase/WorkspaceTabs";
 import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
@@ -38,6 +39,7 @@ export default function ImportCostAssessmentWorkspace(p: PurchaseScreenProps) {
   const [statusFilter, setStatusFilter] = useState("");
   const [msg, setMsg] = useState<{ text: string; kind: "ok" | "err" | "info" }>({ text: "Loading…", kind: "info" });
   const searchRef = useRef<HTMLInputElement>(null);
+  const dlg = useDialog();
 
   const refresh = useCallback(async () => {
     try {
@@ -46,13 +48,13 @@ export default function ImportCostAssessmentWorkspace(p: PurchaseScreenProps) {
         importAssessmentApi.eligibleImports({ companyId: p.companyId, branchId: p.branchId, fiscalYear: p.fyCode }),
       ]);
       setAll(list.rows as Row[]); setImports(eligible.rows as ImportOption[]); setMsg({ text: "Ready", kind: "info" });
-    } catch (e) { setMsg({ text: (e as Error).message, kind: "err" }); }
-  }, [p.companyId, p.branchId, p.fyCode]);
+    } catch (e) { setMsg({ text: (e as Error).message, kind: "err" }); void dlg.error((e as Error).message); }
+  }, [p.companyId, p.branchId, p.fyCode, dlg]);
   useEffect(() => {
     let live = true;
-    purchaseApi.lookups(p.companyId).then((l) => { if (live) setLookups(l); }).catch((e: Error) => { if (live) setLoadError(e.message); });
+    purchaseApi.lookups(p.companyId).then((l) => { if (live) setLookups(l); }).catch((e: Error) => { if (live) { setLoadError(e.message); void dlg.error(e.message, { title: "Could not load the assessment screen" }); } });
     return () => { live = false; };
-  }, [p.companyId]);
+  }, [p.companyId, dlg]);
   useEffect(() => { void refresh(); }, [refresh]);
 
   const rows = useMemo(() => {
@@ -90,14 +92,15 @@ export default function ImportCostAssessmentWorkspace(p: PurchaseScreenProps) {
     if (open) setActive(open.id);
     else addTab({ docId: row.id, title: String(row.assessmentNumber) });
   }, [addTab]);
-  const closeTab = useCallback((id: number, force = false) => {
-    const list = tabsRef.current, at = list.findIndex((t) => t.id === id);
+  const closeTab = useCallback(async (id: number, force = false) => {
+    if (!force && tabsRef.current.find((t) => t.id === id)?.dirty
+      && !(await dlg.confirm("This assessment has unsaved changes. Close the tab and lose them?", { title: "Close this tab?", variant: "warning", confirmLabel: "Close tab", cancelLabel: "Keep editing" }))) return;
+    const list = tabsRef.current, at = list.findIndex((t) => t.id === id); // read again: the tabs may have changed while the question was open
     if (at < 0) return;
-    if (list[at].dirty && !force && !window.confirm("This assessment has unsaved changes. Close the tab and lose them?")) return;
     snaps.current.delete(id);
     setTabs(list.filter((t) => t.id !== id));
     if (activeRef.current === id) setActive(list[at - 1]?.id ?? list[at + 1]?.id ?? "list");
-  }, []);
+  }, [dlg]);
   const onMeta = useCallback((id: number, meta: { title: string; dirty: boolean; docId: number | null }) => {
     setTabs((cur) => {
       let changed = false;

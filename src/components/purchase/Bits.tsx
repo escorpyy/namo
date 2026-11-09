@@ -3,7 +3,7 @@ import { CalendarDays, Check, MapPin, Pencil, PanelRightClose, PanelRightOpen, P
 import type { PListRow } from "../../api";
 import { fmtPaise, toPaise } from "../../lib/money";
 import type { DocScreen } from "../../screens/purchase/useDocScreen";
-import { ConfirmDialog } from "../ConfirmDialog";
+import { Dialog } from "../Dialog";
 import { ShortcutsOverlay } from "../ShortcutsOverlay";
 
 export const money = (s: unknown) => (s == null || s === "" ? "" : fmtPaise(toPaise(String(s))));
@@ -226,7 +226,7 @@ export function DocShell<F extends object>({ s, title, singular, branchName, fyC
           )}
         </aside>
       </main>
-      {s.dialog && <ConfirmDialog spec={s.dialog} onClose={() => s.setDialog(null)} />}
+      {s.dialog && <Dialog spec={s.dialog} onClose={() => s.setDialog(null)} />}
       {s.help && <ShortcutsOverlay onClose={() => s.setHelp(false)} shortcuts={help} />}
     </>
   );

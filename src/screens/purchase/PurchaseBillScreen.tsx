@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import { ArrowRight, ChevronDown, ChevronRight, Copy, Pencil, Plus, RotateCcw, Save, Send, Trash2, X } from "lucide-react";
 import { purchaseApi, type PDoc, type PListRow, type PLookups } from "../../api";
 import { Combobox, type ComboOption } from "../../components/Combobox";
-import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { Dialog } from "../../components/Dialog";
 import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
 import { COMMON_HELP, DocHeader, Field, FormSection, HINTS, Pill, focusStep, formEnterKey, money } from "../../components/purchase/Bits";
 import { EmptyPanel, HeaderSummary, SidePanel, VendorPanel, usePanelState } from "../../components/purchase/BillPanels";
@@ -313,7 +313,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     if (found.length) {
       const [first, message] = found[0];
       if (first.startsWith("imp.")) setImportOpen(true);
-      s.flash(message!, "err");
+      s.flash(message!, "warn");
       window.setTimeout(() => document.querySelector<HTMLElement>(`[data-field="${first}"]`)?.focus(), 30);
       return false;
     }
@@ -372,7 +372,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   const importAutoOpened = useRef(false);
   const landedAutoOpened = useRef(false);
   useEffect(() => {
-    purchaseApi.list("bills", { companyId: p.companyId, branchId: p.branchId, fiscalYear: "", status: "POSTED" }).then((r) => setMains(r.rows.filter((x) => !x.isAdditional))).catch(() => {});
+    purchaseApi.list("bills", { companyId: p.companyId, branchId: p.branchId, fiscalYear: "", status: "POSTED" }).then((r) => setMains(r.rows.filter((x) => !x.isAdditional))).catch((e: Error) => s.flash(e.message, "err", "Could not load the bill list"));
   }, [p.companyId, p.branchId, s.doc?.id, s.mode]);
   const sourceTargetOpts = useMemo<ComboOption[]>(() => {
     const o = mains.filter((x) => String(x.purchaseType).startsWith("GOODS_PURCHASE_") && !x.isAdditional)
@@ -442,7 +442,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     return (
       <>
         <section data-purchase-document className="grid min-h-0 flex-1 place-items-center text-slate-500">Loading…</section>
-        {s.dialog && <ConfirmDialog spec={s.dialog} onClose={() => s.setDialog(null)} />}
+        {s.dialog && <Dialog spec={s.dialog} onClose={() => s.setDialog(null)} />}
       </>
     );
   }
@@ -753,7 +753,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
           </div>
         </div>
       )}
-      {s.dialog && <ConfirmDialog spec={s.dialog} onClose={() => s.setDialog(null)} />}
+      {s.dialog && <Dialog spec={s.dialog} onClose={() => s.setDialog(null)} />}
       {s.help && <ShortcutsOverlay onClose={() => s.setHelp(false)} shortcuts={HELP} />}
     </>
   );

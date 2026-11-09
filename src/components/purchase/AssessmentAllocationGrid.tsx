@@ -1,6 +1,7 @@
 import { allocateByWeights, toMicro } from "../../../shared/purchase-calculation";
 import { formatImportCost } from "../../../shared/import-costing";
 import type { ImportAssessmentPreview } from "../../api";
+import { useDialog } from "../Dialog";
 
 export interface AssessmentAllocationColumn {
   key: string;
@@ -47,6 +48,7 @@ const totalEntered = (term: AssessmentAllocationColumn) => {
 };
 
 export function AssessmentAllocationGrid({ lines, terms, editing, busy, previewReady, onCellsChange, onMessage, fill }: Props) {
+  const dlg = useDialog();
   const targetsReady = terms.every((term) => term.result?.finalAmount != null || term.result?.amount != null);
   const pasteRange = (event: React.ClipboardEvent<HTMLInputElement>, startRow: number, startColumn: number) => {
     const text = event.clipboardData.getData("text/plain").replace(/\r/g, "");
@@ -70,10 +72,10 @@ export function AssessmentAllocationGrid({ lines, terms, editing, busy, previewR
     }
   };
 
-  const autoFill = () => {
+  const autoFill = async () => {
     if (!previewReady || !targetsReady || !lines.length || !terms.length) return;
     const hasValues = terms.some((term) => Object.values(term.manual).some((value) => value.trim() !== ""));
-    if (hasValues && !window.confirm("Replace the current manual allocations with exact splits based on each charge’s allocation basis?")) return;
+    if (hasValues && !(await dlg.confirm("Replace the current manual allocations with exact splits based on each charge’s allocation basis?", { title: "Replace manual allocations?", variant: "warning", confirmLabel: "Replace" }))) return;
     try {
       const updates: AssessmentAllocationCellUpdate[] = [];
       for (const term of terms) {
@@ -89,7 +91,9 @@ export function AssessmentAllocationGrid({ lines, terms, editing, busy, previewR
       onCellsChange(updates);
       onMessage(`Auto-filled ${terms.length} charge split${terms.length === 1 ? "" : "s"} across ${lines.length} product lines. Review before saving.`);
     } catch (error) {
-      onMessage(error instanceof Error ? error.message : "Could not auto-fill manual allocations.");
+      const text = error instanceof Error ? error.message : "Could not auto-fill manual allocations.";
+      onMessage(text);
+      void dlg.error(text, { title: "Could not auto-fill" });
     }
   };
 

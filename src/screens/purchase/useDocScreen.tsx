@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { ApiError, purchaseApi, type PDoc, type PListRow, type PLookups, type PurchaseKind } from "../../api";
-import type { DialogSpec } from "../../components/ConfirmDialog";
+import { useDialog, type DialogSpec } from "../../components/Dialog";
 import type { Mode, MsgKind, StatusInfo } from "../../types";
 
 // The behaviour every purchase document screen shares: the list on the right, the selected document, new / view / edit, the
@@ -85,7 +85,13 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
     setListCollapsed(next);
     window.setTimeout(() => q("[data-list-toggle]")?.focus(), 0);
   }, [listCollapsed, listStorageKey]);
-  const flash = useCallback((text: string, kind: MsgKind = "info") => setMsg({ text, kind }), []);
+  const dlg = useDialog();
+  // The status bar keeps every message; a warning or an error also stops the person with a dialog (title: optional heading for it).
+  const flash = useCallback((text: string, kind: MsgKind = "info", title?: string) => {
+    setMsg({ text, kind });
+    if (kind === "err") void dlg.error(text, { title });
+    else if (kind === "warn") void dlg.warning(text, { title });
+  }, [dlg]);
 
   const dirty = mode !== "view" && form !== null && sig(form) !== baseSig;
 
@@ -151,7 +157,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
     if (!dirty) return action();
     const stay = () => setDialog(null);
     setDialog({
-      title: "Discard changes?", body: "This document has unsaved changes.",
+      title: "Discard changes?", body: "This document has unsaved changes.", variant: "warning",
       buttons: [
         { label: "Save", kind: "primary", onClick: () => { setDialog(null); void save(); } },
         { label: "Discard", kind: "danger", onClick: () => { setDialog(null); action(); } },
@@ -176,7 +182,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
   });
   const edit = () => {
     if (mode !== "view" || !doc) return;
-    if (!cfg.editable(doc)) return flash(`This ${cfg.singular.toLowerCase()} can no longer be edited.`, "err");
+    if (!cfg.editable(doc)) return flash(`This ${cfg.singular.toLowerCase()} can no longer be edited.`, "warn", "Cannot edit");
     setMode("edit"); setErrors({});
     setTimeout(() => q("[data-zone=form] [data-field]:not(:disabled)")?.focus(), 40);
   };
@@ -198,7 +204,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
     const first = Object.keys(errs).find((k) => errs[k]);
     if (first) {
       setErrors(errs);
-      flash(errs[first]!, "err");
+      flash(errs[first]!, "warn");
       setTimeout(() => (q(`[data-field="${first}"]`) ?? q(`[data-field^="${first}"]`))?.focus(), 0);
       return false;
     }
@@ -222,7 +228,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
   // ---- delete ----
   const askDelete = () => {
     if (mode !== "view" || !doc) return;
-    if (!cfg.deletable(doc)) { flash(`This ${cfg.singular.toLowerCase()} cannot be deleted.`, "err"); return; }
+    if (!cfg.deletable(doc)) { flash(`This ${cfg.singular.toLowerCase()} cannot be deleted.`, "warn", "Cannot delete"); return; }
     const target = doc;
     setDialog({
       title: `Delete ${cfg.singular.toLowerCase()}?`,
@@ -249,7 +255,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
   // ---- workflow actions: approve, confirm, post, reverse ... (always asks first) ----
   const run = (spec: ActionSpec) => {
     if (!doc) return;
-    if (dirty) return flash("Save or cancel your changes first.", "err");
+    if (dirty) return flash("Save or cancel your changes first.", "warn");
     const target = doc;
     setDialog({
       title: spec.title, body: spec.body,

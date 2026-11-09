@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Plus, Receipt, Search } from "lucide-react";
 import { purchaseApi, type PListRow, type PLookups } from "../../api";
+import { useDialog } from "../../components/Dialog";
 import { ContextChips, Pill, money } from "../../components/purchase/Bits";
 import { EmptyList, WorkspaceTabs } from "../../components/purchase/WorkspaceTabs";
 import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
@@ -34,11 +35,12 @@ let consumedChallan = 0;
 export default function PurchaseBillWorkspace(p: PurchaseScreenProps & { fromChallan: { id: number; n: number } | null }) {
   const [lookups, setLookups] = useState<PLookups | null>(null);
   const [loadError, setLoadError] = useState("");
+  const dlg = useDialog();
   useEffect(() => {
     let live = true;
-    purchaseApi.lookups(p.companyId).then((l) => { if (live) setLookups(l); }).catch((e: Error) => { if (live) setLoadError(e.message); });
+    purchaseApi.lookups(p.companyId).then((l) => { if (live) setLookups(l); }).catch((e: Error) => { if (live) { setLoadError(e.message); void dlg.error(e.message, { title: "Could not load the bill screen" }); } });
     return () => { live = false; };
-  }, [p.companyId]);
+  }, [p.companyId, dlg]);
 
   // ---- the list ----
   const [rows, setRows] = useState<PListRow[]>([]);
@@ -51,8 +53,8 @@ export default function PurchaseBillWorkspace(p: PurchaseScreenProps & { fromCha
     try {
       const r = await purchaseApi.list("bills", { companyId: p.companyId, branchId: p.branchId, fiscalYear: p.fyCode, status: statusFilter || undefined, search: search.trim() || undefined });
       setRows(r.rows); setTotal(r.total); setMsg({ text: "Ready", kind: "info" });
-    } catch (e) { setMsg({ text: (e as Error).message, kind: "err" }); }
-  }, [p.companyId, p.branchId, p.fyCode, statusFilter, search]);
+    } catch (e) { setMsg({ text: (e as Error).message, kind: "err" }); void dlg.error((e as Error).message); }
+  }, [p.companyId, p.branchId, p.fyCode, statusFilter, search, dlg]);
   useEffect(() => { const t = setTimeout(() => void loadList(), search ? 250 : 0); return () => clearTimeout(t); }, [loadList, search]);
 
   // ---- tabs ----
@@ -81,14 +83,15 @@ export default function PurchaseBillWorkspace(p: PurchaseScreenProps & { fromCha
     if (open) setActive(open.id);
     else addTab({ docId: row.id, fromChallan: null, title: String(row.invoiceNumber) });
   }, [addTab]);
-  const closeTab = useCallback((id: number, force = false) => {
-    const list = tabsRef.current, at = list.findIndex((t) => t.id === id);
+  const closeTab = useCallback(async (id: number, force = false) => {
+    if (!force && tabsRef.current.find((t) => t.id === id)?.dirty
+      && !(await dlg.confirm("This bill has unsaved changes. Close the tab and lose them?", { title: "Close this tab?", variant: "warning", confirmLabel: "Close tab", cancelLabel: "Keep editing" }))) return;
+    const list = tabsRef.current, at = list.findIndex((t) => t.id === id); // read again: the tabs may have changed while the question was open
     if (at < 0) return;
-    if (list[at].dirty && !force && !window.confirm("This bill has unsaved changes. Close the tab and lose them?")) return;
     snaps.current.delete(id);
     setTabs(list.filter((t) => t.id !== id));
     if (activeRef.current === id) setActive(list[at - 1]?.id ?? list[at + 1]?.id ?? "list");
-  }, []);
+  }, [dlg]);
   const onMeta = useCallback((id: number, meta: { title: string; dirty: boolean; docId: number | null }) => {
     setTabs((cur) => {
       let changed = false;

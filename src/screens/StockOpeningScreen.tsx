@@ -5,7 +5,7 @@ import { soApi, type SoData, type SoLine } from "../api";
 import { fmtPaise, toPaise } from "../lib/money";
 import type { MsgKind, StatusInfo } from "../types";
 import { MasterReferencePicker, type ReferenceOption } from "../components/MasterReferencePicker";
-import { ConfirmDialog, type DialogSpec } from "../components/ConfirmDialog";
+import { Dialog, useDialog, type DialogSpec } from "../components/Dialog";
 import { DateInput } from "../components/DateInput";
 import { ShortcutsOverlay } from "../components/ShortcutsOverlay";
 
@@ -49,7 +49,13 @@ export default function StockOpeningScreen({ companyId, branchId, fyId, branchNa
   const gridRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const savingRef = useRef(false);
-  const flash = (text: string, kind: MsgKind = "info") => setMsg({ text, kind });
+  const dlg = useDialog();
+  // The status bar keeps every message; a warning or an error also stops the person with a dialog.
+  const flash = (text: string, kind: MsgKind = "info") => {
+    setMsg({ text, kind });
+    if (kind === "err") void dlg.error(text);
+    else if (kind === "warn") void dlg.warning(text);
+  };
 
   const load = async () => {
     try {
@@ -169,7 +175,7 @@ export default function StockOpeningScreen({ companyId, branchId, fyId, branchNa
     setErrs(e);
     const firstKey = live.find((r) => e[r.key])?.key;
     if (firstKey) {
-      flash(e[firstKey].msg, "err");
+      flash(e[firstKey].msg, "warn");
       const i = rows.findIndex((r) => r.key === firstKey);
       gridRef.current?.querySelector<HTMLElement>(`[data-field="L.${i}.${e[firstKey].col}"]`)?.focus();
       return;
@@ -192,7 +198,7 @@ export default function StockOpeningScreen({ companyId, branchId, fyId, branchNa
   const reset = () => {
     if (!dirty) return;
     setDialog({
-      title: "Discard changes?", body: "Saare unsaved badlav hat jayenge.",
+      title: "Discard changes?", body: "Saare unsaved badlav hat jayenge.", variant: "warning",
       buttons: [
         { label: "Stay", kind: "neutral", autoFocus: true, onClick: () => setDialog(null) },
         { label: "Discard", kind: "danger", onClick: () => { setDialog(null); setRows(orig.length ? orig.map((x) => ({ ...x })) : [blankRow()]); setErrs({}); flash("Changes discarded.", "info"); } },
@@ -313,7 +319,7 @@ export default function StockOpeningScreen({ companyId, branchId, fyId, branchNa
           </div>
         </div>
       </main>
-      {dialog && <ConfirmDialog spec={dialog} onClose={() => setDialog(null)} />}
+      {dialog && <Dialog spec={dialog} onClose={() => setDialog(null)} />}
       {help && <ShortcutsOverlay onClose={() => setHelp(false)} shortcuts={HELP} />}
     </>
   );

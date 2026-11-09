@@ -1,4 +1,4 @@
-import { CheckCircle2, AlertCircle, Info } from "lucide-react";
+import { CheckCircle2, AlertCircle, AlertTriangle, Info } from "lucide-react";
 import type { Mode, StatusInfo } from "../types";
 
 const HINTS: Record<Mode, string[]> = {
@@ -16,8 +16,8 @@ interface Props {
 }
 
 export function StatusBar({ status, company, branch, fy }: Props) {
-  const Icon = status.kind === "ok" ? CheckCircle2 : status.kind === "err" ? AlertCircle : Info;
-  const color = status.kind === "ok" ? "text-green-700" : status.kind === "err" ? "text-red-700" : "text-slate-600";
+  const Icon = status.kind === "ok" ? CheckCircle2 : status.kind === "err" ? AlertCircle : status.kind === "warn" ? AlertTriangle : Info;
+  const color = status.kind === "ok" ? "text-green-700" : status.kind === "err" ? "text-red-700" : status.kind === "warn" ? "text-amber-700" : "text-slate-600";
   return (
     <footer className="h-7 shrink-0 border-t border-slate-400 bg-slate-100 flex items-center gap-3 px-2 text-[12px] whitespace-nowrap overflow-hidden">
       <span className={`px-2 py-px rounded-sm text-white font-semibold ${MODE_STYLE[status.mode]}`}>{status.mode.toUpperCase()}</span>

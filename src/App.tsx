@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { ContextData, StatusInfo } from "./types";
+import { useDialog } from "./components/Dialog";
 import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
@@ -26,6 +27,7 @@ export default function App() {
   const [note, setNote] = useState<{ text: string; n: number } | null>(null);
   const [fromChallan, setFromChallan] = useState<{ id: number; n: number } | null>(null);
   const dirtyRef = useRef(false);
+  const dlg = useDialog();
 
   const pickDefaults = (c: ContextData["companies"][number]) => {
     setBranchId((c.branches.find((b) => b.isHeadOffice) ?? c.branches[0])?.id ?? 0);
@@ -44,15 +46,29 @@ export default function App() {
       if (!co) { setCompanyId(d.companies[0].id); pickDefaults(d.companies[0]); return; }
       if (!co.branches.some((b) => b.id === cur.branchId)) setBranchId((co.branches.find((b) => b.isHeadOffice) ?? co.branches[0])?.id ?? 0);
       if (!co.fiscalYears.some((y) => y.id === cur.fyId)) setFyId((co.fiscalYears.find((y) => y.isCurrent) ?? co.fiscalYears[0])?.id ?? 0);
-    }).catch(() => {});
-  }, []);
+    }).catch((e: Error) => void dlg.error(e.message, { title: "Could not refresh the company list" }));
+  }, [dlg]);
 
-  useEffect(() => {
+  const start = useCallback(() => {
+    setError(null);
     api.context().then((d) => {
       if (!d.companies.length) return setError("Database me koi company nahi hai. `npm run db:seed` chalao.");
       setCtx(d); setCompanyId(d.companies[0].id); pickDefaults(d.companies[0]);
     }).catch((e: Error) => setError(e.message));
   }, []);
+  useEffect(() => { start(); }, [start]);
+
+  // The app cannot start: say why in a dialog; the page behind it only offers "Try again".
+  useEffect(() => {
+    if (!error) return;
+    void dlg.error(
+      <>
+        <span className="block">{error}</span>
+        <span className="mt-2 block text-[12px] text-slate-500">Checklist: .env me DATABASE_URL, <code>npm run db:push</code>, <code>npm run db:seed</code>, aur API (<code>npm run dev</code>) chal rahi ho.</span>
+      </>,
+      { title: "Cannot start NamoErp" },
+    );
+  }, [error, dlg]);
 
   const toggleSidebar = useCallback(() => setCollapsed((c) => { localStorage.setItem("sb-collapsed", c ? "0" : "1"); return !c; }), []);
   useEffect(() => {
@@ -66,10 +82,9 @@ export default function App() {
   if (error) {
     return (
       <div className="h-full grid place-items-center">
-        <div className="max-w-md border border-red-300 bg-white p-5">
-          <h1 className="font-semibold text-red-700 mb-1">Cannot start NamoErp</h1>
-          <p className="mb-2">{error}</p>
-          <p className="text-slate-600 text-[12px]">Checklist: .env me DATABASE_URL, <code>npm run db:push</code>, <code>npm run db:seed</code>, aur API (<code>npm run dev</code>) chal rahi ho.</p>
+        <div className="text-center">
+          <p className="mb-3 text-slate-600">NamoErp could not start.</p>
+          <button type="button" className="btn btn-primary" onClick={start}>Try again</button>
         </div>
       </div>
     );
@@ -77,22 +92,25 @@ export default function App() {
   if (!ctx) return <div className="h-full grid place-items-center text-slate-500">Loading…</div>;
 
   const co = ctx.companies.find((c) => c.id === companyId)!;
-  const changeCompany = (id: number) => {
+  // Unsaved grid / form data is lost by switching screen, company, branch or year, so each of those asks first.
+  const okToLeave = async (message: string, title: string, confirmLabel: string) =>
+    !dirtyRef.current || dlg.confirm(message, { title, variant: "warning", confirmLabel, cancelLabel: "Stay here" });
+
+  const changeCompany = async (id: number) => {
     if (id === companyId) return;
-    if (dirtyRef.current && !window.confirm("Unsaved changes will be lost. Switch company anyway?")) return;
+    if (!(await okToLeave("Unsaved changes will be lost. Switch company anyway?", "Switch company?", "Switch company"))) return;
     setCompanyId(id);
     pickDefaults(ctx.companies.find((c) => c.id === id)!);
   };
 
-  // Branch / FY badalne se bhi unsaved grid/form ka data jaata hai: wahi guard
-  const guarded = (fn: () => void) => () => {
-    if (dirtyRef.current && !window.confirm("Unsaved changes will be lost. Continue?")) return;
+  const guarded = (fn: () => void) => async () => {
+    if (!(await okToLeave("Unsaved changes will be lost. Continue?", "Discard unsaved changes?", "Continue"))) return;
     fn();
   };
 
-  const navigate = (id: string) => {
+  const navigate = async (id: string) => {
     if (id === screen) return;
-    if (dirtyRef.current && !window.confirm("Unsaved changes will be lost. Leave this screen?")) return;
+    if (!(await okToLeave("Unsaved changes will be lost. Leave this screen?", "Leave this screen?", "Leave screen"))) return;
     setScreen(id);
   };
 
@@ -104,7 +122,7 @@ export default function App() {
         onCalendar={(c) => { setCalendar(c); localStorage.setItem("cal", c); }}
       />
       <div className="flex-1 min-h-0 flex">
-        <Sidebar collapsed={collapsed} active={screen} onToggle={toggleSidebar} onNavigate={navigate} onNotify={(text) => setNote({ text, n: Date.now() })} />
+        <Sidebar collapsed={collapsed} active={screen} onToggle={toggleSidebar} onNavigate={navigate} onNotify={(text) => { setNote({ text, n: Date.now() }); void dlg.info(text, { title: "Not available yet" }); }} />
         {/* key: screen ya company badalne par list reload + form reset */}
         {screen.startsWith("purchase-") && screen !== "purchase-terms" ? (() => {
           const k = `${screen}:${companyId}:${branchId}:${fyId}`;

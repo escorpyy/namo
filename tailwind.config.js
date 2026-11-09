@@ -19,6 +19,14 @@ export default {
         ledger: ['"IBM Plex Sans Variable"', '"IBM Plex Sans"', "Inter", '"Segoe UI"', "system-ui", "sans-serif"],
         "ledger-mono": ['"IBM Plex Mono"', "ui-monospace", "Consolas", "monospace"],
       },
+      keyframes: {
+        "dialog-fade": { from: { opacity: "0" }, to: { opacity: "1" } },
+        "dialog-pop": { from: { opacity: "0", transform: "translateY(8px) scale(0.96)" }, to: { opacity: "1", transform: "none" } },
+      },
+      animation: {
+        "dialog-fade": "dialog-fade 140ms ease-out",
+        "dialog-pop": "dialog-pop 190ms cubic-bezier(0.16, 1, 0.3, 1)",
+      },
       boxShadow: {
         // Only things that float get a shadow (the open tab, dialogs, the totals bar); ordinary cards rely on their border.
         lift: "0 10px 30px -12px rgba(17, 26, 47, 0.28), 0 2px 6px -2px rgba(17, 26, 47, 0.12)",

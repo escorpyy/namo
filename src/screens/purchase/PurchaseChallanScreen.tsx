@@ -64,7 +64,7 @@ export default function PurchaseChallanScreen(p: PurchaseScreenProps & { onCreat
   // approved orders that goods can be received against
   const [orders, setOrders] = useState<PListRow[]>([]);
   useEffect(() => {
-    purchaseApi.list("orders", { companyId: p.companyId, branchId: p.branchId, fiscalYear: "", status: "APPROVED" }).then((r) => setOrders(r.rows)).catch(() => {});
+    purchaseApi.list("orders", { companyId: p.companyId, branchId: p.branchId, fiscalYear: "", status: "APPROVED" }).then((r) => setOrders(r.rows)).catch((e: Error) => s.flash(e.message, "err", "Could not load approved orders"));
   }, [p.companyId, p.branchId, s.doc?.id, s.mode]);
   const orderOpts = useMemo<ComboOption[]>(() => {
     const list = orders.filter((o) => !f?.vendorGLId || String(o.vendorGLId) === f.vendorGLId || String(o.id) === f.purchaseOrderId);
@@ -86,7 +86,7 @@ export default function PurchaseChallanScreen(p: PurchaseScreenProps & { onCreat
       }));
       s.patch({ purchaseOrderId: id, vendorGLId: str(o.vendorGLId), subLedgerId: str(o.subLedgerId), agentId: str(o.agentId), lines: lines.length ? lines : [blankLine()] });
       s.clearError("vendorGLId", "subLedgerId");
-      s.flash(lines.length ? `Filled ${lines.length} line(s) with what is still to be received on ${o.orderNumber}` : `${o.orderNumber} has nothing left to receive`, lines.length ? "info" : "err");
+      s.flash(lines.length ? `Filled ${lines.length} line(s) with what is still to be received on ${o.orderNumber}` : `${o.orderNumber} has nothing left to receive`, lines.length ? "info" : "warn");
     } catch (e) { s.flash((e as Error).message, "err"); }
   };
 

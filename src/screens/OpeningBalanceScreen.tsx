@@ -3,7 +3,7 @@ import { AlertTriangle, Lock, LockOpen, RotateCcw, Save, Search } from "lucide-r
 import { ApiError, obApi, type ObData, type ObRow } from "../api";
 import { editStr, fmtPaise, toPaise } from "../lib/money";
 import type { MsgKind, StatusInfo } from "../types";
-import { ConfirmDialog, type DialogSpec } from "../components/ConfirmDialog";
+import { Dialog, useDialog, type DialogSpec } from "../components/Dialog";
 import { ShortcutsOverlay } from "../components/ShortcutsOverlay";
 
 const HELP: [string, string][] = [
@@ -44,7 +44,13 @@ export default function OpeningBalanceScreen({ companyId, branchId, fyId, userId
   const [msg, setMsg] = useState<{ text: string; kind: MsgKind }>({ text: "Loading…", kind: "info" });
   const searchRef = useRef<HTMLInputElement>(null);
   const savingRef = useRef(false);
-  const flash = (text: string, kind: MsgKind = "info") => setMsg({ text, kind });
+  const dlg = useDialog();
+  // The status bar keeps every message; a warning or an error also stops the person with a dialog (title: optional heading for it).
+  const flash = (text: string, kind: MsgKind = "info", title?: string) => {
+    setMsg({ text, kind });
+    if (kind === "err") void dlg.error(text, { title });
+    else if (kind === "warn") void dlg.warning(text, { title });
+  };
 
   const load = async () => {
     try {
@@ -152,7 +158,7 @@ export default function OpeningBalanceScreen({ companyId, branchId, fyId, userId
   const reset = () => {
     if (!dirty) return;
     setDialog({
-      title: "Discard changes?", body: `${Object.keys(draft).length} edited row(s) will be reverted.`,
+      title: "Discard changes?", body: `${Object.keys(draft).length} edited row(s) will be reverted.`, variant: "warning",
       buttons: [
         { label: "Stay", kind: "neutral", autoFocus: true, onClick: () => setDialog(null) },
         { label: "Discard", kind: "danger", onClick: () => { setDialog(null); setDraft({}); flash("Changes discarded.", "info"); } },
@@ -166,9 +172,9 @@ export default function OpeningBalanceScreen({ companyId, branchId, fyId, userId
     try { await obApi.lock({ companyId, fiscalYearId: fyId, userId, force }); await load(); flash("Opening balance locked.", "ok"); }
     catch (e) {
       if (e instanceof ApiError && e.field === "stockMismatch") {
-        flash(e.message, "err");
+        setMsg({ text: e.message, kind: "warn" }); // the dialog below is the prompt; the status bar just keeps the text
         return setDialog({
-          title: "Stock does not match the ledger", body: e.message,
+          title: "Stock does not match the ledger", body: e.message, variant: "warning",
           buttons: [
             { label: "Cancel", kind: "neutral", autoFocus: true, onClick: () => setDialog(null) },
             { label: "Lock anyway", kind: "danger", onClick: () => { setDialog(null); void doLock(true); } },
@@ -182,7 +188,7 @@ export default function OpeningBalanceScreen({ companyId, branchId, fyId, userId
     if (!fy || fy.isClosed) return;
     if (fy.isOpeningBalanceLocked) {
       setDialog({
-        title: "Unlock opening balance?", body: `FY ${fy.code}: opening balances ko dobara edit kiya ja sakega. Iska record audit me rakhna hoga.`,
+        title: "Unlock opening balance?", body: `FY ${fy.code}: opening balances ko dobara edit kiya ja sakega. Iska record audit me rakhna hoga.`, variant: "warning",
         buttons: [
           { label: "Cancel", kind: "neutral", autoFocus: true, onClick: () => setDialog(null) },
           { label: "Unlock", kind: "danger", onClick: async () => { setDialog(null); try { await obApi.unlock({ companyId, fiscalYearId: fyId }); await load(); flash("Opening balance unlocked.", "ok"); } catch (e) { flash((e as Error).message, "err"); } } },
@@ -190,11 +196,9 @@ export default function OpeningBalanceScreen({ companyId, branchId, fyId, userId
       });
       return;
     }
-    if (dirty) return flash("Save the changes before locking.", "err");
+    if (dirty) return flash("Save the changes before locking.", "warn");
     if (totals.companyDiff !== 0) {
-      const t = `Cannot lock: company-wide opening balance is not balanced (difference ${fmtPaise(totals.companyDiff)} ${totals.companyDiff > 0 ? "Dr" : "Cr"}).`;
-      flash(t, "err");
-      return setDialog({ title: "Cannot lock", body: t, buttons: [{ label: "OK", kind: "neutral", autoFocus: true, onClick: () => setDialog(null) }] });
+      return flash(`Cannot lock: company-wide opening balance is not balanced (difference ${fmtPaise(totals.companyDiff)} ${totals.companyDiff > 0 ? "Dr" : "Cr"}).`, "err", "Cannot lock");
     }
     setDialog({
       title: "Lock opening balance?", body: `FY ${fy.code}: Dr = Cr. Lock ke baad koi edit nahi hoga jab tak Unlock na ho.`,
@@ -328,7 +332,7 @@ export default function OpeningBalanceScreen({ companyId, branchId, fyId, userId
           </div>
         </div>
       </main>
-      {dialog && <ConfirmDialog spec={dialog} onClose={() => setDialog(null)} />}
+      {dialog && <Dialog spec={dialog} onClose={() => setDialog(null)} />}
       {help && <ShortcutsOverlay onClose={() => setHelp(false)} shortcuts={HELP} />}
     </>
   );
