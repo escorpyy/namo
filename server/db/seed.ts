@@ -39,27 +39,157 @@ async function main() {
 
     if (c.code !== "ABC") continue; // demo master data sirf ABC me
 
-    if (!(await hasRows(S.accountGroup, co.id))) {
-      const groups = await db.insert(S.accountGroup).values([
-        { companyId: co.id, code: "AG01", description: "Current Assets", type: "ASSET" },
-        { companyId: co.id, code: "AG02", description: "Fixed Assets", type: "ASSET" },
-        { companyId: co.id, code: "AG03", description: "Sundry Creditors", type: "LIABILITY" },
-        { companyId: co.id, code: "AG04", description: "Capital", type: "EQUITY" },
-        { companyId: co.id, code: "AG05", description: "Direct Income", type: "REVENUE" },
-        { companyId: co.id, code: "AG06", description: "Indirect Income", type: "REVENUE" },
-        { companyId: co.id, code: "AG07", description: "Direct Expenses", type: "EXPENSE" },
-        { companyId: co.id, code: "AG08", description: "Indirect Expenses", type: "EXPENSE" },
-        { companyId: co.id, code: "AG09", description: "Loans & Advances", type: "LIABILITY" },
-        { companyId: co.id, code: "AG10", description: "Provisions", type: "LIABILITY" },
-        { companyId: co.id, code: "AG11", description: "Reserves & Surplus", type: "EQUITY" },
-        { companyId: co.id, code: "AG12", description: "Other Assets", type: "ASSET" },
-      ]).returning();
-      const ag01 = groups.find((g) => g.code === "AG01")!;
-      await db.insert(S.accountSubGroup).values([
-        { accountGroupId: ag01.id, code: "SG01", description: "Cash-in-Hand" },
-        { accountGroupId: ag01.id, code: "SG02", description: "Bank Accounts" },
-        { accountGroupId: ag01.id, code: "SG03", description: "Stock-in-Hand" },
-      ]);
+    // Chart of Accounts: ensure each group/subgroup independently on every run.
+    // Codes are stable identifiers; descriptions/types are corrected in place.
+    const ensureGroup = async (
+      code: string,
+      description: string,
+      type: "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE",
+    ) => {
+      const [existing] = await db.select().from(S.accountGroup).where(
+        and(eq(S.accountGroup.companyId, co.id), eq(S.accountGroup.code, code)),
+      );
+      const [nameOwner] = await db.select().from(S.accountGroup).where(
+        and(eq(S.accountGroup.companyId, co.id), eq(S.accountGroup.description, description)),
+      );
+      if (nameOwner && nameOwner.code !== code) {
+        throw new Error(`Cannot seed account group ${code} (${description}): description is already used by ${nameOwner.code}.`);
+      }
+      if (existing) {
+        if (existing.description !== description || existing.type !== type) {
+          const [updated] = await db.update(S.accountGroup)
+            .set({ description, type, isActive: true })
+            .where(eq(S.accountGroup.id, existing.id))
+            .returning();
+          return updated;
+        }
+        return existing;
+      }
+      return (await db.insert(S.accountGroup).values({
+        companyId: co.id, code, description, type,
+      }).returning())[0];
+    };
+
+    const groupDefinitions = [
+      ["AG01", "Current Assets", "ASSET"],
+      ["AG02", "Fixed Assets", "ASSET"],
+      ["AG03", "Current Liabilities", "LIABILITY"],
+      ["AG04", "Capital", "EQUITY"],
+      ["AG05", "Direct Income", "REVENUE"],
+      ["AG06", "Indirect Income", "REVENUE"],
+      ["AG07", "Direct Expenses", "EXPENSE"],
+      ["AG08", "Indirect Expenses", "EXPENSE"],
+      ["AG09", "Non-current Liabilities", "LIABILITY"],
+      ["AG10", "Provisions", "LIABILITY"],
+      ["AG11", "Reserves & Surplus", "EQUITY"],
+      ["AG12", "Other Assets", "ASSET"],
+      ["AG13", "Non-current Assets", "ASSET"],
+    ] as const;
+
+    for (const [code, description, type] of groupDefinitions) {
+      await ensureGroup(code, description, type);
+    }
+
+    const ensureSub = async (groupCode: string, subCode: string, description: string) => {
+      const [group] = await db.select().from(S.accountGroup).where(
+        and(eq(S.accountGroup.companyId, co.id), eq(S.accountGroup.code, groupCode)),
+      );
+      if (!group) throw new Error(`Account group ${groupCode} is missing while seeding ${description}.`);
+      const [existing] = await db.select().from(S.accountSubGroup).where(
+        and(eq(S.accountSubGroup.accountGroupId, group.id), eq(S.accountSubGroup.code, subCode)),
+      );
+      const [nameOwner] = await db.select().from(S.accountSubGroup).where(
+        and(eq(S.accountSubGroup.accountGroupId, group.id), eq(S.accountSubGroup.description, description)),
+      );
+      if (nameOwner && nameOwner.code !== subCode) {
+        throw new Error(`Cannot seed subgroup ${groupCode}/${subCode} (${description}): description is already used by ${nameOwner.code}.`);
+      }
+      if (existing) {
+        if (existing.description !== description) {
+          const [updated] = await db.update(S.accountSubGroup)
+            .set({ description, isActive: true })
+            .where(eq(S.accountSubGroup.id, existing.id))
+            .returning();
+          return updated;
+        }
+        return existing;
+      }
+      return (await db.insert(S.accountSubGroup).values({
+        accountGroupId: group.id, code: subCode, description,
+      }).returning())[0];
+    };
+
+    const subgroupDefinitions = [
+      // Current assets
+      ["AG01", "SG01", "Cash-in-Hand"],
+      ["AG01", "SG02", "Bank Accounts"],
+      ["AG01", "SG03", "Stock-in-Hand"],
+      ["AG01", "SG04", "Sundry Debtors"],
+      ["AG01", "SG05", "Duties & Taxes"],
+      ["AG01", "SG06", "Loans & Advances (Asset)"],
+      ["AG01", "SG07", "Supplier Advances"],
+      ["AG01", "SG08", "Staff Advances"],
+      ["AG01", "SG09", "Prepaid Expenses"],
+      ["AG01", "SG10", "Short-term Security Deposits"],
+      ["AG01", "SG11", "Other Receivables"],
+      // Fixed assets
+      ["AG02", "SG01", "Land & Buildings"],
+      ["AG02", "SG02", "Plant & Machinery"],
+      ["AG02", "SG03", "Furniture & Fixtures"],
+      ["AG02", "SG04", "Vehicles"],
+      ["AG02", "SG05", "Computers & Office Equipment"],
+      ["AG02", "SG06", "Accumulated Depreciation"],
+      // Current liabilities
+      ["AG03", "SG01", "Sundry Creditors"],
+      ["AG03", "SG02", "Duties & Taxes Payable"],
+      ["AG03", "SG03", "Outstanding Expenses"],
+      ["AG03", "SG04", "Customer Advances"],
+      ["AG03", "SG05", "Short-term Borrowings"],
+      // Equity
+      ["AG04", "SG01", "Owner's Capital"],
+      ["AG04", "SG02", "Drawings"],
+      ["AG04", "SG03", "Partners' Capital"],
+      ["AG04", "SG04", "Share Capital"],
+      // Income
+      ["AG05", "SG01", "Sales Accounts"],
+      ["AG05", "SG02", "Sales Returns"],
+      ["AG06", "SG01", "Interest Received"],
+      ["AG06", "SG02", "Discount Received"],
+      ["AG06", "SG03", "Commission Received"],
+      ["AG06", "SG04", "Rent Received"],
+      // Expenses
+      ["AG07", "SG01", "Purchase Accounts"],
+      ["AG07", "SG02", "Purchase Returns"],
+      ["AG07", "SG03", "Direct Wages"],
+      ["AG07", "SG04", "Freight Inward"],
+      ["AG08", "SG01", "Administrative Expenses"],
+      ["AG08", "SG02", "Salaries & Wages"],
+      ["AG08", "SG03", "Rent & Utilities"],
+      ["AG08", "SG04", "Bank Charges"],
+      ["AG08", "SG05", "Repairs & Maintenance"],
+      ["AG08", "SG06", "Depreciation"],
+      ["AG08", "SG07", "Selling & Distribution Expenses"],
+      // Non-current liabilities
+      ["AG09", "SG01", "Long-term Loans"],
+      ["AG09", "SG02", "Secured Loans"],
+      ["AG09", "SG03", "Unsecured Loans"],
+      ["AG09", "SG04", "Lease Liabilities"],
+      // Provisions and reserves
+      ["AG10", "SG01", "Provision for Income Tax"],
+      ["AG10", "SG02", "Employee Benefit Provisions"],
+      ["AG10", "SG03", "Other Provisions"],
+      ["AG11", "SG01", "General Reserve"],
+      ["AG11", "SG02", "Retained Earnings"],
+      // Other / non-current assets
+      ["AG12", "SG01", "Other Current Assets"],
+      ["AG12", "SG02", "Deposits & Margin Money"],
+      ["AG13", "SG01", "Long-term Investments"],
+      ["AG13", "SG02", "Long-term Security Deposits"],
+      ["AG13", "SG03", "Intangible Assets"],
+    ] as const;
+
+    for (const [groupCode, subCode, description] of subgroupDefinitions) {
+      await ensureSub(groupCode, subCode, description);
     }
 
     // Demo General Ledgers (pehle zaroori sub groups ensure karte hain, purani DB me bhi chalega)
