@@ -21,7 +21,7 @@ export function LedgerTab({ result, ready, voucherNumber, reversalVoucherNumber 
     );
   }
   return (
-    <div className="lg-scroll min-h-0 flex-1 overflow-auto">
+    <div className="lg-scroll min-h-0 flex-1 overflow-auto" data-scroll tabIndex={0}>
       {(voucherNumber || reversalVoucherNumber) && (
         <div className="flex flex-wrap gap-x-6 gap-y-1 border-b border-slate-100 px-4 py-2.5 text-[12.5px] text-slate-600">
           {voucherNumber && <span>Journal voucher <b className="font-mono text-ink">{voucherNumber}</b></span>}

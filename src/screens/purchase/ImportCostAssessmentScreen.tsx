@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { ArrowRight, Copy, Download, FileCheck2, Pencil, Plus, RotateCcw, Save, Trash2, X } from "lucide-react";
 import { ApiError, importAssessmentApi, type ImportAssessmentPreview, type ImportAssessmentTermInput, type PLookups } from "../../api";
+import { DateInput } from "../../components/DateInput";
+import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
 import { LedgerTab } from "../../components/purchase/AssessmentLedgerTab";
 import { MatrixTab } from "../../components/purchase/AssessmentMatrixTab";
@@ -26,6 +28,21 @@ type AssessmentTerm = {
 };
 // splitMode SAME: one split (sameBasis) for every charge and no split column; DIFFERENT: each charge has its own, starting from its term master.
 export type Form = { importBillId: string; assessmentDate: string; referenceNo: string; remarks: string; splitMode: "SAME" | "DIFFERENT"; sameBasis: Basis; terms: AssessmentTerm[] };
+const ASSESSMENT_HELP: [string, string][] = [
+  ["Enter / Shift+Enter", "Next / previous field"],
+  ["Ctrl+← / Ctrl+→", "Previous / next section (Charge terms, Product-wise, Full matrix, Ledger check)"],
+  ["Ctrl+S", "Save draft"],
+  ["F2", "Edit the draft"],
+  ["F3", "New assessment in a new tab"],
+  ["F6", "Add a charge"],
+  ["Product-wise: ↑ / ↓, Enter", "Move between products / open its charges"],
+  ["In a product's charges: Enter, PgUp / PgDn, Esc", "Next amount / previous or next product / close"],
+  ["Alt+1 / Alt+2", "Focus the sidebar / the form"],
+  ["Alt+[ / Alt+] / Alt+\\", "Left panel / right panel / both"],
+  ["Alt+, / Alt+.", "Previous / next workspace tab"],
+  ["Esc", "Cancel editing / close"],
+  ["F1 / ?", "This help"],
+];
 type WorkTab = "charges" | "products" | "matrix" | "ledger";
 const WORK_TABS: [WorkTab, string][] = [["charges", "Charge terms"], ["products", "Product-wise"], ["matrix", "Full matrix"], ["ledger", "Ledger check"]];
 type Doc = Record<string, any> & { id: number; isPosted: boolean; state: string; terms: Record<string, any>[] };
@@ -115,7 +132,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
   useEffect(() => {
     p.setStatus({
       mode: editing ? doc ? "edit" : "new" : "view", count: p.assessments.length, shown: p.assessments.length, message, kind: "info",
-      hints: ["Ctrl+S Save", "F3 New tab", "F2 Edit", "F6 Add charge", "Alt+[ ] Panels", "Alt+, . Tabs", "Ctrl+V paste allocation block"],
+      hints: ["Enter Next", "Ctrl+S Save", "F3 New tab", "F2 Edit", "F6 Add charge", "Ctrl+←/→ Sections", "Alt+1/2 Focus", "Alt+[ ] Panels", "Alt+, . Tabs", "F1 Help"],
     });
   }, [editing, doc, p.assessments.length, message, p.setStatus]);
   useEffect(() => { if (p.externalMessage) setMessage(p.externalMessage.text); }, [p.externalMessage]);
@@ -216,6 +233,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
     const e: Record<string, string> = {};
     if (!f.importBillId) e.importBillId = "Choose a posted goods bill";
     if (!f.assessmentDate) e.assessmentDate = "Assessment date is required";
+    else if (f.assessmentDate.startsWith("?")) e.assessmentDate = "Enter a complete, valid date";
     return e;
   };
   const confirmHeader = () => {
@@ -229,7 +247,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
     focusLater('[data-field="terms.0.termId"]');
     return true;
   };
-  const editHeader = () => { setStage("header"); focusLater("[data-assessment-field]", 40); };
+  const editHeader = () => { setStage("header"); focusLater('[data-field="assessmentDate"]', 40); };
   const jump = (field: string) => {
     if (field.startsWith("tab:")) { setStage("work"); setWorkTab(field.slice(4) as WorkTab); return; }
     const inHeader = HEADER_KEYS.has(field);
@@ -322,11 +340,28 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
   };
 
   // ---- shortcuts: the same ones the screen always had, plus the panels ----
+  const [helpOpen, setHelpOpen] = useState(false);
+  const goSection = (dir: 1 | -1) => {
+    const at = WORK_TABS.findIndex(([id]) => id === workTab);
+    const next = WORK_TABS[(at + dir + WORK_TABS.length) % WORK_TABS.length][0];
+    setWorkTab(next);
+    focusLater(next === "charges" ? '[data-field^="terms."]' : next === "products" ? "[data-prow]" : "#apanel [data-scroll]", 60);
+  };
+  const focusZone = (zone: "sidebar" | "form") => {
+    if (zone === "sidebar") { document.querySelector<HTMLElement>("[data-zone=sidebar] button[data-sb]")?.focus(); return; }
+    document.querySelector<HTMLElement>("[data-zone=form] [data-field], [data-zone=form] [data-prow], [data-zone=form] button")?.focus();
+  };
   const keys = useRef<() => (e: KeyboardEvent) => void>(() => () => {});
   keys.current = () => (e: KeyboardEvent) => {
     const target = e.target as HTMLElement;
     const typing = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+    if (helpOpen) { if (e.key === "Escape" || e.key === "F1") { e.preventDefault(); e.stopPropagation(); setHelpOpen(false); } return; }
+    if (e.key === "F1" || (e.key === "?" && !typing)) { e.preventDefault(); setHelpOpen(true); return; }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight") && stage === "work" && !target.closest('[role="dialog"]')) {
+      e.preventDefault(); goSection(e.key === "ArrowRight" ? 1 : -1); return;
+    }
     if (e.altKey && !e.ctrlKey && !e.metaKey) {
+      if (e.code === "Digit1" || e.code === "Digit2") { e.preventDefault(); focusZone(e.code === "Digit1" ? "sidebar" : "form"); return; }
       if (e.code === "BracketLeft") { e.preventDefault(); toggleLeft(); }
       else if (e.code === "BracketRight") { e.preventDefault(); toggleRight(); }
       else if (e.code === "Backslash") { e.preventDefault(); const both = leftCollapsed && rightCollapsed; if (leftCollapsed === both) toggleLeft(); if (rightCollapsed === both) toggleRight(); }
@@ -461,10 +496,11 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
               {!doc && <p className="text-[12.5px] text-slate-500">Choose the goods bill and set the date. The charges open when the header is complete.</p>}
               <FormSection title="Header" hint="Source bill and assessment details">
                 <div className="grid grid-cols-1 gap-x-4 gap-y-3.5 md:grid-cols-2">
-                  <label className="block lg-label [&>input]:mt-1 [&>textarea]:mt-1">Assessment date
-                    <input data-assessment-field data-field="assessmentDate" type="date" className={fieldClass} disabled={!editing || busy} value={form.assessmentDate} aria-invalid={!!errors.assessmentDate} onChange={(e) => setForm({ ...form, assessmentDate: e.target.value })} />
+                  <div className="block lg-label [&>div]:mt-1">Assessment date
+                    <DateInput fieldName="assessmentDate" value={form.assessmentDate} calendar={p.calendar} hasError={!!errors.assessmentDate} disabled={!editing || busy}
+                      onChange={(v) => setForm((cur) => (cur ? { ...cur, assessmentDate: v } : cur))} onBlurField={() => {}} />
                     {errors.assessmentDate && <span className="block text-[11.5px] font-normal text-rose-700" role="alert">{errors.assessmentDate}</span>}
-                  </label>
+                  </div>
                   <div data-assessment-field>
                     <span className="lg-label mb-1 block">Posted goods bill (local or import)</span>
                     <MasterReferencePicker
@@ -693,6 +729,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
             {previewError && <span role="alert" className="max-w-[40ch] truncate text-[12px] text-rose-300" title={previewError}>{previewError}</span>}
           </section>
         )}
+        {helpOpen && <ShortcutsOverlay onClose={() => setHelpOpen(false)} shortcuts={ASSESSMENT_HELP} />}
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {editing ? (
             <>

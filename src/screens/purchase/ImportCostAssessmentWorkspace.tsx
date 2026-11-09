@@ -123,6 +123,8 @@ export default function ImportCostAssessmentWorkspace(p: PurchaseScreenProps) {
 
   // ---- shortcuts that belong to the tab strip ----
   const [help, setHelp] = useState(false);
+  const helpRef = useRef(false);
+  helpRef.current = help;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = ["INPUT", "TEXTAREA", "SELECT"].includes((e.target as HTMLElement).tagName);
@@ -137,7 +139,8 @@ export default function ImportCostAssessmentWorkspace(p: PurchaseScreenProps) {
         const ctrl = e.ctrlKey || e.metaKey;
         if ((ctrl && e.key.toLowerCase() === "n") || e.key === "F3") { e.preventDefault(); openNew(); }
         else if (e.key === "F4" || (ctrl && e.key.toLowerCase() === "f") || (e.key === "/" && !typing)) { e.preventDefault(); searchRef.current?.focus(); }
-        else if (e.key === "F1" || (e.key === "?" && !typing)) { e.preventDefault(); setHelp(true); }
+        else if (e.key === "Escape" && helpRef.current) { e.preventDefault(); setHelp(false); }
+        else if (e.key === "F1" || (e.key === "?" && !typing)) { e.preventDefault(); setHelp(!helpRef.current); }
       }
     };
     window.addEventListener("keydown", onKey);

@@ -12,7 +12,7 @@ export function MatrixTab({ matrix, ready }: { matrix: Matrix; ready: boolean })
   if (!rows.length) return <p className="p-4 text-slate-500">{ready ? "This goods bill has no product lines." : "Working out the matrix…"}</p>;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="lg-scroll lg-grid min-h-0 flex-1 overflow-auto">
+      <div className="lg-scroll lg-grid min-h-0 flex-1 overflow-auto" data-scroll tabIndex={0}>
         <table className="w-full min-w-[640px] text-[12.5px]">
           <thead className="lg-th sticky top-0 z-10">
             <tr>
