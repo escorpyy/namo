@@ -85,14 +85,14 @@ export const soApi = {
 // ---- Purchase documents (Order -> Challan -> Bill): /api/purchase ----
 export type PurchaseKind = "orders" | "challans" | "bills";
 export interface PLookups {
-  vendors: { id: number; code: string; name: string; requiresSubLedger: boolean; isActive: boolean }[];
+  vendors: { id: number; code: string; name: string; requiresSubLedger: boolean; isActive: boolean; paymentTermDays: number | null }[];
   subLedgers: { id: number; code: string; name: string; generalLedgerId: number | null; isActive: boolean }[];
   agents: { id: number; code: string; name: string; isActive: boolean }[];
   locations: { id: number; code: string; name: string; isActive: boolean }[];
   units: { id: number; code: string; name: string; decimalPlaces: number }[];
   products: {
     id: number; code: string; description: string; type: "STOCK" | "NON_STOCK" | "SERVICE" | "FIXED_ASSET"; isActive: boolean; baseUnitId: number | null;
-    tracksBatch: boolean; tracksExpiry: boolean; defaultLocationId: number | null; alternateUnits: { unitId: number; conversionFactor: string }[];
+    tracksBatch: boolean; tracksExpiry: boolean; defaultLocationId: number | null; purchaseRate: string | null; alternateUnits: { unitId: number; conversionFactor: string }[];
   }[];
   terms: {
     id: number; code: string; name: string; generalLedgerId?: number | null; affectsStockValue?: boolean; defaultAgainstLedgerId?: number | null; lastAgainstLedgerId?: number | null; allocationBasis?: string; category: "GENERAL" | "ADDITIONAL"; nature: "ADDITIVE" | "DEDUCTIVE"; isProductwise: boolean; isMandatory: boolean;

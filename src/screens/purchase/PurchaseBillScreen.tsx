@@ -549,7 +549,12 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
                 <select data-field="purchaseType" disabled={ro} value={f.purchaseType} onChange={(e) => { const purchaseType = e.target.value; s.patch({ purchaseType, importCostForBillId: purchaseType.startsWith("SERVICE_PURCHASE_") ? f.importCostForBillId : "" }); s.clearError("importCostForBillId"); }} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}>{PURCHASE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select>
               </Field>
               <VendorFields lookups={lk} contextKey={String(p.companyId)} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors} lockVendor={!!f.purchaseChallanId}
-                onChange={(c) => { s.patch(c); s.clearError("vendorGLId", "subLedgerId"); }} />
+                onChange={(c) => {
+                  // a new vendor brings its payment term days, unless due days are already filled
+                  const days = c.vendorGLId && c.vendorGLId !== f.vendorGLId && !f.dueDays ? lk.vendors.find((v) => String(v.id) === c.vendorGLId)?.paymentTermDays : null;
+                  s.patch(days ? { ...c, dueDays: String(days), dueDate: f.invoiceDate ? addDaysIso(f.invoiceDate, days) : f.dueDate } : c);
+                  s.clearError("vendorGLId", "subLedgerId");
+                }} />
               <TextField label="Vendor Invoice No" name="vendorInvoiceNo" value={f.vendorInvoiceNo} onChange={(v) => s.patch({ vendorInvoiceNo: v })} readOnly={ro} error={s.err("vendorInvoiceNo")} max={30} />
               <DateField label="Vendor Invoice Date" name="vendorInvoiceDate" value={f.vendorInvoiceDate} onChange={(v) => { s.patch({ vendorInvoiceDate: v }); s.clearError("vendorInvoiceDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("vendorInvoiceDate")} />
               <TextField label="Due Days" name="dueDays" value={f.dueDays} onChange={(v) => {
@@ -603,12 +608,6 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
               )}
             </section>
           )}
-          <FormSection title="Remarks" hint="Optional note for this bill" className="w-full">
-            <textarea data-field="remarks" maxLength={1024} disabled={ro} value={f.remarks} onChange={(e) => s.patch({ remarks: e.target.value })}
-              placeholder="Add remarks…" className={`fld h-20 min-h-20 resize-y py-2 ${s.err("remarks") ? "fld-err" : ""}`} aria-label="Remarks" />
-            {s.err("remarks") && <span className="mt-1 block text-[12px] text-rose-700">{s.err("remarks")}</span>}
-          </FormSection>
-
                 <div className="flex justify-end pb-2">
                   <button type="button" data-nav="header-continue" className="btn btn-primary" onClick={confirmHeader}>
                     {doc ? "Done — back to lines" : "Continue to lines"} <ArrowRight size={14} />{!doc && <span className="kbd">Ctrl+S</span>}
@@ -680,6 +679,16 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
           )}
 
                 </div>
+                <section className="lg-card shrink-0 px-4 py-2.5" aria-label="Remarks">
+                  <label className="flex items-start gap-3">
+                    <span className="mt-1.5 w-[64px] shrink-0 text-[12px] font-semibold text-slate-700">Remarks</span>
+                    <span className="min-w-0 flex-1">
+                      <textarea data-field="remarks" maxLength={1024} disabled={ro} value={f.remarks} onChange={(e) => s.patch({ remarks: e.target.value })}
+                        placeholder="Optional note for this bill…" className={`fld h-14 min-h-14 resize-y py-1.5 ${s.err("remarks") ? "fld-err" : ""}`} aria-label="Remarks" />
+                      {s.err("remarks") && <span className="mt-1 block text-[12px] text-rose-700">{s.err("remarks")}</span>}
+                    </span>
+                  </label>
+                </section>
               </>
             )}
           </div>

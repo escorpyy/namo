@@ -303,14 +303,17 @@ export function getPurchaseBill(id: number, companyId: number) {
 export function purchaseLookups(companyId: number) {
   return snapshot(async (tx) => {
     const [ledgers, subs, agents, products, alts, locations, terms, years, units] = await Promise.all([
-      tx.select({ id: S.generalLedger.id, code: S.generalLedger.code, name: S.generalLedger.name, requiresSubLedger: S.generalLedger.requiresSubLedger, isActive: S.generalLedger.isActive }).from(S.generalLedger).where(eq(S.generalLedger.companyId, companyId)).orderBy(asc(S.generalLedger.code)),
+      tx.select({ id: S.generalLedger.id, code: S.generalLedger.code, name: S.generalLedger.name, requiresSubLedger: S.generalLedger.requiresSubLedger, isActive: S.generalLedger.isActive,
+        // the supplier's payment term days (Party master), used to default a bill's due days
+        paymentTermDays: sql<number | null>`(select vd."paymentTermDays" from "Party" p inner join "VendorDetail" vd on vd."partyId" = p.id where p."generalLedgerId" = ${S.generalLedger.id})`,
+      }).from(S.generalLedger).where(eq(S.generalLedger.companyId, companyId)).orderBy(asc(S.generalLedger.code)),
       tx.select({ id: S.subLedger.id, code: S.subLedger.code, name: S.subLedger.name, generalLedgerId: S.subLedger.generalLedgerId, isActive: S.subLedger.isActive }).from(S.subLedger).innerJoin(S.generalLedger, eq(S.generalLedger.id, S.subLedger.generalLedgerId)).where(eq(S.generalLedger.companyId, companyId)).orderBy(asc(S.subLedger.code)),
       tx.select({ id: S.agent.id, code: S.agent.code, name: S.agent.name, isActive: S.agent.isActive }).from(S.agent).where(eq(S.agent.companyId, companyId)).orderBy(asc(S.agent.code)),
       tx.select({
         id: S.product.id, code: S.product.code, description: S.product.description, type: S.product.type, isActive: S.product.isActive,
         stockDetailId: S.stockDetail.id, baseUnitId: sql<number | null>`coalesce(${S.stockDetail.baseUnitId}, ${S.nonStockDetail.unitId}, ${S.serviceDetail.unitId})`,
         tracksBatch: sql<boolean>`coalesce(${S.stockDetail.tracksBatch}, false)`, tracksExpiry: sql<boolean>`coalesce(${S.stockDetail.tracksExpiry}, false)`,
-        defaultLocationId: S.stockDetail.defaultLocationId,
+        defaultLocationId: S.stockDetail.defaultLocationId, purchaseRate: S.stockDetail.purchaseRate,
       })
         .from(S.product)
         .leftJoin(S.stockDetail, eq(S.stockDetail.productId, S.product.id))

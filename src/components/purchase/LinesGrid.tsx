@@ -7,6 +7,7 @@ import { fillDownRows } from "../../lib/tableKinds";
 import { useGridRows } from "../table/useGridRows";
 import { MasterReferencePicker, type ReferenceOption } from "../MasterReferencePicker";
 import { DateInput } from "../DateInput";
+import { BatchDialog, hasBatch } from "./BatchDialog";
 import { focusStep, money } from "./Bits";
 import type { PreviewTermResult } from "../../../shared/purchase-preview";
 
@@ -26,6 +27,7 @@ const COL_HEAD: Record<ColKey, string> = {
   xd: "Expected", lc: "Location", b: "Batch", mf: "Mfg Date", ex: "Expiry", link: "Linked to", rm: "",
 };
 // Excel's alignment: numbers and dates right, text left. (Headers follow their column.)
+const CENTER_HEAD = new Set(["Batch"]); // a Yes / No cell is a boolean: centred
 const RIGHT_HEAD = new Set(["Alt Qty", "Quantity", "Rate", "Amount", "Term Amount", "Net Amount", "Expected", "Mfg Date", "Expiry"]);
 // Ctrl+D: which fields of a line are copied from the line above, and which field a cell column stands for. Never the key or the links to an order / challan.
 const FILL_FIELDS: (keyof LineRow)[] = ["productId", "altQty", "altUnitId", "qty", "unitId", "rate", "locationId", "batchNo", "manufactureDate", "expiryDate", "expectedDate"];
@@ -40,6 +42,16 @@ function lineColumns(kind: LineKind, showAlt: boolean, showLoc: boolean, showBat
   const cols: ColKey[] = ["n", "p"];
   if (showAlt) cols.push("aq", "au");
   cols.push("q", "u", "r", "amt");
+  if (kind === "bill") {
+    // Purchase bill: terms, location, ONE batch column (Yes / No, opens a dialog), the link, and Net amount always last.
+    if (showTerms) cols.push("terms");
+    if (showLoc) cols.push("lc");
+    if (showBatch || showExpiry) cols.push("b");
+    if (showLink) cols.push("link");
+    if (showTerms) cols.push("net");
+    cols.push("rm");
+    return cols;
+  }
   if (showTerms) cols.push("terms", "net");
   if (kind === "order") cols.push("xd");
   if (kind !== "order") {
@@ -101,6 +113,8 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
     const p = products.get(id), l = lines[i];
     patch(i, {
       productId: id, altUnitId: "", altQty: "", unitId: "", batchNo: p?.tracksBatch ? l.batchNo : "", expiryDate: p?.tracksExpiry ? l.expiryDate : "", manufactureDate: p?.tracksExpiry ? l.manufactureDate : "",
+      // an empty rate takes the product's purchase rate; a rate already typed stays
+      rate: l.rate || (kind !== "challan" && p?.purchaseRate && Number(p.purchaseRate) > 0 ? String(Number(p.purchaseRate)) : ""),
       locationId: p?.type === "STOCK" ? l.locationId || (p.defaultLocationId ? String(p.defaultLocationId) : "") : "",
     });
   };
@@ -129,6 +143,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
   const fillCell = (i: number, col: string) => {
     const f = FIELD_OF[col], above = lines[i - 1];
     if (readOnly || !f || !above || (f === "productId" && lockProducts && lines[i].link)) return;
+    if (col === "b" && kind === "bill") { patch(i, { batchNo: above.batchNo, manufactureDate: above.manufactureDate, expiryDate: above.expiryDate }); return; } // the whole batch dialog
     if (f === "productId") { if (above.productId) pick(i, above.productId); return; } // choosing a product also resets what depends on it
     patch(i, { [f]: above[f] } as Partial<LineRow>);
   };
@@ -136,6 +151,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
   // Two modes. ROW MODE: focus sits on the grid itself and one whole row is highlighted (arrows move between rows).
   // EDIT MODE: focus sits inside a cell of that row (Enter walks the cells, Esc goes back to ROW MODE).
   const [rowSel, setRowSel] = useState<number | null>(null);
+  const [batchFor, setBatchFor] = useState<number | null>(null); // purchase bill: the line whose batch dialog is open
   const lastRow = useRef(0);
   const rowOf = (el: Element) => { const m = /^L\.(\d+)\./.exec(el.getAttribute("data-field") ?? ""); return m ? Number(m[1]) : -1; };
   const go = (el: HTMLElement) => { el.focus(); el.scrollIntoView({ block: "nearest", inline: "nearest" }); };
@@ -186,6 +202,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
     if (!m) return;
     const i = Number(m[1]), col = m[2];
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); enterRowMode(e.currentTarget, i); }
+    else if (e.key === "Enter" && !e.shiftKey && col === "b" && kind === "bill") { e.preventDefault(); e.stopPropagation(); setBatchFor(i); }
     else if (e.key === "Enter" && el.getAttribute("role") !== "combobox") {
       e.preventDefault(); e.stopPropagation(); stepFrom(el, e.shiftKey ? -1 : 1);
     } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && el.getAttribute("role") !== "combobox") {
@@ -207,7 +224,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
         onBlur={(e) => { if (e.target === e.currentTarget) setRowSel(null); }}>
         <div className="min-w-max">
           <div style={{ gridTemplateColumns: layout.template }} className="lg-th xl-head">
-            {layout.heads.map((h, i) => <span key={i} className={i === 0 ? "xl-rowhead" : RIGHT_HEAD.has(h) ? "text-right" : ""}>{h}</span>)}
+            {layout.heads.map((h, i) => <span key={i} className={i === 0 ? "xl-rowhead" : RIGHT_HEAD.has(h) ? "text-right" : kind === "bill" && CENTER_HEAD.has(h) ? "text-center" : ""}>{h}</span>)}
           </div>
           {lines.map((l, i) => {
             const p = products.get(l.productId);
@@ -244,7 +261,6 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                         className={`${kind === "bill" ? "h-7" : "h-8"} w-full px-1 text-right tabular-nums text-cobalt-700 underline decoration-cobalt-200 underline-offset-4 hover:bg-cobalt-50 disabled:text-slate-500 disabled:no-underline`}>
                         {summary.amount.startsWith("-") ? `− ${money(summary.amount.slice(1))}` : money(summary.amount || "0")}{summary.count > 0 && <span className="ml-1 text-[10px] text-slate-500 no-underline">({summary.count})</span>}
                       </button>
-                      <span className="text-right tabular-nums font-medium">{lineNet(lineAmount(l, p), summary.amount)}</span>
                     </>;
                   })()}
                   {kind === "order" && (off
@@ -253,16 +269,26 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                   {layout.showLoc && (
                     <MasterReferencePicker fieldName={`L.${i}.lc`} label="Location" required={p?.type === "STOCK"} scopeKey="locations" contextKey={contextKey} placeholder={p?.type === "STOCK" ? "Choose location" : "—"} value={l.locationId} hasError={bad("lc")} options={locOpts} disabled={off || p?.type !== "STOCK"} onChange={(v) => patch(i, { locationId: v })} onCommit={afterCombo} />
                   )}
-                  {layout.showBatch && (
+                  {kind === "bill" && (layout.showBatch || layout.showExpiry) && (() => {
+                    const tracked = !!(p?.tracksBatch || p?.tracksExpiry), yes = hasBatch(l);
+                    return (
+                      <button type="button" data-field={`L.${i}.b`} disabled={!tracked || (off && !yes)} onClick={() => setBatchFor(i)} aria-label={`Batch details: ${yes ? "yes" : "no"}`} title={tracked ? "Batch no, mfg and expiry (Enter)" : "This product has no batch"}
+                        className={`${cls("b", "")} text-center ${!tracked ? "bg-slate-100 text-slate-400" : yes ? "font-medium text-emerald-700" : bad("b") ? "text-rose-700" : "text-slate-500"}`}>
+                        {tracked ? (yes ? "Yes" : "No") : "—"}
+                      </button>
+                    );
+                  })()}
+                  {kind !== "bill" && layout.showBatch && (
                     <input data-field={`L.${i}.b`} disabled={off || !p?.tracksBatch} maxLength={50} placeholder={p?.tracksBatch ? "Batch" : "—"} value={l.batchNo} onChange={(e) => patch(i, { batchNo: e.target.value })} onFocus={(e) => e.currentTarget.select()} className={cls("b", !p?.tracksBatch ? "bg-slate-100" : "")} aria-label="Batch no" />
                   )}
-                  {layout.showExpiry && (
+                  {kind !== "bill" && layout.showExpiry && (
                     <>
                       <DateInput fieldName={`L.${i}.mf`} value={l.manufactureDate} onChange={(v) => patch(i, { manufactureDate: v })} calendar={calendar} hasError={bad("mf")} onBlurField={() => {}} compact disabled={off || !p?.tracksExpiry} />
                       <DateInput fieldName={`L.${i}.ex`} value={l.expiryDate} onChange={(v) => patch(i, { expiryDate: v })} calendar={calendar} hasError={bad("ex")} onBlurField={() => {}} compact disabled={off || !p?.tracksExpiry} />
                     </>
                   )}
                   {layout.showLink && <span className="break-words text-[11px] leading-tight text-slate-600" title={l.link}>{l.link || "—"}</span>}
+                  {kind === "bill" && onOpenTerms && <span className="text-right tabular-nums font-medium">{lineNet(lineAmount(l, p), (termSummary?.(i) ?? { amount: "0.00" }).amount)}</span>}
                   <button type="button" data-nav="remove-line" disabled={off} onClick={() => remove(i)} title="Remove line (Delete when the row is selected)" aria-label="Remove line" className={`${kind === "bill" ? "h-7 w-7" : "h-8 w-8"} grid place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-2 focus-visible:outline-cobalt-700 disabled:opacity-30`}><X size={14} /></button>
                 </div>
                 {errMsgs.length > 0 && <p className="px-3 pb-1 text-[12px] text-rose-700">{errMsgs[0]}</p>}
@@ -271,6 +297,13 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
           })}
         </div>
       </div>
+      {batchFor !== null && lines[batchFor] && (() => {
+        const l = lines[batchFor], p = products.get(l.productId);
+        return <BatchDialog title={`Line ${batchFor + 1} batch`} product={p ? `${p.code} — ${p.description}` : ""} tracksBatch={!!p?.tracksBatch} tracksExpiry={!!p?.tracksExpiry} value={{ batchNo: l.batchNo, manufactureDate: l.manufactureDate, expiryDate: l.expiryDate }}
+          calendar={calendar} readOnly={readOnly}
+          onClose={() => { const i = batchFor; setBatchFor(null); requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-field="L.${i}.b"]`)?.focus()); }}
+          onApply={(v) => { const i = batchFor; patch(i, v); setBatchFor(null); requestAnimationFrame(() => { const el = document.querySelector<HTMLElement>(`[data-field="L.${i}.b"]`); if (el) stepFrom(el, 1); }); }} />;
+      })()}
       {errors.lines && <p className="px-3 py-1.5 text-[12px] text-rose-700">{errors.lines}</p>}
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200 bg-slate-50 px-3 py-2.5">
         {!readOnly && <button type="button" data-nav="add-line" className="btn" onClick={() => addRow()}><Plus size={13} /> Add line {kind === "bill" && <span className="kbd">F6</span>}</button>}
