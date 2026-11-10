@@ -123,11 +123,12 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
     onChange([...lines, blankLine()]);
     if (focus) setTimeout(() => document.querySelector<HTMLElement>(`[data-field="L.${lines.length}.p"]`)?.focus(), 40);
   };
-  const remove = (i: number, backToRowMode?: HTMLElement) => {
+  // fromRowMode: Delete on the selected row (the grid keeps the focus); otherwise (Shift+Delete in a cell, the X button) focus goes to a neighbouring line.
+  const remove = (i: number, fromRowMode = false) => {
     const n = lines.filter((_, k) => k !== i);
     onChange(n.length ? n : [blankLine()]);
+    if (fromRowMode) return;
     requestAnimationFrame(() => {
-      if (backToRowMode) { enterRowMode(backToRowMode, Math.max(0, Math.min(i, n.length - 1))); return; }
       const next = document.querySelector<HTMLElement>(`[data-field="L.${Math.min(i, n.length - 1)}.p"]:not(:disabled)`)
         ?? document.querySelector<HTMLElement>('[data-nav="add-line"]:not(:disabled)');
       next?.focus();
@@ -148,27 +149,20 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
     patch(i, { [f]: above[f] } as Partial<LineRow>);
   };
 
-  // Two modes. ROW MODE: focus sits on the grid itself and one whole row is highlighted (arrows move between rows).
-  // EDIT MODE: focus sits inside a cell of that row (Enter walks the cells, Esc goes back to ROW MODE).
-  const [rowSel, setRowSel] = useState<number | null>(null);
   const [batchFor, setBatchFor] = useState<number | null>(null); // purchase bill: the line whose batch dialog is open
-  const lastRow = useRef(0);
+  // The keyboard flow (row mode, Enter walking the cells, arrows, Delete, Ctrl+D) is the shared useGridRows hook, the same as every other grid.
   const rowOf = (el: Element) => { const m = /^L\.(\d+)\./.exec(el.getAttribute("data-field") ?? ""); return m ? Number(m[1]) : -1; };
-  const go = (el: HTMLElement) => { el.focus(); el.scrollIntoView({ block: "nearest", inline: "nearest" }); };
-  const enterRowMode = (grid: HTMLElement | null, r: number) => {
-    if (!grid) return;
-    lastRow.current = r; setRowSel(r); grid.focus();
-    grid.querySelector(`[data-row="${r}"]`)?.scrollIntoView({ block: "nearest" });
-  };
-  const editRow = (grid: HTMLElement, r: number) => { const first = cells(grid).find((c) => rowOf(c) === r); if (first) go(first); };
-  // Enter / Shift+Enter from a cell (also used by the pickers' onCommit).
-  const stepFrom = (el: HTMLElement, dir: 1 | -1) => {
-    const grid = el.closest<HTMLElement>("[data-grid=lines]"), all = cells(grid), next = all[all.indexOf(el) + dir], r = rowOf(el);
-    if (dir === -1) { if (!next || rowOf(next) !== r) enterRowMode(grid, r); else go(next); }   // first cell of a row -> back to ROW MODE
-    else if (next) { if (rowOf(next) !== r) enterRowMode(grid, rowOf(next)); else go(next); }   // end of a row -> next row in ROW MODE
-    else if (!readOnly && !isBlankLine(lines[lines.length - 1])) addRow();                      // end of the last row -> new row, EDIT MODE
-    else focusStep(el, 1);
-  };
+  const gridRows = useGridRows({
+    count: lines.length, readOnly,
+    firstCell: (grid, r) => cells(grid).find((c) => rowOf(c) === r) ?? null,
+    cellOf: (el) => { const m = /^L\.(\d+)\.(\w+)$/.exec(el.getAttribute("data-field") ?? ""); return m ? { row: Number(m[1]), col: m[2] } : null; },
+    onRemove: remove, onFillRow: fillRow, onFillCell: fillCell,
+    cellSelector: '[data-field^="L."]', fieldOf: (r, c) => `L.${r}.${c}`, endOfRow: "row",
+    onAddRow: () => addRow(), lastRowBlank: () => isBlankLine(lines[lines.length - 1]), leave: (el, dir) => focusStep(el, dir),
+    onCellEnter: (cell) => { if (cell.col === "b" && kind === "bill") { setBatchFor(cell.row); return true; } return false; },
+  });
+  const rowSel = gridRows.rowSel;
+  const afterCombo = gridRows.afterCombo;
 
   // Enter on the empty Product cell of a blank row = leave the table, to the first field after it (skipping "Add line").
   // A blank last row (usually the one Enter just created) is dropped again; it is not a real line.
@@ -186,42 +180,13 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
     leaveTable(el, Number(m[1]));
   };
 
-  // Keys while the grid itself has focus (ROW MODE).
-  const onRowModeKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const grid = e.currentTarget, last = lines.length - 1, r = Math.max(0, Math.min(rowSel ?? lastRow.current, last));
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); enterRowMode(grid, Math.max(0, Math.min(last, r + (e.key === "ArrowDown" ? 1 : -1)))); }
-    else if (e.key === "Home" || e.key === "End") { e.preventDefault(); enterRowMode(grid, e.key === "Home" ? 0 : last); }
-    else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); if (e.shiftKey) focusStep(grid, -1); else editRow(grid, r); }
-    else if (e.key === "Delete" && !e.ctrlKey && !e.metaKey && !e.altKey && !readOnly) { e.preventDefault(); e.stopPropagation(); remove(r, grid); }
-    else if (e.key.toLowerCase() === "d" && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); fillRow(r); }
-  };
-  const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const el = e.target as HTMLElement, f = el.getAttribute("data-field") ?? "";
-    if (el === e.currentTarget) { onRowModeKey(e); return; }
-    const m = /^L\.(\d+)\.(\w+)$/.exec(f);
-    if (!m) return;
-    const i = Number(m[1]), col = m[2];
-    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); enterRowMode(e.currentTarget, i); }
-    else if (e.key === "Enter" && !e.shiftKey && col === "b" && kind === "bill") { e.preventDefault(); e.stopPropagation(); setBatchFor(i); }
-    else if (e.key === "Enter" && el.getAttribute("role") !== "combobox") {
-      e.preventDefault(); e.stopPropagation(); stepFrom(el, e.shiftKey ? -1 : 1);
-    } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && el.getAttribute("role") !== "combobox") {
-      e.preventDefault();
-      const dir = e.key === "ArrowDown" ? 1 : -1;
-      for (let k = i + dir; k >= 0 && k < lines.length; k += dir) { const t = e.currentTarget.querySelector<HTMLInputElement>(`[data-field="L.${k}.${col}"]`); if (t && !t.disabled) { t.focus(); break; } }
-    } else if (e.key === "Delete" && e.shiftKey && !readOnly) { e.preventDefault(); e.stopPropagation(); remove(i); }
-    else if (e.key.toLowerCase() === "d" && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); fillCell(i, col); }
-  };
-  const afterCombo = (el: HTMLInputElement, dir: 1 | -1 = 1) => stepFrom(el, dir);
 
   const total = lines.reduce((a, l) => a + toPaise(lineAmount(l, products.get(l.productId)) || "0"), 0);
   const live = lines.filter((l) => !isBlankLine(l)).length;
 
   return (
     <div className={`lg-card lg-grid ${fill ? "flex min-h-0 flex-1 flex-col" : ""}`}>
-      <div className={`${fill ? "min-h-0 flex-1 overflow-auto" : "overflow-x-auto"} lg-scroll outline-none`} data-grid="lines" data-nav="lines-grid" onKeyDown={onKey} onKeyDownCapture={onKeyCapture} tabIndex={0} aria-label={`${kind} line items`}
-        onFocus={(e) => { if (e.target === e.currentTarget) setRowSel(Math.max(0, Math.min(lastRow.current, lines.length - 1))); else { const r = rowOf(e.target as Element); if (r >= 0) lastRow.current = r; } }}
-        onBlur={(e) => { if (e.target === e.currentTarget) setRowSel(null); }}>
+      <div className={`${fill ? "min-h-0 flex-1 overflow-auto" : "overflow-x-auto"} lg-scroll outline-none`} data-grid="lines" data-nav="lines-grid" {...gridRows.gridProps} onKeyDown={gridRows.handleKey} onKeyDownCapture={onKeyCapture} aria-label={`${kind} line items`}>
         <div className="min-w-max">
           <div style={{ gridTemplateColumns: layout.template }} className="lg-th xl-head">
             {layout.heads.map((h, i) => <span key={i} className={i === 0 ? "xl-rowhead" : RIGHT_HEAD.has(h) ? "text-right" : kind === "bill" && CENTER_HEAD.has(h) ? "text-center" : ""}>{h}</span>)}
@@ -239,7 +204,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
             return (
               <div key={l.key} data-row={i} className={`border-b border-slate-100 transition-colors ${rowSel === i ? "bg-cobalt-50 ring-2 ring-inset ring-cobalt-700" : errMsgs.length ? "bg-rose-50" : "hover:bg-slate-50/80"}`}>
                 <div style={{ gridTemplateColumns: layout.template }} data-selected={rowSel === i} className="xl-row">
-                  <button type="button" tabIndex={-1} className="xl-rowhead" title="Select row" aria-label={`Select line ${i + 1}`} onClick={(e) => enterRowMode(e.currentTarget.closest<HTMLElement>("[data-grid=lines]"), i)}>{i + 1}</button>
+                  <button type="button" className="xl-rowhead" {...gridRows.rowHeadProps(i)}>{i + 1}</button>
                   <MasterReferencePicker fieldName={`L.${i}.p`} label="Product" required scopeKey="products" contextKey={contextKey} placeholder="Choose product…" value={l.productId} hasError={bad("p")} options={productOpts} disabled={off || (lockProducts && !!l.link)} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
                   {layout.showAlt && (
                     <>
@@ -302,7 +267,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
         return <BatchDialog title={`Line ${batchFor + 1} batch`} product={p ? `${p.code} — ${p.description}` : ""} tracksBatch={!!p?.tracksBatch} tracksExpiry={!!p?.tracksExpiry} value={{ batchNo: l.batchNo, manufactureDate: l.manufactureDate, expiryDate: l.expiryDate }}
           calendar={calendar} readOnly={readOnly}
           onClose={() => { const i = batchFor; setBatchFor(null); requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-field="L.${i}.b"]`)?.focus()); }}
-          onApply={(v) => { const i = batchFor; patch(i, v); setBatchFor(null); requestAnimationFrame(() => { const el = document.querySelector<HTMLElement>(`[data-field="L.${i}.b"]`); if (el) stepFrom(el, 1); }); }} />;
+          onApply={(v) => { const i = batchFor; patch(i, v); setBatchFor(null); requestAnimationFrame(() => { const el = document.querySelector<HTMLElement>(`[data-field="L.${i}.b"]`); if (el) gridRows.stepFrom(el, 1); }); }} />;
       })()}
       {errors.lines && <p className="px-3 py-1.5 text-[12px] text-rose-700">{errors.lines}</p>}
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200 bg-slate-50 px-3 py-2.5">
@@ -346,9 +311,10 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
     const m = masters.get(id);
     patch(i, m ? { termId: id, nature: undefined, calcType: m.defaultCalcType, rate: m.defaultCalcType === "PERCENT" ? trimDec(m.defaultValue) : "", inputAmount: m.defaultCalcType === "AMOUNT" ? trimDec(m.defaultValue) : "", lineNumber: m.isProductwise ? String(fixedLineNumber ?? 1) : "", finalAmount: "" } : { termId: id, nature: undefined });
   };
-  const remove = (i: number) => {
+  const remove = (i: number, fromRowMode = false) => {
     const nextTerms = terms.filter((_, k) => k !== i);
     onChange(nextTerms);
+    if (fromRowMode) return; // Delete on the selected row: the grid keeps the focus
     requestAnimationFrame(() => {
       const next = document.querySelector<HTMLElement>(`[data-field="T.${Math.min(i, nextTerms.length - 1)}.t"]:not(:disabled)`)
         ?? document.querySelector<HTMLElement>('[data-nav="add-term"]:not(:disabled)');
@@ -362,6 +328,8 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
     firstCell: (grid, r) => grid.querySelector<HTMLElement>(`[data-field="T.${r}.t"]:not(:disabled)`),
     cellOf: (el) => { const m = /^T\.(\d+)\.(\w+)$/.exec(el.getAttribute("data-field") ?? ""); return m ? { row: Number(m[1]), col: m[2] } : null; },
     onRemove: remove,
+    cellSelector: '[data-field^="T."]', fieldOf: (r, c) => `T.${r}.${c}`, endOfRow: "continue",
+    onAddRow: add, lastRowBlank: () => isBlankTerm(terms[terms.length - 1]), leave: (el, dir) => focusStep(el, dir),
     onFillRow: (r) => fillTerms(fillDownRows(terms, [r], TERM_FILL), r),
     onFillCell: (r, col) => {
       const above = terms[r - 1];
@@ -373,29 +341,11 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
       if (one) patch(r, one);
     },
   });
-  const cellsOf = (root: Element | null) => Array.from(root?.querySelectorAll<HTMLElement>('[data-field^="T."]') ?? []).filter((el) => !(el as HTMLInputElement).disabled && el.getClientRects().length > 0);
-  const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (gridRows.handleKey(e)) return;
-    const el = e.target as HTMLElement, m = /^T\.(\d+)\./.exec(el.getAttribute("data-field") ?? "");
-    if (!m) return;
-    if (e.key === "Enter" && el.getAttribute("role") !== "combobox" && (el.tagName === "INPUT" || el.tagName === "SELECT")) {
-      const all = cellsOf(e.currentTarget), at = all.indexOf(el);
-      e.preventDefault(); e.stopPropagation();
-      if (e.shiftKey) { if (at > 0) { all[at - 1].focus(); all[at - 1].scrollIntoView({ block: "nearest", inline: "nearest" }); } else focusStep(el, -1); }
-      else if (at === all.length - 1 && !readOnly && !isBlankTerm(terms[terms.length - 1])) add();
-      else if (at < all.length - 1) { all[at + 1].focus(); all[at + 1].scrollIntoView({ block: "nearest", inline: "nearest" }); }
-      else focusStep(el, 1);
-    }
-  };
-  const afterCombo = (el: HTMLInputElement, dir: 1 | -1 = 1) => {
-    const all = cellsOf(el.closest("[data-grid=terms]")), at = all.indexOf(el), next = all[at + dir];
-    if (next) { next.focus(); next.scrollIntoView({ block: "nearest", inline: "nearest" }); }
-    else focusStep(el, dir);
-  };
+  const afterCombo = gridRows.afterCombo;
 
   return (
     <div className="lg-card lg-grid">
-      <div className="lg-scroll overflow-x-auto focus-visible:outline-2 focus-visible:outline-cobalt-700" data-grid="terms" {...gridRows.gridProps} onKeyDown={onKey} aria-label="Billing terms; scroll horizontally to see all columns">
+      <div className="lg-scroll overflow-x-auto focus-visible:outline-2 focus-visible:outline-cobalt-700" data-grid="terms" {...gridRows.gridProps} onKeyDown={gridRows.handleKey} aria-label="Billing terms; scroll horizontally to see all columns">
         <div className="min-w-max">
           <div style={{ gridTemplateColumns: TCOLS }} className="lg-th xl-head">
             <span className="xl-rowhead">#</span><span>Term</span><span className="text-right">Line</span><span>Calculated as</span><span className="text-right">Rate % / Amount</span><span className="text-center">Override</span><span className="text-right">Use amount</span><span className="text-right">{calculationPreview === undefined ? "Saved amount" : "Live amount"}</span><span />

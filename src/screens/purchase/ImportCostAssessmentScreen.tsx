@@ -12,7 +12,7 @@ import { MatrixTab } from "../../components/purchase/AssessmentMatrixTab";
 import { ProductsTab } from "../../components/purchase/AssessmentProductsTab";
 import { AssessmentInsights, AssessmentSummary } from "../../components/purchase/AssessmentPanels";
 import { EmptyPanel, SidePanel, usePanelState } from "../../components/purchase/BillPanels";
-import { DocHeader, formEnterKey, FormSection, Pill } from "../../components/purchase/Bits";
+import { DocHeader, focusStep, formEnterKey, FormSection, Pill } from "../../components/purchase/Bits";
 import { allocationCsv, openAssessmentsFor, readiness } from "../../lib/assessmentInsights";
 import {
   allocationsByTerm, buildMatrix, cents, ledgerCheck, lineId, manualGapCents, manualSeed,
@@ -245,6 +245,9 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
     firstCell: (grid, r) => grid.querySelector<HTMLElement>(`[data-field="terms.${r}.termId"]:not(:disabled)`),
     cellOf: (el) => { const m = /^terms\.(\d+)\.(\w+)$/.exec(el.getAttribute("data-field") ?? ""); return m ? { row: Number(m[1]), col: m[2] } : null; },
     onRemove: (r) => setForm((f) => (f && f.terms.length > 1 ? { ...f, terms: f.terms.filter((_, n) => n !== r) } : f)),
+    // Enter / Shift+Enter walk the cells, ↑ ↓ move down a column, and Enter past the last cell adds a charge, like the bill's lines
+    cellSelector: '[data-field^="terms."]', fieldOf: (r, c) => `terms.${r}.${c}`, endOfRow: "continue",
+    onAddRow: addCharge, lastRowBlank: () => !form?.terms[form.terms.length - 1]?.termId, leave: (el, dir) => focusStep(el, dir),
     onFillRow: (r) => setForm((f) => {
       const next = f && fillDownRows(f.terms, [r], CHARGE_FILL);
       return f && next ? { ...f, terms: next.map((t, n) => (n === r ? { ...t, allocationMode: "AUTO" as const, manual: {} } : t)) } : f;
@@ -649,7 +652,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                               <td className="xl-rowhead p-0"><button type="button" className="h-full min-h-[32px] w-full tabular-nums" {...chargeRows.rowHeadProps(i)}>{i + 1}</button></td>
                               <td className="px-2 py-2">
                                 <MasterReferencePicker fieldName={`terms.${i}.termId`} label={`Charge ${i + 1}`} required value={t.termId} options={termOptions}
-                                  onChange={(v) => selectTerm(i, v)} disabled={!editing || busy} scopeKey="purchase-terms"
+                                  onChange={(v) => selectTerm(i, v)} onCommit={chargeRows.afterCombo} disabled={!editing || busy} scopeKey="purchase-terms"
                                   contextKey={`${p.companyId}:${p.branchId}`} placeholder="Choose charge…" hasError={!!errors.terms && !t.termId} />
                               </td>
                               <td className="px-2 py-2">
