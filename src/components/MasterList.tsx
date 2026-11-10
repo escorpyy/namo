@@ -1,8 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Search } from "lucide-react";
 import type { MasterDef, Opt } from "../../shared/masters";
 import type { Row } from "../lib/form";
 import { OptBadge } from "./OptBadge";
+import { DataTable, type Column } from "./table/DataTable";
+import type { ColKind } from "../lib/tableKinds";
 
 interface Props {
   def: MasterDef;
@@ -15,38 +17,39 @@ interface Props {
   searchRef: React.RefObject<HTMLInputElement>;
   onSearchKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   lookups: Record<string, Opt[]>;
+  onDeleteSelected?: () => void; // Delete on the selected row (the screen asks before it deletes)
 }
 
-export function MasterList({ def, items, total, selectedId, search, onSearch, onSelect, searchRef, onSearchKeyDown, lookups }: Props) {
+// What each kind of master column holds, for alignment (Excel's rules: text left, numbers and dates right, yes/no centred).
+const KIND: Record<NonNullable<MasterDef["columns"][number]["kind"]>, ColKind> = { mono: "text", text: "text", badge: "text", lookup: "text", number: "number", date: "date", dot: "boolean" };
+
+export function MasterList({ def, items, total, selectedId, search, onSearch, onSelect, searchRef, onSearchKeyDown, lookups, onDeleteSelected }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
-  const grid = { gridTemplateColumns: def.columns.map((c) => c.width).join(" ") };
 
   // Selected row hamesha dikhni chahiye
   useEffect(() => {
     if (selectedId != null) listRef.current?.querySelector(`[data-row="${selectedId}"]`)?.scrollIntoView({ block: "nearest" });
   }, [selectedId, items]);
 
-  const onRowKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const rows = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("[data-row]"));
-    const i = rows.indexOf(document.activeElement as HTMLElement);
-    if (e.key === "ArrowDown") { e.preventDefault(); rows[Math.min(i + 1, rows.length - 1)]?.focus(); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); rows[Math.max(i - 1, 0)]?.focus(); }
-    else if (e.key === "Escape") { e.stopPropagation(); document.querySelector<HTMLElement>("[data-zone=form] [data-nav]")?.focus(); }
-  };
-
   const cell = (row: Row, c: MasterDef["columns"][number]) => {
     const v = row[c.name];
     switch (c.kind) {
-      case "mono": return <span className="font-mono tabular-nums truncate">{v}</span>;
+      case "mono": return <span className="font-mono tabular-nums">{v}</span>;
       case "badge": return <OptBadge opt={def.fields.find((f) => f.name === c.name)?.options?.find((o) => o.value === v)} />;
-      case "lookup": return <span className="font-mono truncate text-slate-600">{v == null ? "—" : (lookups[c.name]?.find((o) => o.value === String(v))?.short ?? "")}</span>;
-      case "dot": return <span className="text-center"><span className={`inline-block w-2 h-2 rounded-full ${v ? "bg-green-600" : "bg-slate-400"}`} title={`${c.label}: ${v ? "Yes" : "No"}`} /></span>;
-      case "date": return <span className="tabular-nums truncate">{v ? String(v).slice(0, 10) : ""}</span>;
+      case "lookup": return <span className="font-mono text-slate-600">{v == null ? "—" : (lookups[c.name]?.find((o) => o.value === String(v))?.short ?? "")}</span>;
+      case "dot": return <span className={`inline-block h-2 w-2 rounded-full ${v ? "bg-green-600" : "bg-slate-400"}`} title={`${c.label}: ${v ? "Yes" : "No"}`} />;
+      case "date": return v ? String(v).slice(0, 10) : "";
       default:
-        if (v == null || v === "") return c.empty ? <span className="truncate pr-2 text-slate-500">{c.empty}</span> : <span />;
-        return <span className="truncate pr-2">{String(v)}</span>;
+        if (v == null || v === "") return c.empty ? <span className="text-slate-500">{c.empty}</span> : null;
+        return String(v);
     }
   };
+
+  const columns = useMemo<Column<Row>[]>(() => def.columns.map((c) => ({
+    key: c.name, header: c.label, kind: KIND[c.kind ?? "text"], width: c.width === "1fr" ? undefined : c.width, className: c.kind === "badge" || c.kind === "dot" ? undefined : "truncate",
+    value: (r: Row) => r[c.name], render: (r: Row) => cell(r, c),
+  })), [def, lookups]); // eslint-disable-line react-hooks/exhaustive-deps
+  const selected = useMemo(() => new Set<string | number>(selectedId != null ? [selectedId] : []), [selectedId]);
 
   return (
     <aside data-zone="list" className="w-[320px] shrink-0 border-l border-slate-400 bg-white/50 flex flex-col min-h-0">
@@ -60,21 +63,14 @@ export function MasterList({ def, items, total, selectedId, search, onSearch, on
           />
         </div>
       </div>
-      <div style={grid} className="grid px-3 py-1 text-[11px] font-semibold text-slate-600 border-y border-slate-300 bg-slate-100">
-        {def.columns.map((c) => <span key={c.name} className={c.kind === "dot" ? "text-center" : ""}>{c.label}</span>)}
-      </div>
-      <div ref={listRef} onKeyDown={onRowKey} className="flex-1 min-h-0 overflow-y-auto">
-        {items.length === 0 && <div className="p-4 text-slate-500">{total === 0 ? "No records yet. Press F3 for a new one." : "No records match."}</div>}
-        {items.map((r) => (
-          <div
-            key={r.id} data-row={r.id} tabIndex={-1} role="option" aria-selected={r.id === selectedId} style={grid}
-            onClick={() => onSelect(r.id)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(r.id); } }}
-            className={`grid items-center px-3 h-8 border-b border-slate-200 cursor-pointer hover:bg-slate-100 ${r.id === selectedId ? "bg-blue-100 hover:bg-blue-100" : ""}`}
-          >
-            {def.columns.map((c) => <span key={c.name} className="min-w-0 contents">{cell(r, c)}</span>)}
-          </div>
-        ))}
+      <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto">
+        <DataTable
+          label={`${def.title} list`} fixed rows={items} rowKey={(r) => r.id} columns={columns} selected={selected}
+          onSelectedChange={(k) => { const id = [...k][0]; if (typeof id === "number") onSelect(id); }}
+          onDelete={(rows) => { const id = rows[0].id; if (id !== selectedId) onSelect(id); else onDeleteSelected?.(); }} // first press selects, the next one asks to delete
+          onEscape={() => document.querySelector<HTMLElement>("[data-zone=form] [data-nav]")?.focus()}
+          empty={total === 0 ? "No records yet. Press F3 for a new one." : "No records match."}
+        />
       </div>
       <div className="px-3 h-8 flex items-center border-t border-slate-300 text-[12px] text-slate-600">{items.length} of {total}</div>
     </aside>

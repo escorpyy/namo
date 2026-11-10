@@ -28,7 +28,7 @@ export function LedgerTab({ result, ready, voucherNumber, reversalVoucherNumber 
           {reversalVoucherNumber && <span>Reversal voucher <b className="font-mono text-ink">{reversalVoucherNumber}</b></span>}
         </div>
       )}
-      <table className="w-full min-w-[560px] text-[12.5px]">
+      <table className="xl-table min-w-[560px] text-[12.5px]">
         <thead className="lg-th sticky top-0 z-10">
           <tr><th className="px-3 py-2 text-left">Ledger</th><th className="px-3 py-2 text-right">Debit</th><th className="px-3 py-2 text-right">Credit</th></tr>
         </thead>

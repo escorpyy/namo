@@ -53,7 +53,7 @@ export interface ColumnDef {
   name: string;
   label: string;
   width: string; // css grid width
-  kind?: "mono" | "text" | "badge" | "dot" | "lookup" | "date";
+  kind?: "mono" | "text" | "number" | "badge" | "dot" | "lookup" | "date"; // number: right-aligned, like a number in Excel; dot: a yes/no, centred
   empty?: string; // khali value par kya dikhana hai (jaise "All branches")
 }
 
@@ -209,7 +209,7 @@ function termMaster(kind: "purchase" | "sales"): MasterDef {
     labelFields: ["code", "name"], cols: 2, sortBy: "sequence", sortDir: "asc",
     fields,
     columns: [
-      { name: "sequence", label: "Seq", width: "44px", kind: "mono" },
+      { name: "sequence", label: "Seq", width: "44px", kind: "number" },
       { name: "code", label: "Code", width: "72px", kind: "mono" },
       { name: "name", label: "Name", width: "1fr", kind: "text" },
       { name: "nature", label: "Nature", width: "96px", kind: "badge" },
@@ -540,13 +540,13 @@ const list: MasterDef[] = [
   {
     key: "product-units", title: "Unit", singular: "Unit", labelFields: ["code", "name"],
     fields: [code(), text("name", "Name", 50), { name: "decimalPlaces", label: "Decimal Places", type: "number", required: true, decimals: 0, min: 0, maxValue: 6, default: "0", placeholder: "0 for PCS, 2-3 for KG/LTR" }, active()],
-    columns: [CODE_COL, { name: "name", label: "Name", width: "1fr", kind: "text" }, { name: "decimalPlaces", label: "Dec", width: "40px", kind: "text" }, ON_COL],
+    columns: [CODE_COL, { name: "name", label: "Name", width: "1fr", kind: "text" }, { name: "decimalPlaces", label: "Dec", width: "40px", kind: "number" }, ON_COL],
     unique: [["code"], ["name"]],
   },
   {
     key: "tax-rates", title: "Tax Rate", singular: "Tax Rate", labelFields: ["code", "name"],
     fields: [code(), text("name", "Name", 50), { name: "ratePercent", label: "Rate %", type: "number", required: true, decimals: 2, min: 0, maxValue: 100 }, text("hsnSacCode", "HSN / SAC Code", 20, false), active()],
-    columns: [CODE_COL, { name: "name", label: "Name", width: "1fr", kind: "text" }, { name: "ratePercent", label: "Rate %", width: "56px", kind: "text" }, ON_COL],
+    columns: [CODE_COL, { name: "name", label: "Name", width: "1fr", kind: "text" }, { name: "ratePercent", label: "Rate %", width: "56px", kind: "number" }, ON_COL],
     unique: [["code"]],
   },
   {

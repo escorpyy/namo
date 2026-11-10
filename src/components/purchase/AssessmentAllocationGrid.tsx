@@ -111,7 +111,7 @@ export function AssessmentAllocationGrid({ lines, terms, editing, busy, previewR
         </button>}
       </div>
       <div className={`${fill ? "min-h-0 flex-1" : "max-h-[40vh]"} lg-scroll lg-grid overflow-auto overscroll-contain`} aria-label="Product allocation and landed cost grid">
-        <table className="w-full min-w-[960px] table-fixed text-[12px]">
+        <table className="xl-table min-w-[960px] table-fixed text-[12px]">
           <thead className="lg-th !z-20">
             <tr>
               <th className="sticky left-0 z-30 w-[180px] border-r border-slate-200 bg-slate-50 px-3 py-2 text-left">Product</th>

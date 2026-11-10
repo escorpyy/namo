@@ -18,11 +18,12 @@ interface EntryTab { id: number; docId: number | null; title: string; dirty: boo
 type Active = "list" | number;
 interface TabSnap { hook: MutableRefObject<DocSnapshot<BForm> | null>; stage: MutableRefObject<Stage | null> }
 
-const LIST_HINTS = ["F3: New bill", "Enter: Open", "/: Search", "Alt+, Alt+.: Tabs", "F1: Help"];
+const LIST_HINTS = ["F3: New bill", "Enter: Open", "Del: Delete draft", "/: Search", "Alt+, Alt+.: Tabs", "F1: Help"];
 const LIST_HELP: [string, string][] = [
   ["F3 / Ctrl+N", "New bill in a new tab"],
   ["Enter", "Open the highlighted bill in its own tab (a bill already open is just shown)"],
   ["↑ / ↓", "Move through the list"],
+  ["Delete", "Delete the highlighted draft bill (asks first; posted bills cannot be deleted)"],
   ["/ or F4 or Ctrl+F", "Search the list"],
   ["Alt+, / Alt+.", "Previous / next tab"],
   ["Alt+W", "Close the open bill tab"],
@@ -56,6 +57,16 @@ export default function PurchaseBillWorkspace(p: PurchaseScreenProps & { fromCha
     } catch (e) { setMsg({ text: (e as Error).message, kind: "err" }); void dlg.error((e as Error).message); }
   }, [p.companyId, p.branchId, p.fyCode, statusFilter, search, dlg]);
   useEffect(() => { const t = setTimeout(() => void loadList(), search ? 250 : 0); return () => clearTimeout(t); }, [loadList, search]);
+
+  // Delete on a highlighted row: only a draft can go, it must not be open in a tab, and the person is asked first.
+  const deleteDraft = async (row: PListRow) => {
+    const no = String(row.invoiceNumber);
+    if (String(row.state) !== "DRAFT") { void dlg.warning(`Bill ${no} is ${String(row.state).toLowerCase()}; only a draft bill can be deleted.`, { title: "Cannot delete" }); return; }
+    if (tabsRef.current.some((t) => t.docId === row.id)) { void dlg.warning(`Bill ${no} is open in a tab. Close that tab first.`, { title: "Cannot delete" }); return; }
+    if (!(await dlg.confirm(`Delete draft bill ${no}? This cannot be undone.`, { title: "Delete draft bill?", variant: "danger", confirmLabel: "Delete" }))) return;
+    try { await purchaseApi.remove("bills", row.id, p.companyId, p.userId); setMsg({ text: `Deleted ${no}`, kind: "ok" }); await loadList(); }
+    catch (e) { void dlg.error((e as Error).message); }
+  };
 
   // ---- tabs ----
   const [tabs, setTabs] = useState<EntryTab[]>([]);
@@ -201,15 +212,16 @@ export default function PurchaseBillWorkspace(p: PurchaseScreenProps & { fromCha
                 const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("[data-row]")), i = items.indexOf(e.target as HTMLElement);
                 if (e.key === "ArrowDown") { e.preventDefault(); items[Math.min(i + 1, items.length - 1)]?.focus(); }
                 else if (e.key === "ArrowUp") { e.preventDefault(); if (i <= 0) searchRef.current?.focus(); else items[i - 1].focus(); }
+                else if (e.key === "Delete" && i >= 0 && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); void deleteDraft(rows[i]); }
               }}>
-              <div className={`lg-th grid min-w-[860px] ${COLS} items-center gap-x-3 px-5 py-2.5`}>
-                <span>Invoice no</span><span>Date ({calendar})</span><span>Vendor</span><span>Vendor invoice</span><span>Type</span><span>Status</span><span className="text-right">Amount</span>
+              <div className={`lg-th xl-head min-w-[860px] ${COLS}`}>
+                <span>Invoice no</span><span className="text-right">Date ({calendar})</span><span>Vendor</span><span>Vendor invoice</span><span>Type</span><span>Status</span><span className="text-right">Amount</span>
               </div>
               {rows.length === 0 && <EmptyList icon={<Receipt size={20} />} title={search || statusFilter ? "No bills match" : "No bills in this branch and year yet"} hint={search || statusFilter ? "Try a different search or status." : "Press F3 to enter the first purchase bill."} />}
               {rows.map((r) => (
-                <button key={r.id} type="button" data-row onClick={() => openDoc(r)} className={`lg-row grid min-w-[860px] ${COLS} items-center gap-x-3 px-5 py-3`}>
+                <button key={r.id} type="button" data-row onClick={() => openDoc(r)} className={`lg-row xl-row min-w-[860px] ${COLS}`}>
                   <span className="truncate font-mono text-[13px] font-semibold text-cobalt-800">{String(r.invoiceNumber)}</span>
-                  <span className="tabular-nums text-slate-600">{dateText(r.invoiceDate)}</span>
+                  <span className="text-right tabular-nums text-slate-600">{dateText(r.invoiceDate)}</span>
                   <span className="truncate font-medium text-ink">{r.vendorName}</span>
                   <span className="truncate text-slate-500">{r.vendorInvoiceNo ?? ""}</span>
                   <span>{r.invoiceType === "IMPORT"

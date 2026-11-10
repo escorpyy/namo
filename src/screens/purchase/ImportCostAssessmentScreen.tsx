@@ -5,6 +5,8 @@ import { DateInput } from "../../components/DateInput";
 import { useDialog } from "../../components/Dialog";
 import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
+import { useGridRows } from "../../components/table/useGridRows";
+import { fillDownRows } from "../../lib/tableKinds";
 import { LedgerTab } from "../../components/purchase/AssessmentLedgerTab";
 import { MatrixTab } from "../../components/purchase/AssessmentMatrixTab";
 import { ProductsTab } from "../../components/purchase/AssessmentProductsTab";
@@ -69,6 +71,8 @@ export interface AssessmentEntryProps extends PurchaseScreenProps {
 const HEADER_KEYS = new Set(["importBillId", "assessmentDate"]);
 
 const fieldClass = "fld min-w-0";
+// Ctrl+D on a charge copies these from the charge above (never its key, and never a hand-made product split: that belongs to one charge).
+const CHARGE_FILL: (keyof AssessmentTerm)[] = ["termId", "calcType", "rate", "inputAmount", "allocationBasis", "capitalizable", "isOverridden", "overrideAmount", "againstLedgerId", "againstSubLedgerId"];
 export const blankTerm = (): AssessmentTerm => ({
   key: Math.random().toString(36).slice(2), termId: "", calcType: "AMOUNT", rate: "", inputAmount: "", allocationBasis: "VALUE",
   capitalizable: true, isOverridden: false, overrideAmount: "", againstLedgerId: "", againstSubLedgerId: "", allocationMode: "AUTO", manual: {},
@@ -234,6 +238,31 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
       manual: {},
     });
   };
+
+  // Charges table, row mode: click the row number, Delete removes the charge, Ctrl+D copies the one above (see components/table/useGridRows).
+  const chargeRows = useGridRows({
+    count: form?.terms.length ?? 0, readOnly: !editing || busy,
+    firstCell: (grid, r) => grid.querySelector<HTMLElement>(`[data-field="terms.${r}.termId"]:not(:disabled)`),
+    cellOf: (el) => { const m = /^terms\.(\d+)\.(\w+)$/.exec(el.getAttribute("data-field") ?? ""); return m ? { row: Number(m[1]), col: m[2] } : null; },
+    onRemove: (r) => setForm((f) => (f && f.terms.length > 1 ? { ...f, terms: f.terms.filter((_, n) => n !== r) } : f)),
+    onFillRow: (r) => setForm((f) => {
+      const next = f && fillDownRows(f.terms, [r], CHARGE_FILL);
+      return f && next ? { ...f, terms: next.map((t, n) => (n === r ? { ...t, allocationMode: "AUTO" as const, manual: {} } : t)) } : f;
+    }),
+    onFillCell: (r, col) => {
+      const above = form?.terms[r - 1], row = form?.terms[r];
+      if (!above || !row) return;
+      if (col === "termId") { if (above.termId) selectTerm(r, above.termId); return; } // choosing a charge also loads its defaults
+      const aboveValue = above.calcType === "PERCENT" ? above.rate : above.inputAmount;
+      const one: Partial<AssessmentTerm> | undefined = col === "calcType" ? { calcType: above.calcType }
+        : col === "amount" ? (row.calcType === "PERCENT" ? { rate: aboveValue } : { inputAmount: aboveValue })
+        : col === "override" ? { overrideAmount: above.overrideAmount } : col === "isOverridden" ? { isOverridden: above.isOverridden }
+        : col === "allocationBasis" ? { allocationBasis: above.allocationBasis }
+        : col === "againstLedgerId" ? { againstLedgerId: above.againstLedgerId, againstSubLedgerId: above.againstSubLedgerId }
+        : col === "againstSubLedgerId" ? { againstSubLedgerId: above.againstSubLedgerId } : undefined;
+      if (one) updateTerm(r, one);
+    },
+  });
 
   // ---- header stage: the header form first; the charges open when it is complete ----
   const headerErrors = (f: Form) => {
@@ -592,13 +621,15 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                       <span className="text-[11.5px] text-slate-500">Product amounts are worked out automatically; check or change them on the Product-wise tab.</span>
                     </div>
                     <div className="flex min-h-0 flex-1 flex-col">
-                <div className="lg-scroll lg-grid min-h-0 flex-1 overflow-auto overscroll-contain">
-                  <table className="w-full min-w-[700px] table-fixed text-[12px]">
+                <div data-grid="charges" {...chargeRows.gridProps} onKeyDown={chargeRows.handleKey} aria-label="Charges; Delete removes the selected row, Ctrl+D copies the row above"
+                  className="lg-scroll lg-grid min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cobalt-600">
+                  <table className="xl-table min-w-[700px] table-fixed text-[12px]">
                     <thead className="lg-th">
                       <tr>
+                        <th className="xl-rowhead w-[34px] px-0 py-2">#</th>
                         <th className="w-[132px] px-2 py-2 text-left">Charge term</th>
                         <th className="w-[92px] px-2 py-2 text-left">Calculation</th>
-                        <th className="w-[100px] px-2 py-2 text-left">Rate / amount</th>
+                        <th className="w-[100px] px-2 py-2 text-right">Rate / amount</th>
                         {form.splitMode === "DIFFERENT" && <th className="w-[110px] px-2 py-2 text-left">Split by</th>}
                         <th className="w-[132px] px-2 py-2 text-left">Against ledger</th>
                         <th className="w-[78px] px-2 py-2 text-center" title="Taken from the purchase term master">Stock value</th>
@@ -614,7 +645,8 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                         const subs = (lookups?.subLedgers ?? []).filter((x) => String(x.generalLedgerId) === t.againstLedgerId);
                         return (
                           <Fragment key={t.key}>
-                            <tr className="border-t border-slate-100 align-top transition-colors hover:bg-cobalt-50/40">
+                            <tr data-row={i} data-selected={chargeRows.rowSel === i} className="align-top transition-colors hover:bg-cobalt-50/40">
+                              <td className="xl-rowhead p-0"><button type="button" className="h-full min-h-[32px] w-full tabular-nums" {...chargeRows.rowHeadProps(i)}>{i + 1}</button></td>
                               <td className="px-2 py-2">
                                 <MasterReferencePicker fieldName={`terms.${i}.termId`} label={`Charge ${i + 1}`} required value={t.termId} options={termOptions}
                                   onChange={(v) => selectTerm(i, v)} disabled={!editing || busy} scopeKey="purchase-terms"
@@ -631,12 +663,12 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                               <td className="px-2 py-2">
                                 <div className="flex gap-1.5">
                                   <input data-field={`terms.${i}.amount`} aria-label={t.calcType === "PERCENT" ? `Rate for charge ${i + 1}` : `Amount for charge ${i + 1}`}
-                                    className={fieldClass} disabled={!editing || busy || !t.termId}
+                                    className={`${fieldClass} text-right tabular-nums`} disabled={!editing || busy || !t.termId}
                                     value={t.calcType === "PERCENT" ? t.rate : t.inputAmount} inputMode="decimal"
                                     onChange={(e) => updateTerm(i, t.calcType === "PERCENT" ? { rate: e.target.value } : { inputAmount: e.target.value })}
                                     placeholder={t.calcType === "PERCENT" ? "Percent" : "Amount"} />
                                   {t.isOverridden && (
-                                    <input data-field={`terms.${i}.override`} aria-label={`Override amount for charge ${i + 1}`} className={fieldClass} disabled={!editing || busy}
+                                    <input data-field={`terms.${i}.override`} aria-label={`Override amount for charge ${i + 1}`} className={`${fieldClass} text-right tabular-nums`} disabled={!editing || busy}
                                       value={t.overrideAmount} inputMode="decimal" onChange={(e) => updateTerm(i, { overrideAmount: e.target.value })} placeholder="Final override" />
                                   )}
                                 </div>
@@ -680,7 +712,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                               <td className="px-2 py-2 text-right font-medium tabular-nums">{result ? safeMoney(result.finalAmount ?? result.amount) : "—"}</td>
                               <td className="p-1 pt-2 text-right">
                                 <button type="button" className="btn h-8 w-8 justify-center px-0 text-slate-500 hover:text-rose-700" disabled={!editing || busy || form.terms.length === 1}
-                                  aria-label={`Remove charge ${i + 1}`} onClick={() => setForm({ ...form, terms: form.terms.filter((_, n) => n !== i) })}>
+                                  title="Remove charge (Delete when the row is selected)" aria-label={`Remove charge ${i + 1}`} onClick={() => setForm({ ...form, terms: form.terms.filter((_, n) => n !== i) })}>
                                   <Trash2 size={13} />
                                 </button>
                               </td>

@@ -85,7 +85,7 @@
   .lg-row[aria-selected="true"] { @apply bg-cobalt-50; box-shadow: inset 3px 0 0 0 theme("colors.cobalt.700"); }
 
   /* editable cells in a grid are quiet until you hover or focus them, so a full table reads as a ledger and not a wall of boxes */
-  .lg-grid .fld:not(:focus):not(.fld-err) { @apply border-transparent bg-transparent shadow-none; }
+  .lg-grid .fld:not(:focus):not(.fld-err) { @apply border-transparent bg-transparent; }
   .lg-grid .fld:not(:focus):not(:disabled):not(.fld-err):hover { @apply border-slate-300 bg-white; }
   .lg-grid .fld:disabled { @apply text-slate-400; }
 
@@ -109,4 +109,44 @@
   @media (prefers-reduced-motion: reduce) {
     .ledger *, .ledger *::before, .ledger *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
   }
+
+  /* ===================================================================================================================
+     Excel-style grids — gridlines round every cell, a grey header, numbers right / text left (see src/lib/tableKinds.ts).
+     Two flavours, one look:
+       .xl-table          a real <table> (use <DataTable> or <XlTable>/<Th>/<Td> from components/table)
+       .xl-head / .xl-row a CSS-grid row of cells; the template (grid-template-columns) is set by the screen
+     In a grid row every direct child is a cell. The line to the right of a cell is an inset shadow on the cell itself, so it stays
+     continuous whatever the row holds (text, an input, a picker), and a focused input swaps it for its own focus ring, like Excel's active cell.
+     =================================================================================================================== */
+  :root { --xl-line: #cdd3de; }
+
+  .xl-table { @apply w-full; border-collapse: separate; border-spacing: 0; }
+  :where(.xl-table) :where(th, td) { @apply px-2 py-1.5; }
+  .xl-table :is(th, td) { border-right: 1px solid var(--xl-line); border-bottom: 1px solid var(--xl-line); }
+  .xl-table :is(th, td):first-child { border-left: 1px solid var(--xl-line); }
+  .xl-table thead th { @apply bg-slate-50 text-[12px] font-semibold text-slate-600; border-top: 1px solid var(--xl-line); }
+  .xl-table.xl-sticky thead th { @apply sticky top-0 z-10; }
+  .xl-table tfoot td { @apply bg-slate-50 font-semibold text-ink; }
+  .xl-table tbody tr { @apply transition-colors duration-100; }
+  .xl-table tbody tr:hover { @apply bg-cobalt-50/70; }
+  .xl-table tbody tr:focus { @apply bg-cobalt-50 outline-none; }
+  .xl-table tbody tr:focus > td:first-child, .xl-table tbody tr[aria-selected="true"] > td:first-child { box-shadow: inset 3px 0 0 0 theme("colors.cobalt.700"); }
+  .xl-table tbody tr[aria-selected="true"] { @apply bg-cobalt-100/70; }
+  .xl-table .xl-rowhead { @apply bg-slate-50 text-center text-slate-500; }
+  .xl-table tbody tr[data-selected="true"] > td { background-color: theme("colors.cobalt.50"); }
+  .xl-table tbody tr[data-selected="true"] > td.xl-rowhead { @apply bg-cobalt-700 font-semibold text-white; }
+
+  :where(.xl-head, .xl-row) { display: grid; }
+  .xl-head { @apply bg-slate-50 text-[12px] font-semibold text-slate-600; border-bottom: 1px solid var(--xl-line); }
+  .xl-row { border-bottom: 1px solid var(--xl-line); min-height: 32px; }
+  :where(.xl-head, .xl-row) > * { min-width: 0; box-shadow: inset -1px 0 0 var(--xl-line); }
+  :where(.xl-head, .xl-row) > :is(span, p) { display: block; padding: 6px 8px; line-height: 20px; }
+  .xl-row > .xl-rowhead, .xl-head > .xl-rowhead { @apply select-none bg-slate-50 px-0 text-center tabular-nums text-slate-500; }
+  .xl-row > button.xl-rowhead { @apply cursor-pointer hover:bg-slate-100; }
+  .xl-row[data-selected="true"] > .xl-rowhead { @apply bg-cobalt-700 font-semibold text-white; }
+  /* inputs and pickers fill their cell; their box only shows on hover / focus */
+  .xl-row > .fld { height: auto; min-height: 2rem; }
+  .xl-row > button:not(.xl-rowhead) { height: auto; }
+  .xl-row .fld:not(:focus):not(.fld-err) { border-color: transparent; border-radius: 0; }
+  .xl-row .fld:focus { position: relative; z-index: 1; }
 }

@@ -267,8 +267,8 @@ export default function OpeningBalanceScreen({ companyId, branchId, fyId, userId
 
         {/* grid: sirf andar ka scroll */}
         <div className="mx-4 flex-1 min-h-0 border border-slate-400 bg-white/60 flex flex-col">
-          <div style={{ gridTemplateColumns: COLS }} className="grid px-2 py-1 text-[11px] font-semibold text-slate-600 border-b border-slate-300 bg-slate-100 shrink-0">
-            <span>Code</span><span>Ledger</span><span>Group</span><span className="text-right pr-2">Debit</span><span className="text-right pr-2">Credit</span>
+          <div style={{ gridTemplateColumns: COLS }} className="xl-head shrink-0">
+            <span>Code</span><span>Ledger</span><span>Group</span><span className="text-right">Debit</span><span className="text-right">Credit</span>
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto">
             {!data && <div className="p-4 text-slate-500">Loading…</div>}
@@ -293,9 +293,9 @@ export default function OpeningBalanceScreen({ companyId, branchId, fyId, userId
                 );
               };
               return (
-                <div key={r.key} style={{ gridTemplateColumns: COLS }} className={`grid items-center gap-x-1 px-2 h-8 border-b border-slate-200 ${edited ? "bg-yellow-50" : ""} ${!r.isActive ? "text-slate-500" : ""}`}>
+                <div key={r.key} style={{ gridTemplateColumns: COLS }} className={`xl-row ${edited ? "bg-yellow-50" : ""} ${!r.isActive ? "text-slate-500" : ""}`}>
                   <span className="font-mono tabular-nums truncate">{r.code}</span>
-                  <span className="truncate pr-2" title={`${r.name}${r.subLedgerName ? " › " + r.subLedgerName : ""}`}>
+                  <span className="truncate" title={`${r.name}${r.subLedgerName ? " › " + r.subLedgerName : ""}`}>
                     {r.name}{r.subLedgerCode && <span className="text-slate-600"> › {r.subLedgerCode} {r.subLedgerName}</span>}
                     {r.needsSubLedger && <span className="ml-2 text-[11px] text-amber-700">Sub Ledger required — add one in Sub Ledger master</span>}
                     {PL(r.groupType) && <span className="ml-1.5 text-[10px] px-1 border border-slate-300 rounded-sm text-slate-500">P&amp;L</span>}

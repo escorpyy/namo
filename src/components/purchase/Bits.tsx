@@ -212,6 +212,11 @@ export function DocShell<F extends object>({ s, title, singular, branchName, fyC
                 const rows = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("[data-row]")), i = rows.indexOf(e.target as HTMLElement);
                 if (e.key === "ArrowDown") { e.preventDefault(); rows[Math.min(i + 1, rows.length - 1)]?.focus(); }
                 else if (e.key === "ArrowUp") { e.preventDefault(); if (i <= 0) s.searchRef.current?.focus(); else rows[i - 1].focus(); }
+                else if (e.key === "Delete" && i >= 0 && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) { // first press selects the row, the next one asks to delete it
+                  e.preventDefault(); e.stopPropagation();
+                  const r = s.rows[i];
+                  if (r.id !== s.selectedId) s.select(r.id); else s.askDelete();
+                }
                 else if (e.key === "Escape") { e.stopPropagation(); document.querySelector<HTMLElement>("[data-zone=form] [data-field]:not(:disabled)")?.focus(); }
               }}>
                 {s.rows.length === 0 && <p className="p-4 text-[12px] text-slate-500">No {singular.toLowerCase()}s found.</p>}
@@ -245,7 +250,9 @@ export const COMMON_HELP: [string, string][] = [
   ["Esc", "Close a list / cancel editing"],
   ["F4 / /", "Search the document list"],
   ["Ctrl+↑ / Ctrl+↓", "Previous / next document"],
-  ["Shift+Delete", "Remove the current line or term row"],
+  ["Delete (row selected)", "Remove the selected line / term row (click its row number, or press Esc in a cell, to select the row)"],
+  ["Shift+Delete", "Remove the current line or term row from inside a cell"],
+  ["Ctrl+D", "Fill down: copy the cell above (in a cell) or the row above (row selected)"],
   ["Alt+1 / Alt+2 / Alt+3", "Sidebar / Form / List"],
   ["Alt+4", "Expand / collapse the purchase document list"],
   ["F1 / ?", "This help"],

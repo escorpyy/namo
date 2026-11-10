@@ -16,11 +16,12 @@ interface EntryTab { id: number; docId: number | null; title: string; dirty: boo
 type Active = "list" | number;
 type Row = Record<string, any> & { id: number; assessmentNumber: string; state: string };
 
-const LIST_HINTS = ["F3: New assessment", "Enter: Open", "/: Search", "Alt+, Alt+.: Tabs", "F1: Help"];
+const LIST_HINTS = ["F3: New assessment", "Enter: Open", "Del: Delete draft", "/: Search", "Alt+, Alt+.: Tabs", "F1: Help"];
 const LIST_HELP: [string, string][] = [
   ["F3 / Ctrl+N", "New assessment in a new tab"],
   ["Enter", "Open the highlighted assessment in its own tab (one already open is just shown)"],
   ["↑ / ↓", "Move through the list"],
+  ["Delete", "Delete the highlighted draft assessment (asks first; applied ones cannot be deleted)"],
   ["/ or F4 or Ctrl+F", "Search the list"],
   ["Alt+, / Alt+.", "Previous / next tab"],
   ["Alt+W", "Close the open assessment tab"],
@@ -73,6 +74,16 @@ export default function ImportCostAssessmentWorkspace(p: PurchaseScreenProps) {
   const [tabs, setTabs] = useState<EntryTab[]>([]);
   const [active, setActive] = useState<Active>("list");
   const tabsRef = useRef(tabs); tabsRef.current = tabs;
+
+  // Delete on a highlighted row: only a draft can go, it must not be open in a tab, and the person is asked first.
+  const deleteDraft = async (row: Row) => {
+    const no = String(row.assessmentNumber);
+    if (row.state !== "DRAFT") { void dlg.warning(`Assessment ${no} is ${row.state.toLowerCase()}; only a draft assessment can be deleted.`, { title: "Cannot delete" }); return; }
+    if (tabsRef.current.some((t) => t.docId === row.id)) { void dlg.warning(`Assessment ${no} is open in a tab. Close that tab first.`, { title: "Cannot delete" }); return; }
+    if (!(await dlg.confirm(`Delete draft assessment ${no}? This cannot be undone.`, { title: "Delete draft?", variant: "danger", confirmLabel: "Delete" }))) return;
+    try { await importAssessmentApi.remove(row.id, p.companyId, p.userId); setMsg({ text: `Deleted ${no}`, kind: "ok" }); await refresh(); }
+    catch (e) { void dlg.error((e as Error).message); }
+  };
   const activeRef = useRef(active); activeRef.current = active;
   const nextId = useRef(1);
   const snaps = useRef(new Map<number, MutableRefObject<AssessmentSnapshot | null>>());
@@ -203,15 +214,16 @@ export default function ImportCostAssessmentWorkspace(p: PurchaseScreenProps) {
                 const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("[data-row]")), i = items.indexOf(e.target as HTMLElement);
                 if (e.key === "ArrowDown") { e.preventDefault(); items[Math.min(i + 1, items.length - 1)]?.focus(); }
                 else if (e.key === "ArrowUp") { e.preventDefault(); if (i <= 0) searchRef.current?.focus(); else items[i - 1].focus(); }
+                else if (e.key === "Delete" && i >= 0 && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); void deleteDraft(rows[i]); }
               }}>
-              <div className={`lg-th grid min-w-[860px] ${COLS} items-center gap-x-3 px-5 py-2.5`}>
-                <span>Assessment no</span><span>Date ({calendar})</span><span>Goods bill</span><span>Reference</span><span>State</span><span className="text-right">Assessed net</span><span className="text-right">Landed value</span>
+              <div className={`lg-th xl-head min-w-[860px] ${COLS}`}>
+                <span>Assessment no</span><span className="text-right">Date ({calendar})</span><span>Goods bill</span><span>Reference</span><span>State</span><span className="text-right">Assessed net</span><span className="text-right">Landed value</span>
               </div>
               {rows.length === 0 && <EmptyList icon={<Calculator size={20} />} title={search || statusFilter ? "No assessments match" : "No assessments in this branch and year yet"} hint={search || statusFilter ? "Try a different search or state." : "Press F3 to assess the landed cost of an import bill."} />}
               {rows.map((r) => (
-                <button key={r.id} type="button" data-row onClick={() => openDoc(r)} className={`lg-row grid min-w-[860px] ${COLS} items-center gap-x-3 px-5 py-3`}>
+                <button key={r.id} type="button" data-row onClick={() => openDoc(r)} className={`lg-row xl-row min-w-[860px] ${COLS}`}>
                   <span className="truncate font-mono text-[13px] font-semibold text-cobalt-800">{String(r.assessmentNumber)}</span>
-                  <span className="tabular-nums text-slate-600">{dateText(r.assessmentDate)}</span>
+                  <span className="text-right tabular-nums text-slate-600">{dateText(r.assessmentDate)}</span>
                   <span className="truncate font-medium text-ink">{r.invoiceNumber ?? r.importInvoiceNumber}</span>
                   <span className="truncate text-slate-500">{r.referenceNo ?? ""}</span>
                   <span><Pill text={r.state} tone={tone(r.state)} /></span>

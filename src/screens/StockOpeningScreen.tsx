@@ -8,23 +8,29 @@ import { MasterReferencePicker, type ReferenceOption } from "../components/Maste
 import { Dialog, useDialog, type DialogSpec } from "../components/Dialog";
 import { DateInput } from "../components/DateInput";
 import { ShortcutsOverlay } from "../components/ShortcutsOverlay";
+import { useGridRows } from "../components/table/useGridRows";
+import { fillDownCell, fillDownRows } from "../lib/tableKinds";
 
 const HELP: [string, string][] = [
   ["Enter", "Agla cell; aakhri row ke Rate par Enter = nayi row"],
   ["Shift+Enter", "Pichla cell"],
   ["↑ / ↓", "Usi column me upar / neeche (text cells)"],
-  ["Shift+Delete", "Row hatao"],
+  ["Delete (row select ho)", "Row hatao — row number par click ya Esc se row select karo"],
+  ["Shift+Delete", "Cell me hote hue row hatao"],
+  ["Ctrl+D", "Upar wali cell / row neeche copy (fill down)"],
   ["Ctrl+S", "Saare badlav save"],
   ["F4 / /", "Search"],
   ["Alt+2", "Grid par jao"],
   ["F1 / ?", "Ye help"],
 ];
-const HINTS = ["Enter: Next", "Ctrl+S: Save", "Shift+Del: Remove row", "F4: Search", "F1: Help"];
-const COLS = "minmax(180px,1.6fr) minmax(110px,1fr) 104px 128px 92px 96px 116px 28px";
+const HINTS = ["Enter: Next", "Ctrl+S: Save", "Del: Remove row", "Ctrl+D: Fill down", "F4: Search", "F1: Help"];
+const COLS = "34px minmax(180px,1.6fr) minmax(110px,1fr) 104px 128px 92px 96px 116px 28px";
 
 interface Row { key: string; id?: number; sd: string; loc: string; batch: string; exp: string; qty: string; rate: string }
 const newKey = () => Math.random().toString(36).slice(2);
 const trimDec = (v: string) => (v.includes(".") ? v.replace(/0+$/, "").replace(/\.$/, "") : v);
+const ROW_FIELDS: (keyof Row)[] = ["sd", "loc", "batch", "exp", "qty", "rate"]; // what Ctrl+D copies (never the key or the saved id)
+const COL_FIELD: Record<string, keyof Row> = { p: "sd", l: "loc", b: "batch", e: "exp", q: "qty", r: "rate" };
 const blankRow = (loc = ""): Row => ({ key: newKey(), sd: "", loc, batch: "", exp: "", qty: "", rate: "" });
 const isBlank = (r: Row) => !r.sd && !r.qty && !r.rate && !r.batch && !r.exp;
 const fromLine = (l: SoLine): Row => ({ key: newKey(), id: l.id, sd: String(l.stockDetailId), loc: l.locationId ? String(l.locationId) : "", batch: l.batchNo ?? "", exp: l.expiryDate ? l.expiryDate.slice(0, 10) : "", qty: trimDec(l.quantity), rate: trimDec(l.rate) });
@@ -136,7 +142,8 @@ export default function StockOpeningScreen({ companyId, branchId, fyId, branchNa
     if (dir === 1 && i === all.length - 1) { if (!isBlank(rows[rows.length - 1])) addRow(); return; }
     all[i + dir]?.focus();
   };
-  const onGridKey = (e: React.KeyboardEvent) => {
+  const onGridKey = (e: React.KeyboardEvent<HTMLElement>) => {
+    if (gridRows.handleKey(e)) return;
     const el = e.target as HTMLElement, f = el.getAttribute("data-field") ?? "";
     const m = /^L\.(\d+)\.(\w)$/.exec(f);
     if (!m) return;
@@ -146,7 +153,7 @@ export default function StockOpeningScreen({ companyId, branchId, fyId, branchNa
       e.preventDefault();
       const dir = e.key === "ArrowDown" ? 1 : -1;
       for (let k = i + dir; k >= 0 && k < rows.length; k += dir) { const t = gridRef.current?.querySelector<HTMLInputElement>(`[data-field="L.${k}.${col}"]`); if (t && !t.disabled) { t.focus(); break; } }
-    } else if (e.key === "Delete" && e.shiftKey) { e.preventDefault(); e.stopPropagation(); removeRow(rows[i]); }
+    }
   };
 
   // ---- save ----
@@ -230,6 +237,18 @@ export default function StockOpeningScreen({ companyId, branchId, fyId, branchNa
     const p = prodBy.get(r.sd);
     return `${p?.code ?? ""} ${p?.description ?? ""} ${r.batch}`.toLowerCase().includes(s) || isBlank(r);
   });
+  // Row mode (click a row number, or Esc in a cell): Delete removes the row, Ctrl+D copies the row / cell above. Rows are counted as shown.
+  const realOf = (n: number) => shown[n]?.i ?? -1;
+  // fillDown* work on the rows as shown (so "the row above" is the one you can see); put the changed ones back into the full list
+  const applyFill = (changed: Row[] | null) => { if (!changed) return; const by = new Map(changed.map((r) => [r.key, r])); setRows((rs) => rs.map((r) => by.get(r.key) ?? r)); setErrs({}); };
+  const gridRows = useGridRows({
+    count: shown.length, readOnly,
+    firstCell: (grid, n) => grid.querySelector<HTMLElement>(`[data-field^="L.${realOf(n)}."]:not(:disabled)`),
+    cellOf: (el) => { const m = /^L\.(\d+)\.(\w)$/.exec(el.getAttribute("data-field") ?? ""); const n = m ? shown.findIndex((x) => x.i === Number(m[1])) : -1; return m && n >= 0 ? { row: n, col: m[2] } : null; },
+    onRemove: (n) => { const r = rows[realOf(n)]; if (r) removeRow(r); },
+    onFillRow: (n) => applyFill(fillDownRows(shown.map((x) => x.r), [n], ROW_FIELDS)),
+    onFillCell: (n, col) => { const f = COL_FIELD[col]; if (f) applyFill(fillDownCell(shown.map((x) => x.r), n, f)); },
+  });
   const status = !fy ? "" : fy.isClosed ? "CLOSED" : fy.isOpeningBalanceLocked ? "LOCKED" : "OPEN";
   const diffAll = summary.bad.reduce((a, l) => a + (l.stock - l.ledger), 0);
 
@@ -257,37 +276,38 @@ export default function StockOpeningScreen({ companyId, branchId, fyId, branchNa
         </div>
 
         <div className="mx-4 flex-1 min-h-0 border border-slate-400 bg-white/60 flex flex-col">
-          <div style={{ gridTemplateColumns: COLS }} className="grid gap-x-1 px-2 py-1 text-[11px] font-semibold text-slate-600 border-b border-slate-300 bg-slate-100 shrink-0">
-            <span>Product</span><span>Location</span><span>Batch</span><span>Expiry ({calendar})</span><span className="text-right pr-2">Quantity</span><span className="text-right pr-2">Rate</span><span className="text-right pr-2">Value</span><span />
+          <div style={{ gridTemplateColumns: COLS }} className="xl-head shrink-0">
+            <span className="xl-rowhead">#</span><span>Product</span><span>Location</span><span>Batch</span><span className="text-right">Expiry ({calendar})</span><span className="text-right">Quantity</span><span className="text-right">Rate</span><span className="text-right">Value</span><span />
           </div>
-          <div ref={gridRef} onKeyDown={onGridKey} className="flex-1 min-h-0 overflow-y-auto">
+          <div ref={gridRef} data-grid="stock" {...gridRows.gridProps} onKeyDown={onGridKey} aria-label="Stock opening lines" className="flex-1 min-h-0 overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-600">
             {!data && <div className="p-4 text-slate-500">Loading…</div>}
             {data && data.products.length === 0 && <div className="p-4 text-slate-500">Koi Stock-type product nahi hai. Pehle Product master me Stock product banao.</div>}
-            {shown.map(({ r, i }) => {
+            {shown.map(({ r, i }, n) => {
               const p = prodBy.get(r.sd), er = errs[r.key];
               const off = readOnly;
               const cls = (col: string, extra = "") => `fld h-8 ${extra} ${er?.col === col ? "fld-err" : ""} ${off ? "bg-slate-100 text-slate-500" : ""}`;
               const dec = p?.decimals ?? 0;
               return (
-                <div key={r.key} className={`border-b border-slate-200 ${er ? "bg-red-50" : upserts.includes(r) ? "bg-yellow-50" : ""}`}>
-                  <div style={{ gridTemplateColumns: COLS }} className="grid gap-x-1 px-2 py-1 items-center">
+                <div key={r.key} data-row={n} className={`${gridRows.rowSel === n ? "bg-cobalt-50 ring-2 ring-inset ring-cobalt-700" : er ? "bg-red-50" : upserts.includes(r) ? "bg-yellow-50" : ""}`}>
+                  <div style={{ gridTemplateColumns: COLS }} data-selected={gridRows.rowSel === n} className="xl-row">
+                    <button type="button" className="xl-rowhead" {...gridRows.rowHeadProps(n)}>{n + 1}</button>
                     <MasterReferencePicker fieldName={`L.${i}.p`} label="Stock product" required scopeKey="stock-detail-products" contextKey={String(companyId)} placeholder="Choose product…" value={r.sd} hasError={er?.col === "p"} options={productOpts} disabled={off} onChange={(v) => pickProduct(r, v)} onCommit={(el) => step(el, 1)} />
                     <MasterReferencePicker fieldName={`L.${i}.l`} label="Location" scopeKey="locations" contextKey={String(companyId)} placeholder="Location (optional)" value={r.loc} hasError={false} options={locOpts} disabled={off} onChange={(v) => patch(r.key, { loc: v })} onCommit={(el) => step(el, 1)} />
                     <input data-field={`L.${i}.b`} disabled={off || !p?.tracksBatch} placeholder={p && !p.tracksBatch ? "—" : "Batch"} value={r.batch} maxLength={50} autoComplete="off"
                       onChange={(e) => patch(r.key, { batch: e.target.value })} onFocus={(e) => e.currentTarget.select()} className={cls("b", !p?.tracksBatch ? "bg-slate-100" : "")} />
                     {p?.tracksExpiry && !off
                       ? <DateInput fieldName={`L.${i}.e`} value={r.exp} onChange={(v) => patch(r.key, { exp: v })} calendar={calendar} hasError={er?.col === "e"} onBlurField={() => {}} compact />
-                      : <input data-field={`L.${i}.e`} disabled value={p?.tracksExpiry ? r.exp : ""} placeholder="—" className="fld h-8 bg-slate-100 text-slate-500" readOnly />}
+                      : <input data-field={`L.${i}.e`} disabled value={p?.tracksExpiry ? r.exp : ""} placeholder="—" className="fld h-8 bg-slate-100 text-right text-slate-500" readOnly />}
                     <input data-field={`L.${i}.q`} disabled={off || !p} inputMode="decimal" autoComplete="off" value={r.qty} placeholder={p ? `0${dec ? "." + "0".repeat(dec) : ""}` : ""}
                       onChange={(e) => { const x = e.target.value; const re = dec === 0 ? /^\d{0,12}$/ : new RegExp(`^\\d{0,12}(\\.\\d{0,${dec}})?$`); if (re.test(x)) patch(r.key, { qty: x }); }}
                       onFocus={(e) => e.currentTarget.select()} className={cls("q", "text-right tabular-nums")} aria-label="Quantity" />
                     <input data-field={`L.${i}.r`} disabled={off || !p} inputMode="decimal" autoComplete="off" value={r.rate} placeholder="0.00"
                       onChange={(e) => { const x = e.target.value; if (/^\d{0,12}(\.\d{0,6})?$/.test(x)) patch(r.key, { rate: x }); }}
                       onFocus={(e) => e.currentTarget.select()} className={cls("r", "text-right tabular-nums")} aria-label="Rate" />
-                    <span className="text-right pr-2 tabular-nums font-medium">{valueOf(r) ? fmtPaise(toPaise(valueOf(r))) : ""}</span>
-                    <button type="button" tabIndex={-1} disabled={off} onClick={() => removeRow(r)} title="Remove row (Shift+Delete)" aria-label="Remove row" className="h-8 grid place-items-center text-slate-500 hover:text-red-700 disabled:opacity-30"><X size={14} /></button>
+                    <span className="text-right tabular-nums font-medium">{valueOf(r) ? fmtPaise(toPaise(valueOf(r))) : ""}</span>
+                    <button type="button" tabIndex={-1} disabled={off} onClick={() => removeRow(r)} title="Remove row (Delete)" aria-label="Remove row" className="grid place-items-center text-slate-500 hover:text-red-700 disabled:opacity-30"><X size={14} /></button>
                   </div>
-                  {er && <p className="px-3 pb-1 text-[12px] text-red-700">{er.msg}</p>}
+                  {er && <p className="border-b border-slate-300 px-3 py-1 text-[12px] text-red-700">{er.msg}</p>}
                 </div>
               );
             })}

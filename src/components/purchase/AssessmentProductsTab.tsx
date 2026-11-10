@@ -77,7 +77,7 @@ export function ProductsTab(p: ProductsTabProps) {
       </div>
 
       <div className="lg-scroll lg-grid min-h-0 flex-1 overflow-auto">
-        <table className="w-full min-w-[720px] text-[12.5px]">
+        <table className="xl-table min-w-[720px] text-[12.5px]">
           <thead className="lg-th sticky top-0 z-10">
             <tr>
               <th className="px-2.5 py-2 text-left">Product</th>
@@ -165,7 +165,7 @@ function ProductDialog(p: {
           <button type="button" className="btn h-8 w-8 justify-center px-0" onClick={p.onClose} aria-label="Close"><X size={14} /></button>
         </header>
         <div className="lg-scroll min-h-0 flex-1 overflow-auto">
-          <table className="w-full text-[12.5px]">
+          <table className="xl-table text-[12.5px]">
             <thead className="lg-th">
               <tr>
                 <th className="px-3 py-2 text-left">Charge</th>

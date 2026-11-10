@@ -354,7 +354,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
       </main>
       <MasterList
         def={def} items={filtered} total={items.length} selectedId={mode === "new" ? null : selectedId}
-        search={search} onSearch={setSearch} onSelect={select} searchRef={searchRef} onSearchKeyDown={onSearchKey} lookups={lookups}
+        search={search} onSearch={setSearch} onSelect={select} searchRef={searchRef} onSearchKeyDown={onSearchKey} lookups={lookups} onDeleteSelected={askDelete}
       />
       {dialog && <Dialog spec={dialog} onClose={() => setDialog(null)} />}
       {help && <ShortcutsOverlay onClose={() => setHelp(false)} />}

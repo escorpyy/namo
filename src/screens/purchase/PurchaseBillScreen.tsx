@@ -661,15 +661,15 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
                   </div>
                   {(doc.importCostSources ?? []).length > 0 ? (
                     <div className="mt-2 overflow-x-auto">
-                      <table className="w-full min-w-[560px] text-left text-[12px]">
-                        <thead><tr className="border-b border-sky-200 text-slate-600"><th className="py-1 pr-3">Service invoice</th><th className="py-1 pr-3">Vendor</th><th className="py-1 pr-3">Source basis</th><th className="py-1 pr-3">Treatment</th><th className="py-1 pr-3 text-right">Basic amount</th><th className="py-1 text-right">Cost status</th></tr></thead>
+                      <table className="xl-table min-w-[560px] text-left text-[12px]">
+                        <thead><tr className="border-b border-sky-200 text-slate-600"><th className="py-1 pr-3">Service invoice</th><th className="py-1 pr-3">Vendor</th><th className="py-1 pr-3">Source basis</th><th className="py-1 pr-3">Treatment</th><th className="py-1 pr-3 text-right">Basic amount</th><th className="py-1 text-left">Cost status</th></tr></thead>
                         <tbody>{doc.importCostSources.map((source: any) => <tr key={source.id} className="border-b border-sky-100 last:border-0">
                           <td className="py-1 pr-3 font-mono">{source.invoiceNumber}{source.vendorInvoiceNo ? ` · ${source.vendorInvoiceNo}` : ""}</td>
                           <td className="py-1 pr-3">{source.vendorName}</td>
                           <td className="py-1 pr-3">{source.importCostAllocationBasis === "QUANTITY" ? "Quantity" : "Goods value"}</td>
                           <td className="py-1 pr-3">{source.importCostTreatment === "LANDED_ONLY" ? "Landed only" : "CIF"}</td>
                           <td className="py-1 pr-3 text-right tabular-nums">{money(source.basicAmount)}</td>
-                          <td className="py-1 text-right">{source.includedInCIF ? "Included" : source.state.toLowerCase()}</td>
+                          <td className="py-1 text-left">{source.includedInCIF ? "Included" : source.state.toLowerCase()}</td>
                         </tr>)}</tbody>
                       </table>
                     </div>

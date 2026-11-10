@@ -11,7 +11,9 @@ const rows: [string, string][] = [
   ["Ctrl+B", "Toggle sidebar"],
   ["Alt+4 (purchase)", "Expand / collapse the document list"],
   ["Ctrl+← / Ctrl+→", "Tabs badlo (Product jaise forms me)"],
-  ["Shift+Delete", "Lines me row hatao (Alternate Units, Components)"],
+  ["Delete", "Select ki hui row hatao (list me record, lines me row — row number par click ya cell me Esc se row select hoti hai)"],
+  ["Shift+Delete", "Lines me cell ke andar se row hatao (Alternate Units, Components)"],
+  ["Ctrl+D", "Fill down: upar wali cell / row copy karo"],
   ["A L E R X", "Quick-pick Type in the combobox"],
   ["Alt+↓ / Enter", "Open a master reference picker"],
   ["Picker: ↑ / ↓, Enter, Esc", "Move / select / close"],
@@ -26,7 +28,7 @@ export function ShortcutsOverlay({ onClose, shortcuts = rows }: { onClose: () =>
           <span>Keyboard Shortcuts</span>
           <span className="text-[11px] opacity-80">Esc to close</span>
         </div>
-        <table className="w-full text-[13px] m-1">
+        <table className="xl-table text-[13px]">
           <tbody>
             {shortcuts.map(([k, d]) => (
               <tr key={k} className="border-b border-rule last:border-0">
