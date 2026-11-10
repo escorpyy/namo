@@ -11,4 +11,5 @@ export * from "./purchaseChallan";
 export * from "./purchaseBill";
 export * from "./importAssessment";
 export * from "./periodLock";
+export * from "./codeRule";
 export * from "./relations";
