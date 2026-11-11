@@ -74,7 +74,7 @@ interface Props {
   contextKey: string;
   lockProducts?: boolean;
   rateLabel?: string;
-  onOpenTerms?: (index: number) => void;
+  onOpenTerms?: (index: number, continueAfterApply?: () => void) => void;
   termSummary?: (index: number) => { amount: string; count: number };
   fill?: boolean;
 }
@@ -146,9 +146,9 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
     onRemove: remove, onFillRow: fillRow, onFillCell: fillCell,
     cellSelector: '[data-field^="L."]', fieldOf: (r, c) => `L.${r}.${c}`, endOfRow: "row",
     onAddRow: () => addRow(), lastRowBlank: () => isBlankLine(lines[lines.length - 1]), leave: (el, dir) => focusStep(el, dir),
-    onCellEnter: (cell) => {
+    onCellEnter: (cell, el) => {
       if (cell.col === "b" && kind === "bill") { setBatchFor(cell.row); return true; }
-      if (cell.col === "terms" && kind === "bill" && onOpenTerms && lines[cell.row]?.productId) { onOpenTerms(cell.row); return true; }
+      if (cell.col === "terms" && kind === "bill" && onOpenTerms && lines[cell.row]?.productId) { onOpenTerms(cell.row, () => gridRows.stepFrom(el, 1)); return true; }
       return false;
     },
   });
@@ -209,7 +209,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                   <span data-readonly="true" className="text-right tabular-nums font-medium text-slate-700" title="Calculated amount">{money(lineAmount(l, p))}</span>
                   {kind === "bill" && onOpenTerms && (() => {
                     const summary = termSummary?.(i) ?? { amount: "0.00", count: 0 };
-                    return <button type="button" data-field={`L.${i}.terms`} data-nav={`line-terms-${i}`} disabled={!l.productId} onClick={() => onOpenTerms(i)} title={`Edit terms for line ${i + 1}${summary.count ? ` · ${summary.count} term${summary.count === 1 ? "" : "s"}` : ""}`} className={`${kind === "bill" ? "h-7" : "h-8"} w-full px-1 text-right tabular-nums text-cobalt-700 underline decoration-cobalt-200 underline-offset-4 hover:bg-cobalt-50 disabled:text-slate-500 disabled:no-underline focus-visible:outline-2 focus-visible:outline-cobalt-700`}>{summary.amount.startsWith("-") ? `− ${money(summary.amount.slice(1))}` : money(summary.amount || "0")}{summary.count > 0 && <span className="ml-1 text-[10px] text-slate-500 no-underline">({summary.count})</span>}</button>;
+                    return <button type="button" data-field={`L.${i}.terms`} data-nav={`line-terms-${i}`} disabled={!l.productId} onClick={(event) => { const trigger = event.currentTarget; onOpenTerms(i, () => gridRows.stepFrom(trigger, 1)); }} title={`Edit terms for line ${i + 1}${summary.count ? ` · ${summary.count} term${summary.count === 1 ? "" : "s"}` : ""}`} className={`${kind === "bill" ? "h-7" : "h-8"} w-full px-1 text-right tabular-nums text-cobalt-700 underline decoration-cobalt-200 underline-offset-4 hover:bg-cobalt-50 disabled:text-slate-500 disabled:no-underline focus-visible:outline-2 focus-visible:outline-cobalt-700`}>{summary.amount.startsWith("-") ? `− ${money(summary.amount.slice(1))}` : money(summary.amount || "0")}{summary.count > 0 && <span className="ml-1 text-[10px] text-slate-500 no-underline">({summary.count})</span>}</button>;
                   })()}
                   {kind === "order" && (off
                     ? <input disabled className="fld h-8 bg-slate-100 text-right text-slate-600" value={l.expectedDate} aria-label="Expected date" />

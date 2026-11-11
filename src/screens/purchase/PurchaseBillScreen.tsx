@@ -56,7 +56,7 @@ export interface BForm {
   dueDays: string; dueDate: string; remarks: string; purchaseChallanId: string; purchaseOrderId: string; importCostForBillId: string; importCostAllocationBasis: "VALUE" | "QUANTITY"; importCostTreatment: "CIF" | "LANDED_ONLY"; challanNo: string; orderNo: string;
   lines: LineRow[]; terms: TermRow[]; imp: Record<string, string>;
 }
-type TermDialog = { scope: "header" } | { scope: "line"; lineNumber: number; lineIndex: number };
+type TermDialog = { scope: "header" } | { scope: "line"; lineNumber: number; lineIndex: number; continueAfterApply?: () => void };
 const iso10 = (v: unknown) => (v ? String(v).slice(0, 10) : "");
 export type Stage = "header" | "lines";
 // Errors of the header form: everything that is not a line, a term or the "lines" / "terms" summary.
@@ -194,13 +194,17 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     window.setTimeout(() => (document.querySelector<HTMLElement>('[data-term-dialog] [data-field^="T."]:not(:disabled)')
       ?? document.querySelector<HTMLElement>("[data-term-dialog] button"))?.focus(), 40);
   };
-  const closeTermDialog = () => {
+  const closeTermDialog = (continueAfterApply = false) => {
     const previous = termDialog;
     setTermDialog(null);
     window.requestAnimationFrame(() => {
       const target = previous?.scope === "line"
         ? document.querySelector<HTMLElement>(`[data-nav="line-terms-${previous.lineIndex}"]`)
         : document.querySelector<HTMLElement>('[data-nav="header-terms"]');
+      if (continueAfterApply) {
+        if (previous?.scope === "line" && previous.continueAfterApply) { previous.continueAfterApply(); return; }
+        if (target && focusStep(target, 1)) return;
+      }
       target?.focus();
     });
   };
@@ -210,7 +214,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     const changed = dialogTermsToApply(termDraft, masters);
     s.patch({ terms: [...preserved, ...changed] });
     s.clearError(...Object.keys(s.errors).filter((key) => key === "terms" || key.startsWith("T.")));
-    closeTermDialog();
+    closeTermDialog(true);
   };
   const lineNumberAt = (index: number) => f
     ? f.lines.slice(0, index).filter((line) => !isBlankLine(line)).length + 1
@@ -519,7 +523,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   // The lines grid starts as one blank line and grows with every product. `fill` caps it at the height of the lines stage (the rows then scroll inside).
   const linesGrid = (fill: boolean) => (
     <LinesGrid fill={fill} kind="bill" lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
-      onOpenTerms={(index) => openTerms({ scope: "line", lineNumber: lineNumberAt(index), lineIndex: index })} termSummary={lineTermsSummary} />
+      onOpenTerms={(index, continueAfterApply) => openTerms({ scope: "line", lineNumber: lineNumberAt(index), lineIndex: index, continueAfterApply })} termSummary={lineTermsSummary} />
   );
 
   return (
@@ -748,7 +752,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
                   {termDialog.scope === "header" ? "Document-level terms, in sequence. Terms left at 0 are not saved." : `${dialogLine ? products.get(dialogLine.productId)?.description ?? "Product line" : "Product line"} — terms in sequence. Terms left at 0 are not saved.`}
                 </p>
               </div>
-              <button type="button" className="btn" onClick={closeTermDialog} aria-label="Close terms dialog">Close <span className="kbd">Esc</span></button>
+              <button type="button" className="btn" onClick={() => closeTermDialog()} aria-label="Close terms dialog">Close <span className="kbd">Esc</span></button>
             </div>
             <div className="grid shrink-0 grid-cols-3 divide-x divide-slate-200 border-b border-slate-300 bg-white text-center" aria-live="polite">
               <Stat label={termDialog.scope === "line" ? "Line amount" : "Basic amount"} value={shown(dialogBasic)} />
@@ -762,7 +766,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-300 bg-slate-50 px-3 py-2">
               <span className="text-[12px] text-slate-600">{dialogFilled} term(s) with a value</span>
               <div className="flex gap-2">
-                <button type="button" className="btn" onClick={closeTermDialog}>Cancel</button>
+                <button type="button" className="btn" onClick={() => closeTermDialog()}>Cancel</button>
                 {!ro && <button type="button" className="btn btn-primary" onClick={applyTermDialog}>Apply to bill <span className="kbd">Ctrl+S</span></button>}
               </div>
             </div>
