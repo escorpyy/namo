@@ -1,73 +1,32 @@
 import { useEffect, useState } from "react";
 import {
-  BarChart3,
-  BookOpen,
-  BookText,
-  Boxes,
-  Building2,
-  CalendarRange,
-  ChevronDown,
-  ChevronRight,
-  ClipboardList,
-  Database,
-  FileBarChart2,
-  FileText,
-  FolderTree,
-  Hash,
-  KeyRound,
-  Landmark,
-  Layers,
-  LayoutDashboard,
-  LineChart,
-  Map,
-  MapPin,
-  Network,
-  Package,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Receipt,
-  Ruler,
-  Scale,
-  Settings,
-  ShoppingCart,
-  SlidersHorizontal,
-  Tag,
-  TrendingUp,
-  UserCheck,
-  UserCog,
-  UserSquare,
-  Users,
-  Warehouse,
-  Wrench,
-} from "lucide-react";
-import { MASTERS } from "../../shared/masters";
+    BarChart3, BookOpen, BookText, Boxes, Building2, CalendarRange, ChevronDown, ChevronRight,
+    ClipboardList, Database, FileBarChart2, FileText, FolderTree, Hash, KeyRound, Landmark,
+    Layers, LayoutDashboard, LineChart, Map, MapPin, Network, Package, PanelLeftClose,
+    PanelLeftOpen, Receipt, Ruler, Scale, Settings, ShoppingCart, SlidersHorizontal, Tag,
+    TrendingUp, UserCheck, UserCog, UserSquare, Users, Warehouse, Wrench,
+  } from "lucide-react";
+  import { MASTERS } from "../../shared/masters";
 
-// Custom screens that are not driven by the master engine (grids etc.)
-export const CUSTOM_SCREENS = [
-  "opening-balance",
-  "stock-opening",
-  "purchase-orders",
-  "purchase-challans",
-  "purchase-bills",
-  "purchase-import-assessments",
-  "code-numbering",
-];
+  // Custom screens that are not driven by the master engine (grids etc.)
+  export const CUSTOM_SCREENS = [
+    "opening-balance",
+    "stock-opening",
+    "purchase-orders",
+    "purchase-challans",
+    "purchase-bills",
+    "purchase-import-assessments",
+    "code-numbering",
+  ];
 
 type Item = { id: string; label: string };
-type Section = {
-  id: string;
-  label: string;
-  icon: React.ElementType;
-  items: Item[];
-};
+type Section = { id: string; label: string; icon: React.ElementType; items: Item[] };
 
 // An item is "ready" if its id exists in shared/masters.ts or CUSTOM_SCREENS; everything else shows "not built yet".
 // Each feature appears exactly once. Where the same thing existed in two groups, the copy that fits best was kept.
 const sections: Section[] = [
   {
-    id: "master",
-    label: "Master",
-    icon: Database,
+    id: "master", label: "Master", icon: Database,
     items: [
       { id: "account-groups", label: "Account Group Master" },
       { id: "account-sub-groups", label: "Account Sub-Group Master" },
@@ -82,7 +41,6 @@ const sections: Section[] = [
       { id: "product-groups", label: "Product Group Master" },
       { id: "product-sub-groups", label: "Product Sub-Group Master" },
       { id: "product-units", label: "Unit Master" },
-      { id: "tax-rates", label: "Tax Rate Master" },
       { id: "stock-categories", label: "Stock Category Master" },
       { id: "locations", label: "Location Master" },
       { id: "purchase-terms", label: "Purchase Bill Terms Master" },
@@ -92,25 +50,21 @@ const sections: Section[] = [
     ],
   },
   {
-    id: "transactions",
-    label: "Transactions",
-    icon: Receipt,
+    id: "transactions", label: "Transactions", icon: Receipt,
     items: [
       { id: "cash-bank", label: "Cash / Bank Voucher" },
       { id: "journal", label: "Journal Voucher" },
       { id: "purchase-orders", label: "Purchase Order" },
       { id: "purchase-challans", label: "Purchase Challan" },
       { id: "purchase-bills", label: "Purchase Bill" },
-      { id: "purchase-import-assessments", label: "Import Cost Assessment" },
+      { id: "purchase-import-assessments", label: "Cost Assessment" },
       { id: "sales", label: "Sales" },
       { id: "debit-note", label: "Debit Note" },
       { id: "credit-note", label: "Credit Note" },
     ],
   },
   {
-    id: "inventory",
-    label: "Inventory",
-    icon: Package,
+    id: "inventory", label: "Inventory", icon: Package,
     items: [
       { id: "stock-receipt", label: "Stock Receipt" },
       { id: "stock-issue", label: "Stock Issue" },
@@ -123,9 +77,7 @@ const sections: Section[] = [
     ],
   },
   {
-    id: "reports",
-    label: "Reports",
-    icon: FileBarChart2,
+    id: "reports", label: "Reports", icon: FileBarChart2,
     items: [
       { id: "rpt-cash", label: "Cash Reports" },
       { id: "rpt-bank", label: "Bank Reports" },
@@ -140,9 +92,7 @@ const sections: Section[] = [
     ],
   },
   {
-    id: "inventory-reports",
-    label: "Inventory Reports",
-    icon: FileBarChart2,
+    id: "inventory-reports", label: "Inventory Reports", icon: FileBarChart2,
     items: [
       { id: "inv-stock-ledger", label: "Stock Ledger" },
       { id: "inv-stock-summary", label: "Stock Summary" },
@@ -154,26 +104,19 @@ const sections: Section[] = [
     ],
   },
   {
-    id: "financial-statements",
-    label: "FS — Financial Statements",
-    icon: Landmark,
+    id: "financial-statements", label: "FS — Financial Statements", icon: Landmark,
     items: [
       { id: "fs-ledgers", label: "Ledgers" },
       { id: "fs-trial-balance", label: "Trial Balance" },
       { id: "fs-income-statement", label: "Income Statement" },
       { id: "fs-balance-sheet", label: "Balance Sheet" },
       { id: "fs-cash-flow", label: "Cash Flow Statement" },
-      {
-        id: "fs-owners-equity",
-        label: "Statement of Changes in Owner's Equity",
-      },
+      { id: "fs-owners-equity", label: "Statement of Changes in Owner's Equity" },
     ],
   },
   {
     // Working Capital, Ratios, Budget and Profitability live in FM Analysis; not repeated here.
-    id: "analysis",
-    label: "Analysis",
-    icon: LineChart,
+    id: "analysis", label: "Analysis", icon: LineChart,
     items: [
       { id: "dashboard", label: "Dashboard" },
       { id: "an-sales", label: "Sales Analysis" },
@@ -183,9 +126,7 @@ const sections: Section[] = [
     ],
   },
   {
-    id: "fm-analysis",
-    label: "FM Analysis",
-    icon: TrendingUp,
+    id: "fm-analysis", label: "FM Analysis", icon: TrendingUp,
     items: [
       { id: "fm-financial-dashboard", label: "Financial Dashboard" },
       { id: "fm-financial-performance", label: "Financial Performance" },
@@ -208,9 +149,7 @@ const sections: Section[] = [
     ],
   },
   {
-    id: "housekeep",
-    label: "Housekeep",
-    icon: Wrench,
+    id: "housekeep", label: "Housekeep", icon: Wrench,
     items: [
       { id: "hk-data-maintenance", label: "Data Maintenance" },
       { id: "hk-period-management", label: "Period Management" },
@@ -222,12 +161,11 @@ const sections: Section[] = [
   },
   {
     // Financial Year and Chart of Accounts are not repeated here: they are Fiscal Year / Account masters above.
-    id: "setup",
-    label: "Setup",
-    icon: SlidersHorizontal,
+    id: "setup", label: "Setup", icon: SlidersHorizontal,
     items: [
       { id: "companies", label: "Company" },
       { id: "branches", label: "Branch" },
+      { id: "code-numbering", label: "Code Numbering" },
       { id: "setup-accounting", label: "Accounting" },
       { id: "setup-tax", label: "Tax" },
       { id: "setup-voucher-configuration", label: "Voucher Configuration" },
@@ -235,13 +173,10 @@ const sections: Section[] = [
       { id: "setup-sales-purchase", label: "Sales & Purchase" },
       { id: "setup-receivable-payable", label: "Receivable & Payable" },
       { id: "setup-documents", label: "Document Setup" },
-      { id: "code-numbering", label: "Code Numbering" },
     ],
   },
   {
-    id: "settings",
-    label: "Settings",
-    icon: Settings,
+    id: "settings", label: "Settings", icon: Settings,
     items: [
       { id: "users", label: "Users" },
       { id: "user-access", label: "User Access" },
@@ -257,8 +192,7 @@ const sections: Section[] = [
   },
 ];
 
-const sectionOf = (itemId: string) =>
-  sections.find((s) => s.items.some((i) => i.id === itemId))?.id;
+const sectionOf = (itemId: string) => sections.find((s) => s.items.some((i) => i.id === itemId))?.id;
 
 interface Props {
   collapsed: boolean;
@@ -268,13 +202,7 @@ interface Props {
   onNotify: (msg: string) => void;
 }
 
-export function Sidebar({
-  collapsed,
-  active,
-  onToggle,
-  onNavigate,
-  onNotify,
-}: Props) {
+export function Sidebar({ collapsed, active, onToggle, onNavigate, onNotify }: Props) {
   // With ~11 groups, only the group of the current screen starts open.
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
     const s = sectionOf(active);
@@ -287,22 +215,11 @@ export function Sidebar({
   }, [active]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
-    const btns = Array.from(
-      e.currentTarget.querySelectorAll<HTMLElement>("button[data-sb]"),
-    );
+    const btns = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("button[data-sb]"));
     const i = btns.indexOf(document.activeElement as HTMLElement);
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      btns[Math.min(i + 1, btns.length - 1)]?.focus();
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      btns[Math.max(i - 1, 0)]?.focus();
-    } else if (e.key === "Escape") {
-      e.stopPropagation();
-      document
-        .querySelector<HTMLElement>("[data-zone=form] [data-nav]")
-        ?.focus();
-    }
+    if (e.key === "ArrowDown") { e.preventDefault(); btns[Math.min(i + 1, btns.length - 1)]?.focus(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); btns[Math.max(i - 1, 0)]?.focus(); }
+    else if (e.key === "Escape") { e.stopPropagation(); document.querySelector<HTMLElement>("[data-zone=form] [data-nav]")?.focus(); }
   };
 
   const itemBtn = (it: Item) => {
@@ -310,15 +227,9 @@ export function Sidebar({
     const isActive = it.id === active;
     return (
       <button
-        key={it.id}
-        data-sb
-        title={ready ? undefined : "Not built yet"}
+        key={it.id} data-sb title={ready ? undefined : "Not built yet"}
         aria-current={isActive ? "page" : undefined}
-        onClick={() =>
-          ready
-            ? !isActive && onNavigate(it.id)
-            : onNotify(`${it.label} screen is not built yet`)
-        }
+        onClick={() => (ready ? !isActive && onNavigate(it.id) : onNotify(`${it.label} screen is not built yet`))}
         className={`w-full flex items-center h-8 pl-10 pr-3 text-left hover:bg-white/10 ${isActive ? "bg-blue-700 text-white" : ready ? "text-slate-100" : "text-slate-400"}`}
       >
         <span className="truncate">{it.label}</span>
@@ -331,28 +242,19 @@ export function Sidebar({
     const hasActive = s.items.some((i) => i.id === active);
     // Collapsed rail shows one icon per group; clicking it expands the sidebar with that group open.
     const onClick = () => {
-      if (collapsed) {
-        setOpen((o) => ({ ...o, [s.id]: true }));
-        onToggle();
-      } else setOpen((o) => ({ ...o, [s.id]: !o[s.id] }));
+      if (collapsed) { setOpen((o) => ({ ...o, [s.id]: true })); onToggle(); }
+      else setOpen((o) => ({ ...o, [s.id]: !o[s.id] }));
     };
     return (
       <button
-        data-sb
-        onClick={onClick}
-        title={collapsed ? s.label : undefined}
-        aria-expanded={collapsed ? undefined : !!open[s.id]}
+        data-sb onClick={onClick} title={collapsed ? s.label : undefined} aria-expanded={collapsed ? undefined : !!open[s.id]}
         className={`w-full flex items-center gap-3 h-8 hover:bg-white/10 font-semibold ${collapsed ? "justify-center" : "px-4"} ${hasActive && collapsed ? "bg-blue-700 text-white" : ""}`}
       >
         <Icon size={16} className="shrink-0" />
         {!collapsed && (
           <>
             <span className="flex-1 text-left truncate">{s.label}</span>
-            {open[s.id] ? (
-              <ChevronDown size={14} />
-            ) : (
-              <ChevronRight size={14} />
-            )}
+            {open[s.id] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </>
         )}
       </button>
@@ -360,34 +262,18 @@ export function Sidebar({
   };
 
   return (
-    <aside
-      data-zone="sidebar"
-      onKeyDown={onKeyDown}
-      className={`${collapsed ? "w-[52px]" : "w-[240px]"} shrink-0 bg-slate-700 text-slate-100 flex flex-col transition-[width] duration-100`}
-    >
+    <aside data-zone="sidebar" onKeyDown={onKeyDown} className={`${collapsed ? "w-[52px]" : "w-[240px]"} shrink-0 bg-slate-700 text-slate-100 flex flex-col transition-[width] duration-100`}>
       <nav className="flex-1 overflow-y-auto py-1">
         {sections.map((s) => (
-          <div
-            key={s.id}
-            className="border-t border-white/10 first:border-t-0 mt-1 first:mt-0 pt-1 first:pt-0"
-          >
+          <div key={s.id} className="border-t border-white/10 first:border-t-0 mt-1 first:mt-0 pt-1 first:pt-0">
             {groupBtn(s)}
             {!collapsed && open[s.id] && s.items.map(itemBtn)}
           </div>
         ))}
       </nav>
-      <button
-        onClick={onToggle}
-        title="Toggle sidebar (Ctrl+B)"
-        className="h-10 border-t border-white/10 flex items-center gap-2 px-4 hover:bg-white/10 text-[12px]"
-      >
+      <button onClick={onToggle} title="Toggle sidebar (Ctrl+B)" className="h-10 border-t border-white/10 flex items-center gap-2 px-4 hover:bg-white/10 text-[12px]">
         {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-        {!collapsed && (
-          <>
-            <span className="flex-1 text-left">Collapse Sidebar</span>
-            <span className="kbd">Ctrl+B</span>
-          </>
-        )}
+        {!collapsed && (<><span className="flex-1 text-left">Collapse Sidebar</span><span className="kbd">Ctrl+B</span></>)}
       </button>
     </aside>
   );

@@ -305,11 +305,7 @@ export function purchaseLookups(companyId: number) {
     const [ledgers, subs, agents, products, alts, locations, terms, years, units] = await Promise.all([
       tx.select({ id: S.generalLedger.id, code: S.generalLedger.code, name: S.generalLedger.name, requiresSubLedger: S.generalLedger.requiresSubLedger, isActive: S.generalLedger.isActive,
         // the supplier's payment term days (Party master), used to default a bill's due days
-<<<<<<< Updated upstream
         paymentTermDays: sql<number | null>`(select vd."paymentTermDays" from "Party" p inner join "VendorDetail" vd on vd."partyId" = p.id where p."generalLedgerId" = "GeneralLedger"."id")`.as("paymentTermDays"),
-=======
-        paymentTermDays: sql<number | null>`(select vd."paymentTermDays" from "Party" p inner join "VendorDetail" vd on vd."partyId" = p.id where p."generalLedgerId" = "GeneralLedger"."id")`,
->>>>>>> Stashed changes
       }).from(S.generalLedger).where(eq(S.generalLedger.companyId, companyId)).orderBy(asc(S.generalLedger.code)),
       tx.select({ id: S.subLedger.id, code: S.subLedger.code, name: S.subLedger.name, generalLedgerId: S.subLedger.generalLedgerId, isActive: S.subLedger.isActive }).from(S.subLedger).innerJoin(S.generalLedger, eq(S.generalLedger.id, S.subLedger.generalLedgerId)).where(eq(S.generalLedger.companyId, companyId)).orderBy(asc(S.subLedger.code)),
       tx.select({ id: S.agent.id, code: S.agent.code, name: S.agent.name, isActive: S.agent.isActive }).from(S.agent).where(eq(S.agent.companyId, companyId)).orderBy(asc(S.agent.code)),
