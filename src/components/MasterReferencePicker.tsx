@@ -1,5 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ChevronDown, Search, SlidersHorizontal, X } from "lucide-react";
+import { announceMasterChanged } from "../lib/masterEvents";
+import { useDialog } from "./Dialog";
+import { useQuickCreate, type CreateMasterSpec } from "./quickCreateContext";
 
 export interface ReferenceOption {
   value: string;
@@ -33,6 +36,8 @@ interface Props {
   required?: boolean;
   /** Advanced override. By default the field is clearable exactly when it is not `required`. */
   allowClear?: boolean;
+  /** Ctrl+M: create a record of this master without leaving the screen (its New form opens in a dialog), then select it here. */
+  createMaster?: CreateMasterSpec;
 }
 
 // The empty choice offered on optional fields.
@@ -59,7 +64,7 @@ const readHistory = (key: string): PickerHistory => {
   }
 };
 
-export function MasterReferencePicker({ fieldName, label, value, options, onChange, onCommit, onBlurField, placeholder, hasError, disabled, scopeKey, contextKey = "global", required = false, allowClear }: Props) {
+export function MasterReferencePicker({ fieldName, label, value, options, onChange, onCommit, onBlurField, placeholder, hasError, disabled, scopeKey, contextKey = "global", required = false, allowClear, createMaster }: Props) {
   const clearable = allowClear ?? !required;
   const uid = useId().replace(/:/g, "");
   const dialogId = `master-picker-${uid}`;
@@ -85,6 +90,13 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
   const navigated = useRef(false);
   const current = value === "" ? undefined : options.find((option) => option.value === value);
   const hasInactive = options.some((option) => option.isActive === false);
+  const quickCreate = useQuickCreate();
+  const dlg = useDialog();
+  const creating = useRef(false);
+  // The newest props, for code that runs after an await (the parent re-renders with the new record in its lists before it is used).
+  const latest = useRef({ onChange, onCommit });
+  latest.current = { onChange, onCommit };
+  const canCreate = !!createMaster && !!quickCreate && !disabled;
 
   const filtered = useMemo(() => {
     const q = textOf(query);
@@ -143,6 +155,17 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
     if (restoreFocus) refocusTrigger();
   };
 
+  // The "Recent" / "Often used" views learn from every choice.
+  const remember = (picked: string) => {
+    const history = readHistory(recentKey);
+    const nextRecents = [picked, ...history.recent.filter((id) => id !== picked)].slice(0, RECENT_LIMIT);
+    const updatedCounts = { ...history.counts, [picked]: (history.counts[picked] ?? 0) + 1 };
+    const nextCounts = Object.fromEntries(Object.entries(updatedCounts).sort((a, b) => b[1] - a[1]).slice(0, 50));
+    try { localStorage.setItem(recentKey, JSON.stringify({ recent: nextRecents, counts: nextCounts })); } catch { /* storage can be unavailable in private browsing */ }
+    setRecents(nextRecents);
+    setUsageCounts(nextCounts);
+  };
+
   const choose = (option: ReferenceOption, direction: 1 | -1 = 1) => {
     if (option.value === "") {
       // "None": only offered on optional fields.
@@ -150,13 +173,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
       if (value !== "") onChange("");
     } else {
       if (option.value !== value) onChange(option.value);
-      const history = readHistory(recentKey);
-      const nextRecents = [option.value, ...history.recent.filter((id) => id !== option.value)].slice(0, RECENT_LIMIT);
-      const updatedCounts = { ...history.counts, [option.value]: (history.counts[option.value] ?? 0) + 1 };
-      const nextCounts = Object.fromEntries(Object.entries(updatedCounts).sort((a, b) => b[1] - a[1]).slice(0, 50));
-      try { localStorage.setItem(recentKey, JSON.stringify({ recent: nextRecents, counts: nextCounts })); } catch { /* storage can be unavailable in private browsing */ }
-      setRecents(nextRecents);
-      setUsageCounts(nextCounts);
+      remember(option.value);
     }
     setOpen(false);
     refocusTrigger((el) => onCommit?.(el, direction));
@@ -168,6 +185,34 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
     if (value !== "") onChange("");
     setOpen(false);
     refocusTrigger((el) => onCommit?.(el, direction));
+  };
+
+  // Ctrl+M: the master's New form opens on top; the saved record is selected here and the cursor moves on, as after any choice.
+  const startCreate = async (typed = "") => {
+    if (!createMaster || !quickCreate || disabled || creating.current) return;
+    creating.current = true;
+    const fromList = open;
+    try {
+      const row = await quickCreate({ key: createMaster.key, name: typed.trim(), defaults: createMaster.defaults });
+      if (!row) {
+        // cancelled: back to where the user was
+        if (fromList) requestAnimationFrame(() => searchRef.current?.focus());
+        else refocusTrigger();
+        return;
+      }
+      await announceMasterChanged(createMaster.key); // every list that feeds this field now holds the new record
+      const picked = createMaster.valueFrom ? createMaster.valueFrom(row) : String(row.id);
+      latest.current.onChange(picked);
+      remember(picked);
+      setOpen(false);
+      refocusTrigger((el) => latest.current.onCommit?.(el, 1));
+    } catch (e) {
+      void dlg.error((e as Error).message, { title: `${label} was created, but the list could not be refreshed` });
+      setOpen(false);
+      refocusTrigger();
+    } finally {
+      creating.current = false;
+    }
   };
 
   useEffect(() => {
@@ -211,6 +256,11 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
       event.preventDefault();
       event.stopPropagation();
       closeDialog();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "m" && createMaster) {
+      event.preventDefault();
+      if (canCreate) void startCreate(query.trim() || findName.trim());
       return;
     }
     if (event.key === "Tab") {
@@ -265,6 +315,13 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
             onBlurField?.();
           }}
           onKeyDown={(event) => {
+            // Ctrl+M = create the record this field refers to, without leaving the screen.
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "m" && createMaster) {
+              event.preventDefault();
+              event.stopPropagation();
+              if (canCreate) void startCreate();
+              return;
+            }
             // Enter / Shift+Enter = next / previous field (keyboard-first form flow).
             if (event.key === "Enter") {
               event.preventDefault();
@@ -440,6 +497,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
                 <div className="px-5 py-10 text-center" role="status">
                   <p className="font-medium text-slate-800">No {label.toLocaleLowerCase()} match those filters.</p>
                   <p className="mt-1 text-sm text-slate-600">{view === "frequent" ? "A record appears here after you select it at least twice." : "Try a shorter search, clear Find filters, or include inactive records."}</p>
+                  {canCreate && <button type="button" className="btn btn-primary mr-2 mt-3 h-8" onClick={() => void startCreate(query.trim() || findName.trim())}>+ New {label}{(query.trim() || findName.trim()) ? ` “${query.trim() || findName.trim()}”` : ""} <span className="kbd">Ctrl+M</span></button>}
                   <button type="button" className="btn mt-3 h-8" onClick={clearFilters}>Clear search and filters</button>
                 </div>
               )}
@@ -448,6 +506,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
             <footer className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-3 py-3">
               <p className="text-xs text-slate-600">Search is ready on open. Press <kbd className="kbd">Alt+↓</kbd> on the field to open.</p>
               <div className="flex gap-2">
+                {canCreate && <button type="button" className="btn h-9" title={`Create a new ${label} without leaving this screen`} onClick={() => void startCreate(query.trim() || findName.trim())}>+ New <span className="kbd">Ctrl+M</span></button>}
                 <button type="button" className="btn h-9" onClick={() => closeDialog()}>Cancel</button>
                 <button type="button" className="btn btn-primary h-9" disabled={!activeOption} onClick={() => selectActive()}>Select{activeOption ? `: ${activeOption.code ?? activeOption.short ?? activeOption.label}` : ""}</button>
               </div>

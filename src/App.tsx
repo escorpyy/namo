@@ -5,6 +5,7 @@ import { useDialog } from "./components/Dialog";
 import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
+import { QuickCreateHost } from "./components/QuickCreate";
 import MasterScreen from "./screens/MasterScreen";
 import CodeNumberingScreen from "./screens/CodeNumberingScreen";
 import NumberSeriesScreen from "./screens/NumberSeriesScreen";
@@ -117,6 +118,7 @@ export default function App() {
   };
 
   return (
+    <QuickCreateHost companyId={companyId} calendar={calendar}>
     <div className="h-full flex flex-col">
       <Header
         companies={ctx.companies} companyId={companyId} branchId={branchId} fyId={fyId} userName={ctx.user.name} calendar={calendar}
@@ -162,5 +164,6 @@ export default function App() {
         fy={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
       />
     </div>
+    </QuickCreateHost>
   );
 }

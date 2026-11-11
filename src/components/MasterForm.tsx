@@ -1,6 +1,6 @@
 import { Fragment, useRef } from "react";
 import { FilePlus, Pencil, Save, Trash2, X } from "lucide-react";
-import type { FieldDef, MasterDef, Opt } from "../../shared/masters";
+import { MASTERS, type FieldDef, type MasterDef, type Opt } from "../../shared/masters";
 import { parseLines, tabsOf, visible, isRequired, cleanLines, type Errors, type FormState, type Row } from "../lib/form";
 import type { Mode } from "../types";
 import { Combobox } from "./Combobox";
@@ -28,14 +28,19 @@ interface Props {
   onTab: (t: string) => void;
   /** a small note under a field (the code field says where its suggestion came from) */
   hints?: Record<string, string>;
+  /** What the Esc button of a New form is called (a Ctrl+M dialog calls it "Cancel"). */
+  clearLabel?: string;
   actions: { save: () => void; clear: () => void; edit: () => void; del: () => void; newRec: () => void; cancel: () => void };
 }
 
 const fmt = (iso: string | undefined) => (iso ? new Date(iso).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "—");
 const Err = ({ msg }: { msg?: string }) => (msg ? <p role="alert" className="mt-0.5 text-[12px] text-red-700">{msg}</p> : null);
 const Kbd = ({ k }: { k: string }) => <span className="kbd">{k}</span>;
+// A lookup filtered to one value (the Sub Ledger form's General Ledger: only "Requires Sub Ledger" ones) pre-fills that value when Ctrl+M creates a record for it.
+const whereDefaults = (w: FieldDef["lookupWhere"]): Record<string, string | boolean> | undefined =>
+  w && (typeof w.value === "string" || typeof w.value === "boolean") ? { [w.field]: w.value } : undefined;
 
-export function MasterForm({ def, companyId, mode, form, setForm, errors, onBlurField, selected, dirty, saving, lookups, calendar, tab, onTab, actions, hints }: Props) {
+export function MasterForm({ def, companyId, mode, form, setForm, errors, onBlurField, selected, dirty, saving, lookups, calendar, tab, onTab, actions, hints, clearLabel }: Props) {
   const formRef = useRef<HTMLDivElement>(null);
   const editable = mode !== "view";
   const two = def.cols === 2;
@@ -88,6 +93,7 @@ export function MasterForm({ def, companyId, mode, form, setForm, errors, onBlur
           placeholder={f.placeholder ?? (isRequired(f, form) ? "Choose…" : "Optional")}
           value={String(form[f.name])} hasError={!!err} options={lookups[f.name] ?? []} required={isRequired(f, form)}
           onChange={(v) => set(f.name, v)} onCommit={(el) => moveFocus(el, 1)} onBlurField={() => onBlurField(f.name)} disabled={!editable || (f.lockOnEdit && mode === "edit")}
+          createMaster={f.lookupScope === "record" || !MASTERS[f.lookup!] || MASTERS[f.lookup!].refreshContext ? undefined : { key: f.lookup!, defaults: whereDefaults(f.lookupWhere) }}
         />
       );
     if (f.type === "select")
@@ -218,7 +224,7 @@ export function MasterForm({ def, companyId, mode, form, setForm, errors, onBlur
       <div className="px-5 py-3 border-t border-slate-300 flex gap-2">
         {mode === "new" && (<>
           <button data-nav className="btn btn-primary" disabled={saving} onClick={actions.save}><Save size={14} /> Save <Kbd k="Ctrl+S" /></button>
-          <button className="btn" onClick={actions.clear}><X size={14} /> Clear <Kbd k="Esc" /></button>
+          <button className="btn" onClick={actions.clear}><X size={14} /> {clearLabel ?? "Clear"} <Kbd k="Esc" /></button>
         </>)}
         {mode === "edit" && (<>
           <button data-nav className="btn btn-primary" disabled={saving} onClick={actions.save}><Save size={14} /> Update <Kbd k="Ctrl+S" /></button>

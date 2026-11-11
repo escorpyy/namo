@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { ApiError, purchaseApi, type PDoc, type PListRow, type PLookups, type PurchaseKind } from "../../api";
 import { useDialog, type DialogSpec } from "../../components/Dialog";
+import { useOnMasterChanged } from "../../lib/masterEvents";
 import type { Mode, MsgKind, StatusInfo } from "../../types";
 
 // The behaviour every purchase document screen shares: the list on the right, the selected document, new / view / edit, the
@@ -57,7 +59,9 @@ export interface ActionSpec {
 export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extra: { setStatus: (s: StatusInfo) => void; dirtyRef: MutableRefObject<boolean>; externalMessage: { text: string; n: number } | null; hints: string[] } & DocTabOptions<F>) {
   const { kind } = cfg;
   const skipList = !!extra.skipList;
-  const [lookups, setLookups] = useState<PLookups | null>(extra.sharedLookups ?? null);
+  // The tabs of the bill workspace share the workspace's lookups (it reloads them); every other screen owns its own.
+  const [ownLookups, setLookups] = useState<PLookups | null>(null);
+  const lookups = extra.sharedLookups ?? ownLookups;
   const [rows, setRows] = useState<PListRow[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
@@ -137,6 +141,11 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
   }, [ctx.companyId]);
 
   useEffect(() => { extra.dirtyRef.current = dirty; });
+  // A master record made with Ctrl+M on one of the pickers: reload the pick-lists so it is in them before the field is set.
+  useOnMasterChanged(async () => {
+    const l = await purchaseApi.lookups(ctx.companyId);
+    flushSync(() => setLookups(l));
+  }, !extra.sharedLookups);
   useEffect(() => { if (extra.snapshotRef && form) extra.snapshotRef.current = { doc, mode, form, baseSig, selectedId }; });
   useEffect(() => { if (extra.externalMessage) flash(extra.externalMessage.text, "info"); }, [extra.externalMessage, flash]);
   useEffect(() => extra.setStatus({ mode, count: total, shown: rows.length, message: msg.text, kind: msg.kind, hints: extra.hints }), [mode, total, rows.length, msg, extra.hints, extra.setStatus]);

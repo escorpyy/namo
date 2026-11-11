@@ -241,6 +241,7 @@ export const COMMON_HELP: [string, string][] = [
   ["Enter / Shift+Enter", "Next / previous field (skips disabled controls; last cell adds a line or term)"],
   ["Space / ↓ / F4", "Open a lookup or combobox list (Enter never opens it)"],
   ["Backspace / Delete", "Clear an optional lookup or combobox value"],
+  ["Ctrl+M (on a lookup)", "Create the vendor, product, unit… the field refers to, without leaving the document; it is selected once saved"],
   ["Tab / Shift+Tab", "Navigate every control, including row actions"],
   ["Ctrl+Enter / Ctrl+Shift+Enter", "Next / previous field from a multi-line field"],
   ["Ctrl+S", "Save / Update"],

@@ -16,6 +16,7 @@ const rows: [string, string][] = [
   ["Ctrl+D", "Fill down: upar wali cell / row copy karo"],
   ["A L E R X", "Quick-pick Type in the combobox"],
   ["Alt+↓ / Enter", "Open a master reference picker"],
+  ["Ctrl+M (reference field)", "Us field ka master wahin create karo (Vendor, Product, Unit…) — save karte hi field me select ho jata hai"],
   ["Picker: ↑ / ↓, Enter, Esc", "Move / select / close"],
   ["F1 / ?", "This help"],
 ];

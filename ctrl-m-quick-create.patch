@@ -1,0 +1,796 @@
+From 2edea6180380ffeaaf63ef0bdb2d3133ca8010db Mon Sep 17 00:00:00 2001
+From: dev <dev@example.com>
+Date: Wed, 11 Nov 2026 09:09:31 +0000
+Subject: [PATCH] Ctrl+M on a reference field: create the master in a dialog
+ and select it, without leaving the screen
+
+---
+ src/App.tsx                                   |   3 +
+ src/components/MasterForm.tsx                 |  12 +-
+ src/components/MasterReferencePicker.tsx      |  75 +++++-
+ src/components/QuickCreate.tsx                | 233 ++++++++++++++++++
+ src/components/ShortcutsOverlay.tsx           |   1 +
+ src/components/purchase/Bits.tsx              |   1 +
+ src/components/purchase/HeadFields.tsx        |  12 +-
+ src/components/purchase/LinesGrid.tsx         |   8 +-
+ src/components/quickCreateContext.ts          |  24 ++
+ src/lib/masterEvents.ts                       |  24 ++
+ src/lib/masterLookups.ts                      |  37 +++
+ src/screens/MasterScreen.tsx                  |   9 +
+ .../purchase/PurchaseBillWorkspace.tsx        |   7 +
+ src/screens/purchase/useDocScreen.tsx         |  11 +-
+ 14 files changed, 438 insertions(+), 19 deletions(-)
+ create mode 100644 src/components/QuickCreate.tsx
+ create mode 100644 src/components/quickCreateContext.ts
+ create mode 100644 src/lib/masterEvents.ts
+ create mode 100644 src/lib/masterLookups.ts
+
+diff --git a/src/App.tsx b/src/App.tsx
+index e6e2320..23cb30a 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -5,6 +5,7 @@ import { useDialog } from "./components/Dialog";
+ import { Header } from "./components/Header";
+ import { Sidebar } from "./components/Sidebar";
+ import { StatusBar } from "./components/StatusBar";
++import { QuickCreateHost } from "./components/QuickCreate";
+ import MasterScreen from "./screens/MasterScreen";
+ import CodeNumberingScreen from "./screens/CodeNumberingScreen";
+ import NumberSeriesScreen from "./screens/NumberSeriesScreen";
+@@ -117,6 +118,7 @@ export default function App() {
+   };
+ 
+   return (
++    <QuickCreateHost companyId={companyId} calendar={calendar}>
+     <div className="h-full flex flex-col">
+       <Header
+         companies={ctx.companies} companyId={companyId} branchId={branchId} fyId={fyId} userName={ctx.user.name} calendar={calendar}
+@@ -162,5 +164,6 @@ export default function App() {
+         fy={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
+       />
+     </div>
++    </QuickCreateHost>
+   );
+ }
+diff --git a/src/components/MasterForm.tsx b/src/components/MasterForm.tsx
+index 4e4f4d1..b326365 100644
+--- a/src/components/MasterForm.tsx
++++ b/src/components/MasterForm.tsx
+@@ -1,6 +1,6 @@
+ import { Fragment, useRef } from "react";
+ import { FilePlus, Pencil, Save, Trash2, X } from "lucide-react";
+-import type { FieldDef, MasterDef, Opt } from "../../shared/masters";
++import { MASTERS, type FieldDef, type MasterDef, type Opt } from "../../shared/masters";
+ import { parseLines, tabsOf, visible, isRequired, cleanLines, type Errors, type FormState, type Row } from "../lib/form";
+ import type { Mode } from "../types";
+ import { Combobox } from "./Combobox";
+@@ -28,14 +28,19 @@ interface Props {
+   onTab: (t: string) => void;
+   /** a small note under a field (the code field says where its suggestion came from) */
+   hints?: Record<string, string>;
++  /** What the Esc button of a New form is called (a Ctrl+M dialog calls it "Cancel"). */
++  clearLabel?: string;
+   actions: { save: () => void; clear: () => void; edit: () => void; del: () => void; newRec: () => void; cancel: () => void };
+ }
+ 
+ const fmt = (iso: string | undefined) => (iso ? new Date(iso).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "—");
+ const Err = ({ msg }: { msg?: string }) => (msg ? <p role="alert" className="mt-0.5 text-[12px] text-red-700">{msg}</p> : null);
+ const Kbd = ({ k }: { k: string }) => <span className="kbd">{k}</span>;
++// A lookup filtered to one value (the Sub Ledger form's General Ledger: only "Requires Sub Ledger" ones) pre-fills that value when Ctrl+M creates a record for it.
++const whereDefaults = (w: FieldDef["lookupWhere"]): Record<string, string | boolean> | undefined =>
++  w && (typeof w.value === "string" || typeof w.value === "boolean") ? { [w.field]: w.value } : undefined;
+ 
+-export function MasterForm({ def, companyId, mode, form, setForm, errors, onBlurField, selected, dirty, saving, lookups, calendar, tab, onTab, actions, hints }: Props) {
++export function MasterForm({ def, companyId, mode, form, setForm, errors, onBlurField, selected, dirty, saving, lookups, calendar, tab, onTab, actions, hints, clearLabel }: Props) {
+   const formRef = useRef<HTMLDivElement>(null);
+   const editable = mode !== "view";
+   const two = def.cols === 2;
+@@ -88,6 +93,7 @@ export function MasterForm({ def, companyId, mode, form, setForm, errors, onBlur
+           placeholder={f.placeholder ?? (isRequired(f, form) ? "Choose…" : "Optional")}
+           value={String(form[f.name])} hasError={!!err} options={lookups[f.name] ?? []} required={isRequired(f, form)}
+           onChange={(v) => set(f.name, v)} onCommit={(el) => moveFocus(el, 1)} onBlurField={() => onBlurField(f.name)} disabled={!editable || (f.lockOnEdit && mode === "edit")}
++          createMaster={f.lookupScope === "record" || !MASTERS[f.lookup!] || MASTERS[f.lookup!].refreshContext ? undefined : { key: f.lookup!, defaults: whereDefaults(f.lookupWhere) }}
+         />
+       );
+     if (f.type === "select")
+@@ -218,7 +224,7 @@ export function MasterForm({ def, companyId, mode, form, setForm, errors, onBlur
+       <div className="px-5 py-3 border-t border-slate-300 flex gap-2">
+         {mode === "new" && (<>
+           <button data-nav className="btn btn-primary" disabled={saving} onClick={actions.save}><Save size={14} /> Save <Kbd k="Ctrl+S" /></button>
+-          <button className="btn" onClick={actions.clear}><X size={14} /> Clear <Kbd k="Esc" /></button>
++          <button className="btn" onClick={actions.clear}><X size={14} /> {clearLabel ?? "Clear"} <Kbd k="Esc" /></button>
+         </>)}
+         {mode === "edit" && (<>
+           <button data-nav className="btn btn-primary" disabled={saving} onClick={actions.save}><Save size={14} /> Update <Kbd k="Ctrl+S" /></button>
+diff --git a/src/components/MasterReferencePicker.tsx b/src/components/MasterReferencePicker.tsx
+index 6548ed9..20b0728 100644
+--- a/src/components/MasterReferencePicker.tsx
++++ b/src/components/MasterReferencePicker.tsx
+@@ -1,5 +1,8 @@
+ import { useEffect, useId, useMemo, useRef, useState } from "react";
+ import { ChevronDown, Search, SlidersHorizontal, X } from "lucide-react";
++import { announceMasterChanged } from "../lib/masterEvents";
++import { useDialog } from "./Dialog";
++import { useQuickCreate, type CreateMasterSpec } from "./quickCreateContext";
+ 
+ export interface ReferenceOption {
+   value: string;
+@@ -33,6 +36,8 @@ interface Props {
+   required?: boolean;
+   /** Advanced override. By default the field is clearable exactly when it is not `required`. */
+   allowClear?: boolean;
++  /** Ctrl+M: create a record of this master without leaving the screen (its New form opens in a dialog), then select it here. */
++  createMaster?: CreateMasterSpec;
+ }
+ 
+ // The empty choice offered on optional fields.
+@@ -59,7 +64,7 @@ const readHistory = (key: string): PickerHistory => {
+   }
+ };
+ 
+-export function MasterReferencePicker({ fieldName, label, value, options, onChange, onCommit, onBlurField, placeholder, hasError, disabled, scopeKey, contextKey = "global", required = false, allowClear }: Props) {
++export function MasterReferencePicker({ fieldName, label, value, options, onChange, onCommit, onBlurField, placeholder, hasError, disabled, scopeKey, contextKey = "global", required = false, allowClear, createMaster }: Props) {
+   const clearable = allowClear ?? !required;
+   const uid = useId().replace(/:/g, "");
+   const dialogId = `master-picker-${uid}`;
+@@ -85,6 +90,13 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+   const navigated = useRef(false);
+   const current = value === "" ? undefined : options.find((option) => option.value === value);
+   const hasInactive = options.some((option) => option.isActive === false);
++  const quickCreate = useQuickCreate();
++  const dlg = useDialog();
++  const creating = useRef(false);
++  // The newest props, for code that runs after an await (the parent re-renders with the new record in its lists before it is used).
++  const latest = useRef({ onChange, onCommit });
++  latest.current = { onChange, onCommit };
++  const canCreate = !!createMaster && !!quickCreate && !disabled;
+ 
+   const filtered = useMemo(() => {
+     const q = textOf(query);
+@@ -143,6 +155,17 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+     if (restoreFocus) refocusTrigger();
+   };
+ 
++  // The "Recent" / "Often used" views learn from every choice.
++  const remember = (picked: string) => {
++    const history = readHistory(recentKey);
++    const nextRecents = [picked, ...history.recent.filter((id) => id !== picked)].slice(0, RECENT_LIMIT);
++    const updatedCounts = { ...history.counts, [picked]: (history.counts[picked] ?? 0) + 1 };
++    const nextCounts = Object.fromEntries(Object.entries(updatedCounts).sort((a, b) => b[1] - a[1]).slice(0, 50));
++    try { localStorage.setItem(recentKey, JSON.stringify({ recent: nextRecents, counts: nextCounts })); } catch { /* storage can be unavailable in private browsing */ }
++    setRecents(nextRecents);
++    setUsageCounts(nextCounts);
++  };
++
+   const choose = (option: ReferenceOption, direction: 1 | -1 = 1) => {
+     if (option.value === "") {
+       // "None": only offered on optional fields.
+@@ -150,13 +173,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+       if (value !== "") onChange("");
+     } else {
+       if (option.value !== value) onChange(option.value);
+-      const history = readHistory(recentKey);
+-      const nextRecents = [option.value, ...history.recent.filter((id) => id !== option.value)].slice(0, RECENT_LIMIT);
+-      const updatedCounts = { ...history.counts, [option.value]: (history.counts[option.value] ?? 0) + 1 };
+-      const nextCounts = Object.fromEntries(Object.entries(updatedCounts).sort((a, b) => b[1] - a[1]).slice(0, 50));
+-      try { localStorage.setItem(recentKey, JSON.stringify({ recent: nextRecents, counts: nextCounts })); } catch { /* storage can be unavailable in private browsing */ }
+-      setRecents(nextRecents);
+-      setUsageCounts(nextCounts);
++      remember(option.value);
+     }
+     setOpen(false);
+     refocusTrigger((el) => onCommit?.(el, direction));
+@@ -170,6 +187,34 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+     refocusTrigger((el) => onCommit?.(el, direction));
+   };
+ 
++  // Ctrl+M: the master's New form opens on top; the saved record is selected here and the cursor moves on, as after any choice.
++  const startCreate = async (typed = "") => {
++    if (!createMaster || !quickCreate || disabled || creating.current) return;
++    creating.current = true;
++    const fromList = open;
++    try {
++      const row = await quickCreate({ key: createMaster.key, name: typed.trim(), defaults: createMaster.defaults });
++      if (!row) {
++        // cancelled: back to where the user was
++        if (fromList) requestAnimationFrame(() => searchRef.current?.focus());
++        else refocusTrigger();
++        return;
++      }
++      await announceMasterChanged(createMaster.key); // every list that feeds this field now holds the new record
++      const picked = createMaster.valueFrom ? createMaster.valueFrom(row) : String(row.id);
++      latest.current.onChange(picked);
++      remember(picked);
++      setOpen(false);
++      refocusTrigger((el) => latest.current.onCommit?.(el, 1));
++    } catch (e) {
++      void dlg.error((e as Error).message, { title: `${label} was created, but the list could not be refreshed` });
++      setOpen(false);
++      refocusTrigger();
++    } finally {
++      creating.current = false;
++    }
++  };
++
+   useEffect(() => {
+     if (!open) return;
+     const previousOverflow = document.body.style.overflow;
+@@ -213,6 +258,11 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+       closeDialog();
+       return;
+     }
++    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "m" && createMaster) {
++      event.preventDefault();
++      if (canCreate) void startCreate(query.trim() || findName.trim());
++      return;
++    }
+     if (event.key === "Tab") {
+       const focusable = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
+         'input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+@@ -265,6 +315,13 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+             onBlurField?.();
+           }}
+           onKeyDown={(event) => {
++            // Ctrl+M = create the record this field refers to, without leaving the screen.
++            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "m" && createMaster) {
++              event.preventDefault();
++              event.stopPropagation();
++              if (canCreate) void startCreate();
++              return;
++            }
+             // Enter / Shift+Enter = next / previous field (keyboard-first form flow).
+             if (event.key === "Enter") {
+               event.preventDefault();
+@@ -440,6 +497,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+                 <div className="px-5 py-10 text-center" role="status">
+                   <p className="font-medium text-slate-800">No {label.toLocaleLowerCase()} match those filters.</p>
+                   <p className="mt-1 text-sm text-slate-600">{view === "frequent" ? "A record appears here after you select it at least twice." : "Try a shorter search, clear Find filters, or include inactive records."}</p>
++                  {canCreate && <button type="button" className="btn btn-primary mr-2 mt-3 h-8" onClick={() => void startCreate(query.trim() || findName.trim())}>+ New {label}{(query.trim() || findName.trim()) ? ` “${query.trim() || findName.trim()}”` : ""} <span className="kbd">Ctrl+M</span></button>}
+                   <button type="button" className="btn mt-3 h-8" onClick={clearFilters}>Clear search and filters</button>
+                 </div>
+               )}
+@@ -448,6 +506,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
+             <footer className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-3 py-3">
+               <p className="text-xs text-slate-600">Search is ready on open. Press <kbd className="kbd">Alt+↓</kbd> on the field to open.</p>
+               <div className="flex gap-2">
++                {canCreate && <button type="button" className="btn h-9" title={`Create a new ${label} without leaving this screen`} onClick={() => void startCreate(query.trim() || findName.trim())}>+ New <span className="kbd">Ctrl+M</span></button>}
+                 <button type="button" className="btn h-9" onClick={() => closeDialog()}>Cancel</button>
+                 <button type="button" className="btn btn-primary h-9" disabled={!activeOption} onClick={() => selectActive()}>Select{activeOption ? `: ${activeOption.code ?? activeOption.short ?? activeOption.label}` : ""}</button>
+               </div>
+diff --git a/src/components/QuickCreate.tsx b/src/components/QuickCreate.tsx
+new file mode 100644
+index 0000000..438bfef
+--- /dev/null
++++ b/src/components/QuickCreate.tsx
+@@ -0,0 +1,233 @@
++import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
++import { flushSync } from "react-dom";
++import { codeSpec } from "../../shared/codeRules";
++import { MASTERS, type MasterDef } from "../../shared/masters";
++import { ApiError, codeRulesApi, masterApi } from "../api";
++import { emptyForm, sameForm, tabsOf, toPayload, validate, type Errors, type FormState, type Row } from "../lib/form";
++import { useOnMasterChanged } from "../lib/masterEvents";
++import { buildLookups, lookupKeysOf } from "../lib/masterLookups";
++import { useDialog } from "./Dialog";
++import { MasterForm } from "./MasterForm";
++import { QuickCreateContext, type QuickCreateFn, type QuickCreateRequest } from "./quickCreateContext";
++
++// Ctrl+M on a reference field opens the New form of the master it points to, in a dialog on top of the current screen. The screen
++// behind keeps everything the user typed; the saved record comes back to the field that asked (see MasterReferencePicker).
++
++interface Entry { id: number; req: QuickCreateRequest; resolve: (row: Row | null) => void }
++
++export function QuickCreateHost({ companyId, calendar, children }: { companyId: number; calendar: "BS" | "AD"; children: ReactNode }) {
++  // A stack, because the New form has reference fields of its own (Product -> Product Group) that can open another one.
++  const [stack, setStack] = useState<Entry[]>([]);
++  const seq = useRef(0);
++  const open = useCallback<QuickCreateFn>((req) => {
++    if (!MASTERS[req.key]) return Promise.resolve(null);
++    return new Promise<Row | null>((resolve) => setStack((s) => [...s, { id: ++seq.current, req, resolve }]));
++  }, []);
++  const close = (entry: Entry, row: Row | null) => {
++    setStack((s) => s.filter((e) => e.id !== entry.id));
++    entry.resolve(row);
++  };
++  return (
++    <QuickCreateContext.Provider value={open}>
++      {children}
++      {stack.map((e) => <QuickCreateDialog key={e.id} req={e.req} companyId={companyId} calendar={calendar} onClose={(row) => close(e, row)} />)}
++    </QuickCreateContext.Provider>
++  );
++}
++
++// The form to start from: the master's defaults, what the caller pre-fills, and what was typed in the picker as the record's name.
++function startForm(def: MasterDef, req: QuickCreateRequest): FormState {
++  const f = emptyForm(def);
++  const defaults = req.defaults ?? {};
++  for (const [k, v] of Object.entries(defaults)) if (k in f) f[k] = def.fields.find((x) => x.name === k)?.type === "checkbox" ? Boolean(v) : String(v);
++  const nameField = def.fields.find((x) => x.name === def.labelFields[1]);
++  if (req.name && nameField?.type === "text" && def.labelFields[1] !== def.labelFields[0] && !(nameField.name in defaults)) {
++    const s = nameField.upper ? req.name.toUpperCase() : req.name;
++    f[nameField.name] = nameField.max ? s.slice(0, nameField.max) : s;
++  }
++  return f;
++}
++
++// One field's value drives another (def.suggest), new records only: same chain MasterScreen follows.
++function suggestedFrom(def: MasterDef, next: FormState, prev: FormState, rowsOf: (key: string) => Row[]): FormState {
++  const sg = def.suggest;
++  if (!sg || next[sg.from] === prev[sg.from] || next[sg.from] === "") return next;
++  let id: unknown = next[sg.from];
++  let row: Row | undefined;
++  for (const hop of sg.hops) {
++    row = rowsOf(hop.master).find((r) => String(r.id) === String(id));
++    if (!row) return next;
++    id = hop.via ? row[hop.via] : null;
++  }
++  const v = sg.map[String(row![sg.attr])];
++  return v ? { ...next, [sg.target]: v } : next;
++}
++
++const FOCUSABLE = "input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex='-1'])";
++
++function QuickCreateDialog({ req, companyId, calendar, onClose }: { req: QuickCreateRequest; companyId: number; calendar: "BS" | "AD"; onClose: (row: Row | null) => void }) {
++  const def = MASTERS[req.key];
++  const dlg = useDialog();
++  const rootRef = useRef<HTMLElement>(null);
++  const [items, setItems] = useState<Row[]>([]);
++  const [lookupRows, setLookupRows] = useState<Record<string, Row[]>>({});
++  const [ready, setReady] = useState(false);
++  const [form, setForm] = useState<FormState>(() => startForm(def, req));
++  const [errors, setErrors] = useState<Errors>({});
++  const [tab, setTab] = useState("");
++  const [saving, setSaving] = useState(false);
++  const [codeHint, setCodeHint] = useState("");
++  const [autoCode, setAutoCode] = useState("");
++  const savingRef = useRef(false), codeTouched = useRef(false), autoRef = useRef("");
++  const keys = useMemo(() => lookupKeysOf(def), [def]);
++  const rowsOf = (key: string): Row[] => (key === def.key ? items : (lookupRows[key] ?? []));
++  // eslint-disable-next-line react-hooks/exhaustive-deps
++  const lookups = useMemo(() => buildLookups(def, rowsOf), [def, items, lookupRows]);
++
++  // ---- load: the master's own rows (for the duplicate check) and every list its fields read from ----
++  useEffect(() => {
++    let live = true;
++    Promise.all([masterApi(def.key).list(companyId), ...keys.map((k) => masterApi(k).list(companyId))])
++      .then(([own, ...rest]) => {
++        if (!live) return;
++        setItems(own);
++        setLookupRows(Object.fromEntries(keys.map((k, i) => [k, rest[i]])));
++        setReady(true);
++      })
++      .catch((e: Error) => { if (live) { void dlg.error(e.message, { title: `Could not open New ${def.singular}` }); onClose(null); } });
++    return () => { live = false; };
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, []);
++  useEffect(() => {
++    if (ready) setTimeout(() => rootRef.current?.querySelector<HTMLElement>("[data-zone=form] [data-nav]")?.focus(), 0);
++  }, [ready]);
++
++  // A record made from this dialog's own reference fields (a nested Ctrl+M) is in the options before the field is set.
++  useOnMasterChanged(async (key) => {
++    if (key !== def.key && !keys.includes(key)) return;
++    const rows = await masterApi(key).list(companyId);
++    flushSync(() => { if (key === def.key) setItems(rows); else setLookupRows((p) => ({ ...p, [key]: rows })); });
++  });
++
++  // ---- code numbering: the rule's code is suggested until the user types one of their own ----
++  const spec = codeSpec(def.key);
++  const parentVal = spec?.parentField ? String(form[spec.parentField] ?? "") : "";
++  const nameVal = spec?.nameField ? String(form[spec.nameField] ?? "") : "";
++  const typeVal = spec?.typeField ? String(form[spec.typeField] ?? "") : "";
++  const codeEmpty = !form.code;
++  useEffect(() => {
++    if (!spec || !ready) return;
++    if (codeTouched.current && !codeEmpty) return;
++    let stale = false;
++    const timer = setTimeout(async () => {
++      try {
++        const r = await codeRulesApi.suggest(companyId, def.key, { parentId: parentVal ? Number(parentVal) : null, name: nameVal, type: typeVal });
++        if (stale) return;
++        const prev = autoRef.current;
++        autoRef.current = r.code ?? ""; setAutoCode(r.code ?? "");
++        setForm((f) => (codeTouched.current && f.code ? f : f.code === (r.code ?? "") || (f.code && f.code !== prev) ? f : { ...f, code: r.code ?? "" }));
++        setCodeHint(r.code ? "Suggested by the numbering rule; type a code to use your own." : r.mode === "SUGGESTED" ? (r.reason ?? "") : "");
++      } catch { if (!stale) setCodeHint(""); }
++    }, 250);
++    return () => { stale = true; clearTimeout(timer); };
++  }, [spec, ready, companyId, def.key, parentVal, nameVal, typeVal, codeEmpty]);
++
++  // What the form looks like untouched (a suggested code alone is not a change).
++  const base = useMemo(() => ({ ...startForm(def, req), ...(autoCode ? { code: autoCode } : {}) }), [def, req, autoCode]);
++  const dirty = ready && !sameForm(def, form, base);
++
++  const onChangeForm = (raw: FormState) => {
++    if (spec && raw.code !== form.code) codeTouched.current = !!raw.code && raw.code !== autoRef.current;
++    const f = suggestedFrom(def, raw, form, rowsOf);
++    const next: Errors = { ...errors };
++    for (const k of Object.keys(f)) if (f[k] !== form[k]) delete next[k];
++    setForm(f); setErrors(next);
++  };
++  const onBlurField = (name: string) => {
++    const e = validate(def, form, items, null, "new");
++    setErrors((prev) => ({ ...prev, [name]: e[name] }));
++  };
++  const focusField = (name: string) => {
++    const f = def.fields.find((x) => x.name === name.split(".")[0]);
++    if (f?.tab) setTab(f.tab);
++    setTimeout(() => {
++      const r = rootRef.current;
++      (r?.querySelector<HTMLElement>(`[data-field="${name}"]`) ?? r?.querySelector<HTMLElement>(`[data-field^="${name}."]`))?.focus();
++    }, f?.tab ? 40 : 0);
++  };
++
++  const save = async () => {
++    if (savingRef.current) return;
++    const errs = validate(def, form, items, null, "new");
++    const first = def.fields.find((f) => errs[f.name]);
++    if (first) {
++      setErrors(errs);
++      focusField(first.name);
++      return;
++    }
++    savingRef.current = true; setSaving(true);
++    try {
++      const rec = await masterApi(def.key).create(companyId, toPayload(def, form, "new"));
++      onClose(rec);
++    } catch (e) {
++      if (e instanceof ApiError && e.field && def.fields.some((f) => f.name === e.field)) {
++        setErrors({ [e.field]: e.message });
++        focusField(e.field);
++      }
++      void dlg.error((e as Error).message, { title: `Could not save ${def.singular}` });
++    } finally {
++      savingRef.current = false; setSaving(false);
++    }
++  };
++
++  const cancel = async () => {
++    if (savingRef.current) return;
++    if (dirty && !(await dlg.confirm("What you typed for this new record will be lost.", { title: `Cancel New ${def.singular}?`, variant: "warning", confirmLabel: "Discard", cancelLabel: "Keep editing" }))) return;
++    onClose(null);
++  };
++
++  const onKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
++    // The screen behind must not hear any of these keys (its own Ctrl+S would save *its* form).
++    e.stopPropagation();
++    const ctrl = e.ctrlKey || e.metaKey;
++    if (ctrl && e.key.toLowerCase() === "s") { e.preventDefault(); void save(); }
++    else if (e.key === "Escape") { e.preventDefault(); void cancel(); }
++    else if (ctrl && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
++      const names = tabsOf(def, form, "new");
++      if (names.length < 2) return;
++      e.preventDefault();
++      const i = Math.max(0, names.indexOf(tab));
++      setTab(names[(i + (e.key === "ArrowRight" ? 1 : -1) + names.length) % names.length]);
++      setTimeout(() => rootRef.current?.querySelector<HTMLElement>("[data-tabpane] [data-nav]")?.focus(), 40);
++    } else if (e.key === "Tab") {
++      const nodes = Array.from(rootRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []).filter((n) => n.getClientRects().length > 0);
++      if (!nodes.length) return;
++      const first = nodes[0], last = nodes[nodes.length - 1];
++      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
++      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
++    }
++  };
++
++  return (
++    <div className="fixed inset-0 z-[100] grid place-items-center bg-black/40 p-0 sm:p-5">
++      <section
++        ref={rootRef} role="dialog" aria-modal="true" aria-label={`New ${def.singular}`} onKeyDown={onKeyDown}
++        className="flex h-full max-h-full w-full max-w-[960px] flex-col overflow-hidden border border-slate-500 bg-white shadow-2xl sm:h-auto sm:max-h-[min(92vh,900px)]"
++      >
++        <header className="border-b border-slate-300 bg-slate-100 px-4 py-2">
++          <h2 className="text-base font-semibold">New {def.singular}</h2>
++          <p className="text-xs text-slate-600">Saved here, then selected in the field you came from. <span className="kbd">Ctrl+S</span> saves, <span className="kbd">Esc</span> cancels.</p>
++        </header>
++        <div className="min-h-0 flex-1 overflow-auto">
++          {ready ? (
++            <MasterForm
++              hints={codeHint ? { code: codeHint } : undefined} def={def} companyId={companyId} mode="new" form={form} setForm={onChangeForm} errors={errors} onBlurField={onBlurField}
++              selected={null} dirty={dirty} saving={saving} lookups={lookups} calendar={calendar} tab={tab} onTab={setTab} clearLabel="Cancel"
++              actions={{ save: () => void save(), clear: () => void cancel(), edit: () => {}, del: () => {}, newRec: () => {}, cancel: () => {} }}
++            />
++          ) : <p className="p-6 text-slate-500">Loading…</p>}
++        </div>
++      </section>
++    </div>
++  );
++}
+diff --git a/src/components/ShortcutsOverlay.tsx b/src/components/ShortcutsOverlay.tsx
+index ed414eb..3d065e2 100644
+--- a/src/components/ShortcutsOverlay.tsx
++++ b/src/components/ShortcutsOverlay.tsx
+@@ -16,6 +16,7 @@ const rows: [string, string][] = [
+   ["Ctrl+D", "Fill down: upar wali cell / row copy karo"],
+   ["A L E R X", "Quick-pick Type in the combobox"],
+   ["Alt+↓ / Enter", "Open a master reference picker"],
++  ["Ctrl+M (reference field)", "Us field ka master wahin create karo (Vendor, Product, Unit…) — save karte hi field me select ho jata hai"],
+   ["Picker: ↑ / ↓, Enter, Esc", "Move / select / close"],
+   ["F1 / ?", "This help"],
+ ];
+diff --git a/src/components/purchase/Bits.tsx b/src/components/purchase/Bits.tsx
+index 4a3a40c..b432c82 100644
+--- a/src/components/purchase/Bits.tsx
++++ b/src/components/purchase/Bits.tsx
+@@ -241,6 +241,7 @@ export const COMMON_HELP: [string, string][] = [
+   ["Enter / Shift+Enter", "Next / previous field (skips disabled controls; last cell adds a line or term)"],
+   ["Space / ↓ / F4", "Open a lookup or combobox list (Enter never opens it)"],
+   ["Backspace / Delete", "Clear an optional lookup or combobox value"],
++  ["Ctrl+M (on a lookup)", "Create the vendor, product, unit… the field refers to, without leaving the document; it is selected once saved"],
+   ["Tab / Shift+Tab", "Navigate every control, including row actions"],
+   ["Ctrl+Enter / Ctrl+Shift+Enter", "Next / previous field from a multi-line field"],
+   ["Ctrl+S", "Save / Update"],
+diff --git a/src/components/purchase/HeadFields.tsx b/src/components/purchase/HeadFields.tsx
+index 8e31ede..fd18335 100644
+--- a/src/components/purchase/HeadFields.tsx
++++ b/src/components/purchase/HeadFields.tsx
+@@ -1,11 +1,15 @@
+ import { useMemo } from "react";
+ import type { PLookups } from "../../api";
+ import { MasterReferencePicker, type ReferenceOption } from "../MasterReferencePicker";
++import type { CreateMasterSpec } from "../quickCreateContext";
+ import { DateInput } from "../DateInput";
+ import { Field, focusStep } from "./Bits";
+ 
+ type Errs = Record<string, string | undefined>;
+ 
++// Ctrl+M on the Vendor field: a vendor is a Party of type VENDOR, and the option value is its ledger, not the party row.
++const VENDOR_PARTY: CreateMasterSpec = { key: "party", defaults: { glType: "VENDOR" }, valueFrom: (r) => String(r.generalLedgerId ?? r.id) };
++
+ // Vendor ledger, its sub-ledger (when the ledger needs one) and the agent: the same three fields on every purchase document.
+ export function VendorFields({ lookups, vendorGLId, subLedgerId, agentId, onChange, readOnly, errors, lockVendor, contextKey }: {
+   lookups: PLookups; vendorGLId: string; subLedgerId: string; agentId: string; readOnly: boolean; errors: Errs; lockVendor?: boolean; contextKey: string;
+@@ -18,16 +22,18 @@ export function VendorFields({ lookups, vendorGLId, subLedgerId, agentId, onChan
+   return (
+     <>
+       <Field label="Vendor" required error={errors.vendorGLId} className="col-span-1 sm:col-span-2">
+-        <MasterReferencePicker fieldName="vendorGLId" label="Vendor ledger" scopeKey="vendor-ledgers" contextKey={contextKey} placeholder="Choose vendor ledger…" required value={vendorGLId} hasError={!!errors.vendorGLId} options={vendors} disabled={readOnly || lockVendor}
++        <MasterReferencePicker fieldName="vendorGLId" label="Vendor ledger" scopeKey="vendor-ledgers" contextKey={contextKey} placeholder="Choose vendor ledger…" required value={vendorGLId} hasError={!!errors.vendorGLId} options={vendors} disabled={readOnly || lockVendor} createMaster={VENDOR_PARTY}
+           onChange={(v) => onChange({ vendorGLId: v, subLedgerId: "" })} onCommit={(el, dir) => focusStep(el, dir)} />
+       </Field>
+       <Field label={vendor?.requiresSubLedger ? "Sub Ledger" : "Sub Ledger (not needed)"} required={!!vendor?.requiresSubLedger} error={errors.subLedgerId}>
+-        <MasterReferencePicker fieldName="subLedgerId" label="Sub Ledger" scopeKey="sub-ledger" contextKey={`${contextKey}:${vendorGLId || "none"}`} placeholder={subs.length ? "Choose sub ledger…" : "—"} value={subLedgerId} hasError={!!errors.subLedgerId} options={subs} disabled={readOnly || subs.length === 0}
++        <MasterReferencePicker fieldName="subLedgerId" label="Sub Ledger" scopeKey="sub-ledger" contextKey={`${contextKey}:${vendorGLId || "none"}`} placeholder={subs.length ? "Choose sub ledger…" : vendor?.requiresSubLedger ? "None yet — Ctrl+M to create" : "—"} value={subLedgerId} hasError={!!errors.subLedgerId} options={subs}
++          disabled={readOnly || (subs.length === 0 && !vendor?.requiresSubLedger)}
++          createMaster={vendor?.requiresSubLedger ? { key: "sub-ledger", defaults: { generalLedgerId: vendorGLId } } : undefined}
+           required={!!vendor?.requiresSubLedger}
+           onChange={(v) => onChange({ subLedgerId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
+       </Field>
+       <Field label="Agent" error={errors.agentId}>
+-        <MasterReferencePicker fieldName="agentId" label="Agent" scopeKey="agents" contextKey={contextKey} placeholder="Agent (optional)" value={agentId} hasError={!!errors.agentId} options={agents} disabled={readOnly}
++        <MasterReferencePicker fieldName="agentId" label="Agent" scopeKey="agents" contextKey={contextKey} placeholder="Agent (optional)" value={agentId} hasError={!!errors.agentId} options={agents} disabled={readOnly} createMaster={{ key: "agents" }}
+           onChange={(v) => onChange({ agentId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
+       </Field>
+     </>
+diff --git a/src/components/purchase/LinesGrid.tsx b/src/components/purchase/LinesGrid.tsx
+index 324906a..a7a148b 100644
+--- a/src/components/purchase/LinesGrid.tsx
++++ b/src/components/purchase/LinesGrid.tsx
+@@ -205,16 +205,16 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly,
+               <div key={l.key} data-row={i} className={`border-b border-slate-100 transition-colors ${rowSel === i ? "bg-cobalt-50 ring-2 ring-inset ring-cobalt-700" : errMsgs.length ? "bg-rose-50" : "hover:bg-slate-50/80"}`}>
+                 <div style={{ gridTemplateColumns: layout.template }} data-selected={rowSel === i} className="xl-row">
+                   <button type="button" className="xl-rowhead" {...gridRows.rowHeadProps(i)}>{i + 1}</button>
+-                  <MasterReferencePicker fieldName={`L.${i}.p`} label="Product" required scopeKey="products" contextKey={contextKey} placeholder="Choose product…" value={l.productId} hasError={bad("p")} options={productOpts} disabled={off || (lockProducts && !!l.link)} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
++                  <MasterReferencePicker fieldName={`L.${i}.p`} label="Product" required scopeKey="products" createMaster={{ key: "products" }} contextKey={contextKey} placeholder="Choose product…" value={l.productId} hasError={bad("p")} options={productOpts} disabled={off || (lockProducts && !!l.link)} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
+                   {layout.showAlt && (
+                     <>
+                       <input data-field={`L.${i}.aq`} disabled={off || !p || altOpts.length === 0} inputMode="decimal" autoComplete="off" value={l.altQty} placeholder={altOpts.length ? "" : "—"} onChange={decOnly(QTY, (v) => patch(i, { altQty: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("aq", "text-right tabular-nums")} aria-label="Alternate quantity" />
+-                      <MasterReferencePicker fieldName={`L.${i}.au`} label="Alternate unit" scopeKey="product-units" contextKey={contextKey} placeholder={altOpts.length ? "Choose unit" : "—"} value={l.altUnitId} hasError={bad("au")} options={altOpts} disabled={off || !p || altOpts.length === 0} onChange={(v) => patch(i, { altUnitId: v })} onCommit={afterCombo} />
++                      <MasterReferencePicker fieldName={`L.${i}.au`} label="Alternate unit" scopeKey="product-units" createMaster={{ key: "product-units" }} contextKey={contextKey} placeholder={altOpts.length ? "Choose unit" : "—"} value={l.altUnitId} hasError={bad("au")} options={altOpts} disabled={off || !p || altOpts.length === 0} onChange={(v) => patch(i, { altUnitId: v })} onCommit={afterCombo} />
+                     </>
+                   )}
+                   <input data-field={`L.${i}.q`} disabled={off || !p || useAlt} inputMode="decimal" autoComplete="off" value={useAlt ? trimDec(qtyShown) : l.qty} onChange={decOnly(QTY, (v) => patch(i, { qty: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("q", `text-right tabular-nums ${useAlt ? "bg-slate-100" : ""}`)} aria-label="Quantity" />
+                   {p && !p.baseUnitId
+-                    ? <MasterReferencePicker fieldName={`L.${i}.u`} label="Unit" required scopeKey="product-units" contextKey={contextKey} placeholder="Choose unit" value={l.unitId} hasError={bad("u")} options={unitOpts} disabled={off} onChange={(v) => patch(i, { unitId: v })} onCommit={afterCombo} />
++                    ? <MasterReferencePicker fieldName={`L.${i}.u`} label="Unit" required scopeKey="product-units" createMaster={{ key: "product-units" }} contextKey={contextKey} placeholder="Choose unit" value={l.unitId} hasError={bad("u")} options={unitOpts} disabled={off} onChange={(v) => patch(i, { unitId: v })} onCommit={afterCombo} />
+                     : <span className="text-[12px] text-slate-600">{p?.baseUnitId ? unitCode.get(p.baseUnitId) : ""}</span>}
+                   <input data-field={`L.${i}.r`} disabled={off || !p} inputMode="decimal" autoComplete="off" value={l.rate} placeholder="0.00" onChange={decOnly(RATE, (v) => patch(i, { rate: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("r", "text-right tabular-nums")} aria-label="Rate" />
+                   <span className="text-right tabular-nums font-medium">{money(lineAmount(l, p))}</span>
+@@ -232,7 +232,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly,
+                     ? <input disabled className="fld h-8 bg-slate-100 text-right text-slate-600" value={l.expectedDate} aria-label="Expected date" />
+                     : <DateInput fieldName={`L.${i}.xd`} value={l.expectedDate} onChange={(v) => patch(i, { expectedDate: v })} calendar={calendar} hasError={bad("xd")} onBlurField={() => {}} compact />)}
+                   {layout.showLoc && (
+-                    <MasterReferencePicker fieldName={`L.${i}.lc`} label="Location" required={p?.type === "STOCK"} scopeKey="locations" contextKey={contextKey} placeholder={p?.type === "STOCK" ? "Choose location" : "—"} value={l.locationId} hasError={bad("lc")} options={locOpts} disabled={off || p?.type !== "STOCK"} onChange={(v) => patch(i, { locationId: v })} onCommit={afterCombo} />
++                    <MasterReferencePicker fieldName={`L.${i}.lc`} label="Location" required={p?.type === "STOCK"} scopeKey="locations" createMaster={{ key: "locations" }} contextKey={contextKey} placeholder={p?.type === "STOCK" ? "Choose location" : "—"} value={l.locationId} hasError={bad("lc")} options={locOpts} disabled={off || p?.type !== "STOCK"} onChange={(v) => patch(i, { locationId: v })} onCommit={afterCombo} />
+                   )}
+                   {kind === "bill" && (layout.showBatch || layout.showExpiry) && (() => {
+                     const tracked = !!(p?.tracksBatch || p?.tracksExpiry), yes = hasBatch(l);
+diff --git a/src/components/quickCreateContext.ts b/src/components/quickCreateContext.ts
+new file mode 100644
+index 0000000..86e80f6
+--- /dev/null
++++ b/src/components/quickCreateContext.ts
+@@ -0,0 +1,24 @@
++import { createContext, useContext } from "react";
++import type { Row } from "../lib/form";
++
++// What a field passes to its picker to say "Ctrl+M creates a record of this master".
++export interface CreateMasterSpec {
++  /** shared/masters.ts key of the master to create */
++  key: string;
++  /** field -> value to pre-fill in the New form (e.g. a vendor is a Party of type VENDOR) */
++  defaults?: Record<string, string | boolean>;
++  /** The picker option value for a created row. Default: String(row.id). (A vendor option is the ledger id, not the party id.) */
++  valueFrom?: (row: Row) => string;
++}
++
++export interface QuickCreateRequest {
++  key: string;
++  /** what was typed in the picker's search box: becomes the name of the new record */
++  name?: string;
++  defaults?: Record<string, string | boolean>;
++}
++/** Opens the New form of a master in a dialog; resolves the saved row, or null when the user cancelled. */
++export type QuickCreateFn = (req: QuickCreateRequest) => Promise<Row | null>;
++
++export const QuickCreateContext = createContext<QuickCreateFn | null>(null);
++export const useQuickCreate = () => useContext(QuickCreateContext);
+diff --git a/src/lib/masterEvents.ts b/src/lib/masterEvents.ts
+new file mode 100644
+index 0000000..a8172c4
+--- /dev/null
++++ b/src/lib/masterEvents.ts
+@@ -0,0 +1,24 @@
++import { useEffect, useRef } from "react";
++
++// A master record was just created without leaving the screen (Ctrl+M on a reference field). Everything that keeps its own copy of
++// that master's list (a purchase document's pick-lists, a master form's lookups, a Ctrl+M dialog) registers here and reloads it,
++// so the new record is in the options before the field is set to it.
++type Reloader = (masterKey: string) => Promise<void> | void;
++const reloaders = new Set<Reloader>();
++
++/** Resolves once every registered screen has reloaded; rejects if one could not. */
++export async function announceMasterChanged(masterKey: string): Promise<void> {
++  await Promise.all([...reloaders].map((fn) => fn(masterKey)));
++}
++
++/** Register a reloader for as long as the component is mounted (the latest `fn` is always the one called). */
++export function useOnMasterChanged(fn: Reloader, enabled = true) {
++  const latest = useRef(fn);
++  latest.current = fn;
++  useEffect(() => {
++    if (!enabled) return;
++    const reloader: Reloader = (key) => latest.current(key);
++    reloaders.add(reloader);
++    return () => { reloaders.delete(reloader); };
++  }, [enabled]);
++}
+diff --git a/src/lib/masterLookups.ts b/src/lib/masterLookups.ts
+new file mode 100644
+index 0000000..1238698
+--- /dev/null
++++ b/src/lib/masterLookups.ts
+@@ -0,0 +1,37 @@
++import { MASTERS, matchWhere, type LookupWhere, type MasterDef, type Opt } from "../../shared/masters";
++import { recordTitle, type Row } from "./form";
++
++// The other masters a master's form reads its lookups from (fields, lines columns, and `loads`), same rule MasterScreen uses.
++export const lookupKeysOf = (def: MasterDef): string[] => {
++  const lineLookups = def.fields.flatMap((f) => (f.type === "lines" ? f.lines!.columns.filter((c) => c.type === "lookup").map((c) => c.lookup!) : []));
++  const own = def.fields.filter((f) => f.type === "lookup" && f.lookupScope !== "record").map((f) => f.lookup!);
++  return [...new Set([...own, ...lineLookups, ...(def.loads ?? [])])].filter((k) => k !== def.key);
++};
++
++// Options of every lookup field (and lines lookup column) of `def` from already-loaded rows: the same shape MasterScreen builds.
++export function buildLookups(def: MasterDef, rowsOf: (masterKey: string) => Row[]): Record<string, Opt[]> {
++  const out: Record<string, Opt[]> = {};
++  const build = (key: string, lookup: string, where: LookupWhere | undefined) => {
++    const target = MASTERS[lookup];
++    const rows = rowsOf(lookup).filter((r) => matchWhere(where, r));
++    // A child master (Sub Group) shows its parent's code too: "AG01 / SG01 — Cash-in-Hand"
++    const pf = target.parent && target.fields.find((x) => x.name === target.parent!.field);
++    const parents = pf ? rowsOf(pf.lookup!) : [];
++    const pTarget = pf ? MASTERS[pf.lookup!] : null;
++    out[key] = rows.map((r) => {
++      const par = pf ? parents.find((p) => p.id === r[pf.name]) : null;
++      const prefix = par && pTarget ? `${par[pTarget.labelFields[0]]} / ` : "";
++      const code = String(r[target.labelFields[0]] ?? "");
++      const name = String(r[target.labelFields[1]] ?? "");
++      const parentDetail = par && pTarget ? `${pTarget.title}: ${recordTitle(pTarget, par)}` : "";
++      const attributes = [r.type, r.category, r.glType, r.role].filter((v) => typeof v === "string" && v).join(" · ");
++      const searchText = Object.entries(r).filter(([k, v]) => !["id", "createdAt", "updatedAt"].includes(k) && ["string", "number", "boolean"].includes(typeof v)).map(([, v]) => String(v)).join(" ");
++      return { value: String(r.id), label: `${prefix}${recordTitle(target, r)}`, short: code, code, name, detail: [parentDetail, attributes].filter(Boolean).join(" · "), searchText, isActive: typeof r.isActive === "boolean" ? r.isActive : true };
++    });
++  };
++  for (const f of def.fields) {
++    if (f.type === "lookup" && f.lookupScope !== "record") build(f.name, f.lookup!, f.lookupWhere);
++    if (f.type === "lines") for (const c of f.lines!.columns) if (c.type === "lookup") build(`${f.name}.${c.name}`, c.lookup!, c.lookupWhere);
++  }
++  return out;
++}
+diff --git a/src/screens/MasterScreen.tsx b/src/screens/MasterScreen.tsx
+index 61f5f77..8226d2f 100644
+--- a/src/screens/MasterScreen.tsx
++++ b/src/screens/MasterScreen.tsx
+@@ -1,7 +1,9 @@
+ import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
++import { flushSync } from "react-dom";
+ import { codeSpec } from "../../shared/codeRules";
+ import { MASTERS, matchWhere, type MasterDef, type Opt } from "../../shared/masters";
+ import { ApiError, codeRulesApi, masterApi } from "../api";
++import { useOnMasterChanged } from "../lib/masterEvents";
+ import { emptyForm, recordLabel, recordTitle, sameForm, tabsOf, toForm, toPayload, validate, type Errors, type FormState, type Row } from "../lib/form";
+ import type { Mode, MsgKind, StatusInfo } from "../types";
+ import { MasterForm } from "../components/MasterForm";
+@@ -125,6 +127,13 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
+     return () => { live = false; };
+   }, [companyId, def, api, firstField]);
+ 
++  // A record made with Ctrl+M from one of this form's reference fields joins the options before the field is set to it.
++  useOnMasterChanged(async (key) => {
++    if (key !== def.key && !(key in lookupRows)) return;
++    const rows = await masterApi(key).list(companyId);
++    flushSync(() => { if (key === def.key) setItems(sortRows(def, rows)); else setLookupRows((p) => ({ ...p, [key]: rows })); });
++  });
++
+   // Company screen par: Retained Earnings GL ke options us company ke ledgers se aate hain jo select hai (header wali nahi)
+   useEffect(() => {
+     const fields = def.fields.filter((f) => f.lookupScope === "record");
+diff --git a/src/screens/purchase/PurchaseBillWorkspace.tsx b/src/screens/purchase/PurchaseBillWorkspace.tsx
+index 5c8dfc9..c73a815 100644
+--- a/src/screens/purchase/PurchaseBillWorkspace.tsx
++++ b/src/screens/purchase/PurchaseBillWorkspace.tsx
+@@ -1,10 +1,12 @@
+ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+ import { Plus, Receipt, Search } from "lucide-react";
++import { flushSync } from "react-dom";
+ import { purchaseApi, type PListRow, type PLookups } from "../../api";
+ import { useDialog } from "../../components/Dialog";
+ import { ContextChips, Pill, money } from "../../components/purchase/Bits";
+ import { EmptyList, WorkspaceTabs } from "../../components/purchase/WorkspaceTabs";
+ import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
++import { useOnMasterChanged } from "../../lib/masterEvents";
+ import { adToBs } from "../../lib/nepaliDate";
+ import type { MsgKind } from "../../types";
+ import PurchaseBillEntry, { OPTIONS, STATE_TONE, type BForm, type Stage } from "./PurchaseBillScreen";
+@@ -42,6 +44,11 @@ export default function PurchaseBillWorkspace(p: PurchaseScreenProps & { fromCha
+     purchaseApi.lookups(p.companyId).then((l) => { if (live) setLookups(l); }).catch((e: Error) => { if (live) { setLoadError(e.message); void dlg.error(e.message, { title: "Could not load the bill screen" }); } });
+     return () => { live = false; };
+   }, [p.companyId, dlg]);
++  // A master record made with Ctrl+M on one of the bill's pickers: reload the pick-lists so it is in them before the field is set.
++  useOnMasterChanged(async () => {
++    const l = await purchaseApi.lookups(p.companyId);
++    flushSync(() => setLookups(l));
++  });
+ 
+   // ---- the list ----
+   const [rows, setRows] = useState<PListRow[]>([]);
+diff --git a/src/screens/purchase/useDocScreen.tsx b/src/screens/purchase/useDocScreen.tsx
+index f3a0916..fa754b0 100644
+--- a/src/screens/purchase/useDocScreen.tsx
++++ b/src/screens/purchase/useDocScreen.tsx
+@@ -1,6 +1,8 @@
+ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
++import { flushSync } from "react-dom";
+ import { ApiError, purchaseApi, type PDoc, type PListRow, type PLookups, type PurchaseKind } from "../../api";
+ import { useDialog, type DialogSpec } from "../../components/Dialog";
++import { useOnMasterChanged } from "../../lib/masterEvents";
+ import type { Mode, MsgKind, StatusInfo } from "../../types";
+ 
+ // The behaviour every purchase document screen shares: the list on the right, the selected document, new / view / edit, the
+@@ -57,7 +59,9 @@ export interface ActionSpec {
+ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extra: { setStatus: (s: StatusInfo) => void; dirtyRef: MutableRefObject<boolean>; externalMessage: { text: string; n: number } | null; hints: string[] } & DocTabOptions<F>) {
+   const { kind } = cfg;
+   const skipList = !!extra.skipList;
+-  const [lookups, setLookups] = useState<PLookups | null>(extra.sharedLookups ?? null);
++  // The tabs of the bill workspace share the workspace's lookups (it reloads them); every other screen owns its own.
++  const [ownLookups, setLookups] = useState<PLookups | null>(null);
++  const lookups = extra.sharedLookups ?? ownLookups;
+   const [rows, setRows] = useState<PListRow[]>([]);
+   const [total, setTotal] = useState(0);
+   const [search, setSearch] = useState("");
+@@ -137,6 +141,11 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
+   }, [ctx.companyId]);
+ 
+   useEffect(() => { extra.dirtyRef.current = dirty; });
++  // A master record made with Ctrl+M on one of the pickers: reload the pick-lists so it is in them before the field is set.
++  useOnMasterChanged(async () => {
++    const l = await purchaseApi.lookups(ctx.companyId);
++    flushSync(() => setLookups(l));
++  }, !extra.sharedLookups);
+   useEffect(() => { if (extra.snapshotRef && form) extra.snapshotRef.current = { doc, mode, form, baseSig, selectedId }; });
+   useEffect(() => { if (extra.externalMessage) flash(extra.externalMessage.text, "info"); }, [extra.externalMessage, flash]);
+   useEffect(() => extra.setStatus({ mode, count: total, shown: rows.length, message: msg.text, kind: msg.kind, hints: extra.hints }), [mode, total, rows.length, msg, extra.hints, extra.setStatus]);
+-- 
+2.43.0
+

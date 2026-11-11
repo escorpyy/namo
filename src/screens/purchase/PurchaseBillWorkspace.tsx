@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Plus, Receipt, Search } from "lucide-react";
+import { flushSync } from "react-dom";
 import { purchaseApi, type PListRow, type PLookups } from "../../api";
 import { useDialog } from "../../components/Dialog";
 import { ContextChips, Pill, money } from "../../components/purchase/Bits";
 import { EmptyList, WorkspaceTabs } from "../../components/purchase/WorkspaceTabs";
 import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
+import { useOnMasterChanged } from "../../lib/masterEvents";
 import { adToBs } from "../../lib/nepaliDate";
 import type { MsgKind } from "../../types";
 import PurchaseBillEntry, { OPTIONS, STATE_TONE, type BForm, type Stage } from "./PurchaseBillScreen";
@@ -42,6 +44,11 @@ export default function PurchaseBillWorkspace(p: PurchaseScreenProps & { fromCha
     purchaseApi.lookups(p.companyId).then((l) => { if (live) setLookups(l); }).catch((e: Error) => { if (live) { setLoadError(e.message); void dlg.error(e.message, { title: "Could not load the bill screen" }); } });
     return () => { live = false; };
   }, [p.companyId, dlg]);
+  // A master record made with Ctrl+M on one of the bill's pickers: reload the pick-lists so it is in them before the field is set.
+  useOnMasterChanged(async () => {
+    const l = await purchaseApi.lookups(p.companyId);
+    flushSync(() => setLookups(l));
+  });
 
   // ---- the list ----
   const [rows, setRows] = useState<PListRow[]>([]);

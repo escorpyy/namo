@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { flushSync } from "react-dom";
 import { codeSpec } from "../../shared/codeRules";
 import { MASTERS, matchWhere, type MasterDef, type Opt } from "../../shared/masters";
 import { ApiError, codeRulesApi, masterApi } from "../api";
+import { useOnMasterChanged } from "../lib/masterEvents";
 import { emptyForm, recordLabel, recordTitle, sameForm, tabsOf, toForm, toPayload, validate, type Errors, type FormState, type Row } from "../lib/form";
 import type { Mode, MsgKind, StatusInfo } from "../types";
 import { MasterForm } from "../components/MasterForm";
@@ -124,6 +126,13 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
       .catch((e: Error) => live && flash(e.message, "err"));
     return () => { live = false; };
   }, [companyId, def, api, firstField]);
+
+  // A record made with Ctrl+M from one of this form's reference fields joins the options before the field is set to it.
+  useOnMasterChanged(async (key) => {
+    if (key !== def.key && !(key in lookupRows)) return;
+    const rows = await masterApi(key).list(companyId);
+    flushSync(() => { if (key === def.key) setItems(sortRows(def, rows)); else setLookupRows((p) => ({ ...p, [key]: rows })); });
+  });
 
   // Company screen par: Retained Earnings GL ke options us company ke ledgers se aate hain jo select hai (header wali nahi)
   useEffect(() => {
