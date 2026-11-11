@@ -14,6 +14,7 @@ import { purchaseRouter } from "./routes/purchase";
 import { auditRouter } from "./routes/audit";
 import { periodLockRouter } from "./routes/periodLock";
 import { codeRulesRouter } from "./routes/codeRules";
+import { numberSeriesRouter } from "./routes/numberSeries";
 import { HttpError, pgError } from "./routes/_util";
 
 export const app = express();
@@ -40,6 +41,7 @@ app.use("/api/purchase", purchaseRouter);
 app.use("/api/audit", auditRouter);
 app.use("/api/period-lock", periodLockRouter);
 app.use("/api/code-rules", codeRulesRouter);
+app.use("/api/number-series", numberSeriesRouter);
 for (const { key, router } of masterRouters) app.use(`/api/masters/${key}`, router);
 
 // Production: build ki hui React app yahin se serve hoti hai (npm run build && npm start)
