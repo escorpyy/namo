@@ -1,7 +1,8 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import * as S from "../../db/schema";
 import { HttpError } from "../../routes/_util";
-import { type Actor, type Opts, type Tx, assertBranch, assertVendorLedger, inActorTx, inTx, nextNumber, optDate, parseDate, resolveFiscalYear } from "./common";
+import { type Actor, type Opts, type Tx, assertBranch, assertVendorLedger, inActorTx, inTx, optDate, parseDate, resolveFiscalYear } from "./common";
+import { numberForSave } from "../numberSeries";
 import { resolveLines, type LineInput } from "./lines";
 import { ZERO, fmt, toMicro, type Micro } from "./money";
 import { billedByChallanLine, pending, receivedByOrderLine, withTolerance } from "./quantities";
@@ -27,6 +28,7 @@ export type PurchaseChallanInput = {
   challanNumber?: string;
   challanDate: string | Date;
   fiscalYear?: string;
+  numberSeriesId?: number | null; // which number series to number it from (blank = the user's default series)
   vendorGLId: number;
   subLedgerId?: number | null;
   agentId?: number | null;
@@ -78,9 +80,10 @@ export function savePurchaseChallan(input: PurchaseChallanInput, actor: Actor, o
     const rows = input.lines.map((l) => ({ ...l, rate: l.rate ?? (l.purchaseOrderLineId ? olRate.get(l.purchaseOrderLineId) : undefined) ?? 0 }));
     const lines = await resolveLines(tx, input.companyId, rows);
 
-    const challanNumber = input.challanNumber?.trim() || existing?.challanNumber || (await nextNumber(tx, "PurchaseChallan", "challanNumber", input.branchId, fy.code));
+    const numbered = await numberForSave(tx, { companyId: input.companyId, userId: actor.userId, documentType: "PURCHASE_CHALLAN", seriesId: input.numberSeriesId, typed: input.challanNumber, branchId: input.branchId, fiscalYear: fy.code, existing: existing ? { number: existing.challanNumber, numberSeriesId: existing.numberSeriesId } : null });
+    const challanNumber = numbered.number;
     const header = {
-      companyId: input.companyId, branchId: input.branchId, challanNumber, challanDate, fiscalYear: fy.code, vendorGLId: input.vendorGLId,
+      companyId: input.companyId, branchId: input.branchId, challanNumber, numberSeriesId: numbered.seriesId, challanDate, fiscalYear: fy.code, vendorGLId: input.vendorGLId,
       subLedgerId: input.subLedgerId ?? null, agentId: input.agentId ?? null, purchaseOrderId: input.purchaseOrderId ?? null,
       vendorChallanNo: input.vendorChallanNo?.trim() || null, vendorChallanDate: optDate(input.vendorChallanDate, "vendorChallanDate"),
       transporterName: input.transporterName ?? null, vehicleNo: input.vehicleNo ?? null, lrNo: input.lrNo ?? null, lrDate: optDate(input.lrDate, "lrDate"),

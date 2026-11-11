@@ -1,3 +1,4 @@
+import { NumberField } from "../../components/purchase/NumberField";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { ArrowRight, ChevronDown, ChevronRight, Copy, Pencil, Plus, RotateCcw, Save, Send, Trash2, X } from "lucide-react";
 import { purchaseApi, type PDoc, type PListRow, type PLookups } from "../../api";
@@ -51,7 +52,7 @@ const HELP: [string, string][] = [
 const BILL_HINTS = [...HINTS.filter((h) => !h.startsWith("F4")), "Alt+[ ]: Side panels"];
 
 export interface BForm {
-  invoiceDate: string; invoiceType: "LOCAL" | "IMPORT"; purchaseType: string; vendorGLId: string; subLedgerId: string; agentId: string; vendorInvoiceNo: string; vendorInvoiceDate: string;
+  numberSeriesId: string; docNumber: string; invoiceDate: string; invoiceType: "LOCAL" | "IMPORT"; purchaseType: string; vendorGLId: string; subLedgerId: string; agentId: string; vendorInvoiceNo: string; vendorInvoiceDate: string;
   dueDays: string; dueDate: string; remarks: string; purchaseChallanId: string; purchaseOrderId: string; importCostForBillId: string; importCostAllocationBasis: "VALUE" | "QUANTITY"; importCostTreatment: "CIF" | "LANDED_ONLY"; challanNo: string; orderNo: string;
   lines: LineRow[]; terms: TermRow[]; imp: Record<string, string>;
 }
@@ -80,7 +81,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   const cfg = useMemo<DocConfig<BForm>>(() => ({
     kind: "bills", title: "Purchase Bill", singular: "Bill", statusOptions: OPTIONS,
     emptyForm: (lk) => ({
-      invoiceDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), invoiceType: "LOCAL", purchaseType: "GOODS_PURCHASE_OTHERS", vendorGLId: "", subLedgerId: "", agentId: "",
+      numberSeriesId: "", docNumber: "", invoiceDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), invoiceType: "LOCAL", purchaseType: "GOODS_PURCHASE_OTHERS", vendorGLId: "", subLedgerId: "", agentId: "",
       vendorInvoiceNo: "", vendorInvoiceDate: "", dueDays: "", dueDate: "", remarks: "", purchaseChallanId: "", purchaseOrderId: "", importCostForBillId: "", importCostAllocationBasis: "VALUE", importCostTreatment: "CIF", challanNo: "", orderNo: "",
       lines: Array.from({ length: 10 }, () => blankLine()), terms: alwaysShowTerms(lk.terms), imp: {},
     }),
@@ -89,17 +90,18 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
       const imp: Record<string, string> = {};
       for (const k of IMPORT_FIELDS) imp[k.key] = str(d.importDetail?.[k.key]);
       return {
-        invoiceDate: str(d.invoiceDate), invoiceType: d.invoiceType, purchaseType: str(d.purchaseType), vendorGLId: str(d.vendorGLId), subLedgerId: str(d.subLedgerId), agentId: str(d.agentId),
+        numberSeriesId: str(d.numberSeriesId), docNumber: str(d.invoiceNumber), invoiceDate: str(d.invoiceDate), invoiceType: d.invoiceType, purchaseType: str(d.purchaseType), vendorGLId: str(d.vendorGLId), subLedgerId: str(d.subLedgerId), agentId: str(d.agentId),
         vendorInvoiceNo: str(d.vendorInvoiceNo), vendorInvoiceDate: str(d.vendorInvoiceDate), dueDays: str(d.dueDays), dueDate: str(d.dueDate), remarks: str(d.remarks),
         purchaseChallanId: str(d.purchaseChallanId), purchaseOrderId: str(d.purchaseOrderId), importCostForBillId: str(d.importCostForBillId), importCostAllocationBasis: d.importCostAllocationBasis === "QUANTITY" ? "QUANTITY" : "VALUE", importCostTreatment: d.importCostTreatment === "LANDED_ONLY" ? "LANDED_ONLY" : "CIF", challanNo: str(d.challanNumber), orderNo: str(d.orderNumber),
         lines: d.lines.length ? d.lines.map((l) => lineFromDoc(l, prods.get(str(l.productId)))) : [blankLine()], terms: (d.terms ?? []).map(termFromDoc), imp,
       };
     },
-    toPayload: (f) => {
+    toPayload: (f, doc) => {
       const prods = new Map(lkRef.current!.products.map((x) => [String(x.id), x]));
       const masters = new Map(lkRef.current!.terms.map((x) => [String(x.id), x]));
       const nn = (v: string) => v.trim() || null;
       return {
+        ...(doc ? {} : { invoiceNumber: f.docNumber.trim() || null, numberSeriesId: f.numberSeriesId ? Number(f.numberSeriesId) : null }),
         invoiceDate: f.invoiceDate, invoiceType: f.invoiceType, purchaseType: f.purchaseType, vendorGLId: Number(f.vendorGLId), subLedgerId: f.subLedgerId ? Number(f.subLedgerId) : null,
         agentId: f.agentId ? Number(f.agentId) : null, vendorInvoiceNo: nn(f.vendorInvoiceNo), vendorInvoiceDate: f.vendorInvoiceDate || null,
         dueDays: f.dueDays ? Number(f.dueDays) : null, dueDate: f.dueDate || null, remarks: nn(f.remarks),
@@ -535,7 +537,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
               <div className="mx-auto max-w-[1080px] space-y-4">
           <FormSection title="Bill Header" hint="Invoice, supplier, payment and document links">
             <div className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3.5 xl:grid-cols-3 2xl:grid-cols-4">
-              <Field label="Invoice No"><input disabled className="fld bg-slate-100 text-slate-600" value={doc?.invoiceNumber ?? ""} placeholder="(next number)" aria-label="Invoice number" /></Field>
+              <NumberField label="Invoice No" documentType="PURCHASE_BILL" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.invoiceNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => s.patch(c)} />
               <DateField label="Invoice Date" name="invoiceDate" value={f.invoiceDate} onChange={(v) => {
                 // with due days entered, the due date follows the invoice date
                 const due = f.dueDays ? addDaysIso(v, Number(f.dueDays)) : "";

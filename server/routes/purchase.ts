@@ -96,7 +96,7 @@ function rows(v: unknown, spec: Record<string, Kind>, name: string, max: number,
 const LINE = { productId: "int", altQty: "num", altUnitId: "int", qty: "num", unitId: "int", rate: "num" } as const satisfies Record<string, Kind>;
 const TRACK = { locationId: "int", batchNo: "str", manufactureDate: "date", expiryDate: "date" } as const satisfies Record<string, Kind>;
 const TERM = { termId: "int", lineNumber: "int", calcType: ["PERCENT", "AMOUNT"], rate: "num", inputAmount: "num", isOverridden: "bool", overrideAmount: "num" } as const satisfies Record<string, Kind>;
-const HEAD = { fiscalYear: "str", vendorGLId: "int", subLedgerId: "int", agentId: "int", remarks: "str" } as const satisfies Record<string, Kind>;
+const HEAD = { fiscalYear: "str", numberSeriesId: "int", vendorGLId: "int", subLedgerId: "int", agentId: "int", remarks: "str" } as const satisfies Record<string, Kind>;
 const IMPORT: Record<string, Kind> = {
   customsDeclarationNo: "str", customsDeclarationDate: "date", customsOffice: "str", countryOfOrigin: "str", lcNo: "str", lcDate: "date", lcBankName: "str",
   transportMode: ["ROAD", "AIR", "RAIL", "OTHER"], blAwbNo: "str", blAwbDate: "date", transporterName: "str", vehicleNo: "str", lrNo: "str", lrDate: "date", importPermitNo: "str", importPermitDate: "date",

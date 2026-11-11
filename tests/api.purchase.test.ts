@@ -117,6 +117,8 @@ describe.skipIf(!DB_READY)("Purchase documents (API)", () => {
         const co = W.co;
         await tx.execute(sql`set local session_replication_role = replica`);
         const byDoc = (child: string, fk: string, parent: string) => tx.execute(sql`delete from ${sql.identifier(child)} where ${sql.identifier(fk)} in (select id from ${sql.identifier(parent)} where "companyId" = ${co})`);
+        for (const t of ["NumberCounter", "NumberSeriesUser", "NumberSeriesBranch"]) await byDoc(t, "seriesId", "NumberSeries");
+        await tx.execute(sql`delete from "NumberSeries" where "companyId" = ${co}`);
         await tx.execute(sql`delete from "PurchaseDocumentTermAllocation" where "documentTermId" in (select id from "PurchaseDocumentTerm" where "companyId" = ${co})`);
         await tx.execute(sql`delete from "PurchaseDocumentTerm" where "companyId" = ${co}`);
         await byDoc("PurchaseBillImportDetail", "purchaseBillId", "PurchaseBill");
@@ -175,6 +177,51 @@ describe.skipIf(!DB_READY)("Purchase documents (API)", () => {
     it("lookups needs a company", async () => {
       expect((await call("GET", "/api/purchase/lookups")).status).toBe(400);
       expect((await call("GET", "/api/purchase/lookups?companyId=abc")).status).toBe(400);
+    });
+  });
+
+  // =====================================================================================================================
+  describe("number series on documents", () => {
+    const mkSeries = async (documentType: string, over: Record<string, unknown> = {}) => {
+      const r = await call("POST", "/api/number-series", { companyId: W.co, documentType, name: `S${uniq()}`, prefix: "X-", padding: 3, mode: "AUTOMATIC", ...over });
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      return r.body as { id: number; name: string };
+    };
+    const off = (id: number) => db.execute(sql`update "NumberSeries" set "isActive" = false, "isDefault" = false where id = ${id}`);
+
+    it("an order takes its number from the default series, and saving it again does not change the number", async () => {
+      const s = await mkSeries("PURCHASE_ORDER", { prefix: "PO-", startNumber: 5, isDefault: true });
+      const a = await mkOrder({}, false), b = await mkOrder({}, false);
+      expect([a.orderNumber, b.orderNumber]).toEqual(["PO-005", "PO-006"]);
+      expect((await get("orders", a.id)).body.numberSeriesId).toBe(s.id);
+      const again = await call("PUT", `${base("orders")}/${a.id}?${qs()}`, orderBody({ orderNumber: "PO-005" }));
+      expect(again.body.result.orderNumber).toBe("PO-005");
+      const typedOnAuto = await call("PUT", `${base("orders")}/${a.id}?${qs()}`, orderBody({ orderNumber: "MINE-1" }));
+      expect(typedOnAuto.body.result.orderNumber).toBe("PO-005"); // an automatic series does not let the number be overtyped
+      await off(s.id);
+    });
+
+    it("a suggested series keeps what the user typed; a manual series needs a number; another series can be chosen per document", async () => {
+      const sug = await mkSeries("PURCHASE_CHALLAN", { prefix: "CH-", mode: "SUGGESTED" });
+      const typed = await mkChallan({ numberSeriesId: sug.id, challanNumber: "MY-77" }, false);
+      expect(typed.challanNumber).toBe("MY-77");
+      const given = await mkChallan({ numberSeriesId: sug.id }, false);
+      expect(given.challanNumber).toBe("CH-001");
+      const man = await mkSeries("PURCHASE_CHALLAN", { mode: "MANUAL", prefix: "" });
+      const none = await call("POST", base("challans"), challanBody({ numberSeriesId: man.id }));
+      expect(none.status).toBe(400);
+      const ok = await mkChallan({ numberSeriesId: man.id, challanNumber: "FREE/1" }, false);
+      expect(ok.challanNumber).toBe("FREE/1");
+      await off(sug.id); await off(man.id);
+    });
+
+    it("a series made for another kind of document or switched off is refused", async () => {
+      const bill = await mkSeries("PURCHASE_BILL");
+      const r = await call("POST", base("orders"), orderBody({ numberSeriesId: bill.id }));
+      expect(r.status).toBe(409);
+      await off(bill.id);
+      const gone = await call("POST", base("challans"), challanBody({ numberSeriesId: bill.id }));
+      expect(gone.status).toBe(409);
     });
   });
 

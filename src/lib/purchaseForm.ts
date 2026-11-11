@@ -247,6 +247,7 @@ export function dialogTermsToApply(draft: TermRow[], masters: Map<string, Term>)
 // it to other documents. The vendor invoice no./date, due date and customs declaration no./date are cleared (a repeated vendor invoice no. or a
 // repeated declaration no. is refused on save), the order and challan links are dropped, the invoice date is today's, and every row gets a new key.
 export interface BillCopyFields {
+  numberSeriesId?: string; docNumber?: string; // a copy is a new bill: it gets its own number
   invoiceDate: string; vendorInvoiceNo: string; vendorInvoiceDate: string; dueDate: string;
   purchaseChallanId: string; purchaseOrderId: string; challanNo: string; orderNo: string;
   lines: LineRow[]; terms: TermRow[]; imp: Record<string, string>;
@@ -254,7 +255,7 @@ export interface BillCopyFields {
 export function copyBillForm<F extends BillCopyFields>(source: F, invoiceDate: string): F {
   return {
     ...source,
-    invoiceDate, vendorInvoiceNo: "", vendorInvoiceDate: "", dueDate: "",
+    invoiceDate, vendorInvoiceNo: "", vendorInvoiceDate: "", dueDate: "", numberSeriesId: "", docNumber: "",
     purchaseChallanId: "", purchaseOrderId: "", challanNo: "", orderNo: "",
     lines: source.lines.map((l) => ({ ...l, key: newKey(), purchaseOrderLineId: "", challanLineId: "", link: "" })),
     terms: source.terms.map((t) => ({ ...t, key: newKey(), finalAmount: "" })),

@@ -1,3 +1,4 @@
+import { NumberField } from "../../components/purchase/NumberField";
 import { useMemo, type MutableRefObject } from "react";
 import { Check, Lock, Ban } from "lucide-react";
 import type { PDoc } from "../../api";
@@ -17,7 +18,7 @@ export interface PurchaseScreenProps {
 }
 
 interface OForm {
-  orderDate: string; vendorGLId: string; subLedgerId: string; agentId: string; vendorRefNo: string; vendorRefDate: string; expectedDate: string; remarks: string;
+  numberSeriesId: string; docNumber: string; orderDate: string; vendorGLId: string; subLedgerId: string; agentId: string; vendorRefNo: string; vendorRefDate: string; expectedDate: string; remarks: string;
   lines: LineRow[]; terms: TermRow[];
 }
 const STATUS_TONE: Record<string, "slate" | "green" | "amber" | "red"> = { DRAFT: "slate", APPROVED: "green", CLOSED: "amber", CANCELLED: "red" };
@@ -28,13 +29,13 @@ export default function PurchaseOrderScreen(p: PurchaseScreenProps) {
   const cfg = useMemo<DocConfig<OForm>>(() => ({
     kind: "orders", title: "Purchase Order", singular: "Order", statusOptions: OPTIONS,
     emptyForm: (lk) => ({
-      orderDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), vendorGLId: "", subLedgerId: "", agentId: "", vendorRefNo: "", vendorRefDate: "", expectedDate: "", remarks: "",
+      numberSeriesId: "", docNumber: "", orderDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), vendorGLId: "", subLedgerId: "", agentId: "", vendorRefNo: "", vendorRefDate: "", expectedDate: "", remarks: "",
       lines: [blankLine()], terms: alwaysShowTerms(lk.terms),
     }),
     toForm: (d: PDoc, lk) => {
       const prods = new Map(lk.products.map((x) => [String(x.id), x]));
       return {
-        orderDate: str(d.orderDate), vendorGLId: str(d.vendorGLId), subLedgerId: str(d.subLedgerId), agentId: str(d.agentId), vendorRefNo: str(d.vendorRefNo), vendorRefDate: str(d.vendorRefDate),
+        numberSeriesId: str(d.numberSeriesId), docNumber: str(d.orderNumber), orderDate: str(d.orderDate), vendorGLId: str(d.vendorGLId), subLedgerId: str(d.subLedgerId), agentId: str(d.agentId), vendorRefNo: str(d.vendorRefNo), vendorRefDate: str(d.vendorRefDate),
         expectedDate: str(d.expectedDate), remarks: str(d.remarks),
         lines: d.lines.length ? d.lines.map((l) => lineFromDoc(l, prods.get(str(l.productId)))) : [blankLine()], terms: (d.terms ?? []).map(termFromDoc),
       };
@@ -45,7 +46,7 @@ export default function PurchaseOrderScreen(p: PurchaseScreenProps) {
       return {
         orderDate: f.orderDate, vendorGLId: Number(f.vendorGLId), subLedgerId: f.subLedgerId ? Number(f.subLedgerId) : null, agentId: f.agentId ? Number(f.agentId) : null,
         vendorRefNo: f.vendorRefNo.trim() || null, vendorRefDate: f.vendorRefDate || null, expectedDate: f.expectedDate || null, remarks: f.remarks.trim() || null,
-        ...(doc ? { orderNumber: doc.orderNumber } : {}),
+        ...(doc ? { orderNumber: doc.orderNumber } : { orderNumber: f.docNumber.trim() || null, numberSeriesId: f.numberSeriesId ? Number(f.numberSeriesId) : null }),
         lines: f.lines.filter((l) => !isBlankLine(l)).map((l) => lineToPayload(l, prods.get(l.productId), "order")),
         terms: f.terms.filter((t) => !isBlankTerm(t)).map((t) => termToPayload(t, masters.get(t.termId))),
       };
@@ -97,7 +98,7 @@ export default function PurchaseOrderScreen(p: PurchaseScreenProps) {
       {f && lk && (
         <div className="space-y-3 pt-2">
           <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-x-3 gap-y-2">
-            <Field label="Order No"><input disabled className="fld bg-slate-100 text-slate-600" value={doc?.orderNumber ?? ""} placeholder="(next number)" aria-label="Order number" /></Field>
+            <NumberField label="Order No" documentType="PURCHASE_ORDER" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.orderNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => s.patch(c)} />
             <DateField label="Order Date" name="orderDate" value={f.orderDate} onChange={(v) => { s.patch({ orderDate: v }); s.clearError("orderDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("orderDate")} required />
             <VendorFields lookups={lk} contextKey={String(p.companyId)} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors}
               onChange={(c) => { s.patch(c); s.clearError("vendorGLId", "subLedgerId"); }} />

@@ -1,7 +1,8 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import * as S from "../../db/schema";
 import { HttpError } from "../../routes/_util";
-import { type Actor, type Opts, type Tx, assertBranch, assertVendorLedger, inActorTx, inTx, nextNumber, optDate, parseDate, resolveFiscalYear } from "./common";
+import { type Actor, type Opts, type Tx, assertBranch, assertVendorLedger, inActorTx, inTx, optDate, parseDate, resolveFiscalYear } from "./common";
+import { numberForSave } from "../numberSeries";
 import { assertMandatoryTerms, recalcTerms, saveTerms, type TermInput } from "./docTerms";
 import { resolveLines, type LineInput } from "./lines";
 import { ZERO, fmt, toMicro } from "./money";
@@ -18,6 +19,7 @@ export type PurchaseOrderInput = {
   orderNumber?: string; // blank = next number for the branch and fiscal year
   orderDate: string | Date;
   fiscalYear?: string; // blank = the fiscal year that contains the order date
+  numberSeriesId?: number | null; // which number series to number it from (blank = the user's default series)
   vendorGLId: number;
   subLedgerId?: number | null;
   agentId?: number | null;
@@ -54,9 +56,10 @@ export function savePurchaseOrder(input: PurchaseOrderInput, actor: Actor, opts:
     const fy = await resolveFiscalYear(tx, input.companyId, orderDate, input.fiscalYear ?? null);
     const lines = await resolveLines(tx, input.companyId, input.lines);
 
-    const orderNumber = input.orderNumber?.trim() || existing?.orderNumber || (await nextNumber(tx, "PurchaseOrder", "orderNumber", input.branchId, fy.code));
+    const numbered = await numberForSave(tx, { companyId: input.companyId, userId: actor.userId, documentType: "PURCHASE_ORDER", seriesId: input.numberSeriesId, typed: input.orderNumber, branchId: input.branchId, fiscalYear: fy.code, existing: existing ? { number: existing.orderNumber, numberSeriesId: existing.numberSeriesId } : null });
+    const orderNumber = numbered.number;
     const header = {
-      companyId: input.companyId, branchId: input.branchId, orderNumber, orderDate, fiscalYear: fy.code, vendorGLId: input.vendorGLId,
+      companyId: input.companyId, branchId: input.branchId, orderNumber, numberSeriesId: numbered.seriesId, orderDate, fiscalYear: fy.code, vendorGLId: input.vendorGLId,
       subLedgerId: input.subLedgerId ?? null, agentId: input.agentId ?? null, vendorRefNo: input.vendorRefNo ?? null,
       vendorRefDate: optDate(input.vendorRefDate, "vendorRefDate"), expectedDate, remarks: input.remarks ?? null, updatedAt: new Date(),
     };

@@ -1,6 +1,7 @@
 import type { ContextData } from "./types";
 import type { Row } from "./lib/form";
 import type { CodeMode, CodeRuleRow, CodeSuggestion } from "../shared/codeRules";
+import type { SeriesMode, SeriesRow } from "../shared/numberSeries";
 
 export class ApiError extends Error {
   constructor(
@@ -51,6 +52,17 @@ export const codeRulesApi = {
     req<CodeRuleRow>(`/api/code-rules/${key}`, { method: "PUT", body: JSON.stringify({ companyId, userId, ...v }) }),
   suggest: (companyId: number, key: string, v: { parentId?: number | null; name?: string; type?: string }) =>
     req<CodeSuggestion>(`/api/code-rules/${key}/suggest`, { method: "POST", body: JSON.stringify({ companyId, ...v }) }),
+};
+
+// Number series (shared/numberSeries.ts): the settings, and what a document form offers
+export interface AvailableSeries { id: number; name: string; mode: SeriesMode; assignAt: "DRAFT" | "POST"; isDefault: boolean; next: string | null; left: number | null; problem?: string }
+export const numberSeriesApi = {
+  list: (companyId: number) => req<SeriesRow[]>(`/api/number-series?companyId=${companyId}`),
+  users: () => req<{ id: number; name: string }[]>(`/api/number-series/users`),
+  save: (companyId: number, id: number | null, v: Record<string, unknown>, userId?: number) =>
+    req<SeriesRow>(id ? `/api/number-series/${id}` : `/api/number-series`, { method: id ? "PUT" : "POST", body: JSON.stringify({ companyId, userId, ...v }) }),
+  available: (companyId: number, documentType: string, branchId: number, fiscalYear: string, userId?: number) =>
+    req<AvailableSeries[]>(`/api/number-series/available?companyId=${companyId}&documentType=${documentType}&branchId=${branchId}&fiscalYear=${encodeURIComponent(fiscalYear)}${userId ? `&userId=${userId}` : ""}`),
 };
 
 // Opening Balance: grid screen ka alag API (company + branch + fiscal year ke saare ledgers)

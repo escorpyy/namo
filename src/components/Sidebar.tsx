@@ -17,6 +17,7 @@ import {
     "purchase-bills",
     "purchase-import-assessments",
     "code-numbering",
+    "number-series",
   ];
 
 type Item = { id: string; label: string };
@@ -166,6 +167,7 @@ const sections: Section[] = [
       { id: "companies", label: "Company" },
       { id: "branches", label: "Branch" },
       { id: "code-numbering", label: "Code Numbering" },
+      { id: "number-series", label: "Number Series" },
       { id: "setup-accounting", label: "Accounting" },
       { id: "setup-tax", label: "Tax" },
       { id: "setup-voucher-configuration", label: "Voucher Configuration" },

@@ -1,3 +1,4 @@
+import { NumberField } from "../../components/purchase/NumberField";
 import { useEffect, useMemo, useState } from "react";
 import { CheckCheck, FileText } from "lucide-react";
 import { purchaseApi, type PDoc, type PListRow } from "../../api";
@@ -10,7 +11,7 @@ import type { PurchaseScreenProps } from "./PurchaseOrderScreen";
 import { useDocScreen, type DocConfig, type Errors } from "./useDocScreen";
 
 interface CForm {
-  challanDate: string; vendorGLId: string; subLedgerId: string; agentId: string; purchaseOrderId: string; vendorChallanNo: string; vendorChallanDate: string;
+  numberSeriesId: string; docNumber: string; challanDate: string; vendorGLId: string; subLedgerId: string; agentId: string; purchaseOrderId: string; vendorChallanNo: string; vendorChallanDate: string;
   transporterName: string; vehicleNo: string; lrNo: string; lrDate: string; remarks: string; lines: LineRow[];
 }
 const OPTIONS = [{ value: "DRAFT", label: "Draft" }, { value: "CONFIRMED", label: "Confirmed" }];
@@ -20,13 +21,13 @@ export default function PurchaseChallanScreen(p: PurchaseScreenProps & { onCreat
   const cfg = useMemo<DocConfig<CForm>>(() => ({
     kind: "challans", title: "Purchase Challan", singular: "Challan", statusOptions: OPTIONS,
     emptyForm: (lk) => ({
-      challanDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), vendorGLId: "", subLedgerId: "", agentId: "", purchaseOrderId: "", vendorChallanNo: "", vendorChallanDate: "",
+      numberSeriesId: "", docNumber: "", challanDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), vendorGLId: "", subLedgerId: "", agentId: "", purchaseOrderId: "", vendorChallanNo: "", vendorChallanDate: "",
       transporterName: "", vehicleNo: "", lrNo: "", lrDate: "", remarks: "", lines: [blankLine()],
     }),
     toForm: (d: PDoc, lk) => {
       const prods = new Map(lk.products.map((x) => [String(x.id), x]));
       return {
-        challanDate: str(d.challanDate), vendorGLId: str(d.vendorGLId), subLedgerId: str(d.subLedgerId), agentId: str(d.agentId), purchaseOrderId: str(d.purchaseOrderId),
+        numberSeriesId: str(d.numberSeriesId), docNumber: str(d.challanNumber), challanDate: str(d.challanDate), vendorGLId: str(d.vendorGLId), subLedgerId: str(d.subLedgerId), agentId: str(d.agentId), purchaseOrderId: str(d.purchaseOrderId),
         vendorChallanNo: str(d.vendorChallanNo), vendorChallanDate: str(d.vendorChallanDate), transporterName: str(d.transporterName), vehicleNo: str(d.vehicleNo), lrNo: str(d.lrNo), lrDate: str(d.lrDate),
         remarks: str(d.remarks), lines: d.lines.length ? d.lines.map((l) => lineFromDoc(l, prods.get(str(l.productId)))) : [blankLine()],
       };
@@ -37,7 +38,7 @@ export default function PurchaseChallanScreen(p: PurchaseScreenProps & { onCreat
         challanDate: f.challanDate, vendorGLId: Number(f.vendorGLId), subLedgerId: f.subLedgerId ? Number(f.subLedgerId) : null, agentId: f.agentId ? Number(f.agentId) : null,
         purchaseOrderId: f.purchaseOrderId ? Number(f.purchaseOrderId) : null, vendorChallanNo: f.vendorChallanNo.trim() || null, vendorChallanDate: f.vendorChallanDate || null,
         transporterName: f.transporterName.trim() || null, vehicleNo: f.vehicleNo.trim() || null, lrNo: f.lrNo.trim() || null, lrDate: f.lrDate || null, remarks: f.remarks.trim() || null,
-        ...(doc ? { challanNumber: doc.challanNumber } : {}),
+        ...(doc ? { challanNumber: doc.challanNumber } : { challanNumber: f.docNumber.trim() || null, numberSeriesId: f.numberSeriesId ? Number(f.numberSeriesId) : null }),
         lines: f.lines.filter((l) => !isBlankLine(l)).map((l) => lineToPayload(l, prods.get(l.productId), "challan")),
       };
     },
@@ -112,7 +113,7 @@ export default function PurchaseChallanScreen(p: PurchaseScreenProps & { onCreat
       {f && lk && (
         <div className="space-y-3 pt-2">
           <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-x-3 gap-y-2">
-            <Field label="Challan No"><input disabled className="fld bg-slate-100 text-slate-600" value={doc?.challanNumber ?? ""} placeholder="(next number)" aria-label="Challan number" /></Field>
+            <NumberField label="Challan No" documentType="PURCHASE_CHALLAN" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.challanNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => s.patch(c)} />
             <DateField label="Challan Date" name="challanDate" value={f.challanDate} onChange={(v) => { s.patch({ challanDate: v }); s.clearError("challanDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("challanDate")} required />
             <Field label="Against Order" className="col-span-1 sm:col-span-2" error={s.err("purchaseOrderId")}>
               <Combobox fieldName="purchaseOrderId" placeholder="Approved order (optional)" value={f.purchaseOrderId} hasError={!!s.err("purchaseOrderId")} options={orderOpts} disabled={ro} onChange={(v) => void pickOrder(v)} onCommit={(el, dir) => focusStep(el, dir)} />

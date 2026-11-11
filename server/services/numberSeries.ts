@@ -99,3 +99,23 @@ export async function assignNumber(tx: Tx, o: { companyId: number; userId: numbe
   const a = await nextOfSeries(tx, s, o, true);
   return { number: a.number, seriesId: s.id, mode: s.mode as SeriesMode };
 }
+
+/**
+ * The number to store when a document is saved. A new document (or one moved to another fiscal year, when keepWhen says so) gets a
+ * number from assignNumber(). An existing document keeps its number: changing the series on a saved document is the only thing that
+ * gives it a new one; and a typed number replaces the old one only if the series lets the user type (suggested / manual / no series).
+ */
+export async function numberForSave(tx: Tx, o: {
+  companyId: number; userId: number | null; documentType: DocumentType; seriesId?: number | null; typed?: string | null; branchId: number; fiscalYear: string;
+  existing?: { number: string; numberSeriesId: number | null } | null;
+}): Promise<Assigned> {
+  const typed = o.typed?.trim() || "", ex = o.existing;
+  if (!ex) return assignNumber(tx, o);
+  const switching = !!o.seriesId && o.seriesId !== ex.numberSeriesId;
+  if (switching) return assignNumber(tx, { ...o, typed: typed === ex.number ? "" : typed });
+  if (typed && typed !== ex.number) {
+    const [s] = ex.numberSeriesId ? await tx.select().from(S.numberSeries).where(eq(S.numberSeries.id, ex.numberSeriesId)) : [];
+    if (!s || s.mode !== "AUTOMATIC") return { number: typed, seriesId: ex.numberSeriesId, mode: s ? (s.mode as SeriesMode) : "LEGACY" };
+  }
+  return { number: ex.number, seriesId: ex.numberSeriesId, mode: "LEGACY" };
+}

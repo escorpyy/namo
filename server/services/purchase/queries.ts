@@ -86,7 +86,7 @@ export function getPurchaseOrder(id: number, companyId: number) {
     ]);
     return {
       id: o.id, companyId: o.companyId, branchId: o.branchId, ...names,
-      orderNumber: o.orderNumber, orderDate: iso(o.orderDate), fiscalYear: o.fiscalYear, vendorGLId: o.vendorGLId, subLedgerId: o.subLedgerId, agentId: o.agentId,
+      orderNumber: o.orderNumber, numberSeriesId: o.numberSeriesId, orderDate: iso(o.orderDate), fiscalYear: o.fiscalYear, vendorGLId: o.vendorGLId, subLedgerId: o.subLedgerId, agentId: o.agentId,
       vendorRefNo: o.vendorRefNo, vendorRefDate: iso(o.vendorRefDate), expectedDate: iso(o.expectedDate), remarks: o.remarks,
       status: o.status, approvedAt: o.approvedAt, closedAt: o.closedAt,
       basicAmount: amt(o.basicAmount), termAmount: amt(o.termAmount), totalAmount: amt(o.totalAmount),
@@ -157,7 +157,7 @@ export function getPurchaseChallan(id: number, companyId: number) {
     const olNo = new Map(orderLines.map((l) => [l.id, l.lineNumber]));
     return {
       id: c.id, companyId: c.companyId, branchId: c.branchId, ...names,
-      challanNumber: c.challanNumber, challanDate: iso(c.challanDate), fiscalYear: c.fiscalYear, vendorGLId: c.vendorGLId, subLedgerId: c.subLedgerId, agentId: c.agentId,
+      challanNumber: c.challanNumber, numberSeriesId: c.numberSeriesId, challanDate: iso(c.challanDate), fiscalYear: c.fiscalYear, vendorGLId: c.vendorGLId, subLedgerId: c.subLedgerId, agentId: c.agentId,
       purchaseOrderId: c.purchaseOrderId, orderNumber: order[0]?.orderNumber ?? null, orderStatus: order[0]?.status ?? null,
       vendorChallanNo: c.vendorChallanNo, vendorChallanDate: iso(c.vendorChallanDate), transporterName: c.transporterName, vehicleNo: c.vehicleNo, lrNo: c.lrNo, lrDate: iso(c.lrDate),
       remarks: c.remarks, isConfirmed: c.isConfirmed, confirmedAt: c.confirmedAt,
@@ -258,7 +258,7 @@ export function getPurchaseBill(id: number, companyId: number) {
     const reversed = reversedBy.length > 0;
     return {
       id: b.id, companyId: b.companyId, branchId: b.branchId, ...names,
-      invoiceNumber: b.invoiceNumber, invoiceDate: iso(b.invoiceDate), fiscalYear: b.fiscalYear, invoiceType: b.invoiceType, purchaseType: b.purchaseType,
+      invoiceNumber: b.invoiceNumber, numberSeriesId: b.numberSeriesId, invoiceDate: iso(b.invoiceDate), fiscalYear: b.fiscalYear, invoiceType: b.invoiceType, purchaseType: b.purchaseType,
       vendorGLId: b.vendorGLId, subLedgerId: b.subLedgerId, agentId: b.agentId, vendorInvoiceNo: b.vendorInvoiceNo, vendorInvoiceDate: iso(b.vendorInvoiceDate),
       purchaseChallanId: b.purchaseChallanId, challanNumber: challan[0]?.challanNumber ?? null, purchaseOrderId: b.purchaseOrderId, orderNumber: order[0]?.orderNumber ?? null,
       mainBillId: b.mainBillId, mainBill: main[0] ?? null, reversalOfId: b.reversalOfId, reversalOf, reversedBy: reversedBy[0] ?? null,

@@ -7,6 +7,7 @@ import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import MasterScreen from "./screens/MasterScreen";
 import CodeNumberingScreen from "./screens/CodeNumberingScreen";
+import NumberSeriesScreen from "./screens/NumberSeriesScreen";
 import OpeningBalanceScreen from "./screens/OpeningBalanceScreen";
 import StockOpeningScreen from "./screens/StockOpeningScreen";
 import PurchaseOrderScreen from "./screens/purchase/PurchaseOrderScreen";
@@ -143,6 +144,8 @@ export default function App() {
           />
         ) : screen === "code-numbering" ? (
           <CodeNumberingScreen key={`${screen}:${companyId}`} companyId={companyId} userId={ctx.user.id} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} />
+        ) : screen === "number-series" ? (
+          <NumberSeriesScreen key={`${screen}:${companyId}`} companyId={companyId} userId={ctx.user.id} company={co} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} />
         ) : screen === "opening-balance" ? (
           <OpeningBalanceScreen
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} fyId={fyId} userId={ctx.user.id}

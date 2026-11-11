@@ -37,6 +37,11 @@ numberSeriesRouter.get("/available", wrap(async (req, res) => {
   res.json(await availableSeries(whole(q(req.query.companyId), "companyId"), q(req.query.documentType) ?? "", await actor(q(req.query.userId)), whole(q(req.query.branchId), "branchId"), fy));
 }));
 
+// the people a series can be limited to
+numberSeriesRouter.get("/users", wrap(async (_req, res) => {
+  res.json(await db.select({ id: S.user.id, name: S.user.name }).from(S.user).where(eq(S.user.isActive, true)).orderBy(S.user.name));
+}));
+
 numberSeriesRouter.get("/", wrap(async (req, res) => { res.json(await listSeries(whole(q(req.query.companyId), "companyId"))); }));
 
 numberSeriesRouter.post("/", wrap(async (req, res) => {

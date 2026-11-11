@@ -3,7 +3,8 @@ import { withInitialPostedChildInsert } from "../../db/audit";
 import * as S from "../../db/schema";
 import { HttpError } from "../../routes/_util";
 import { guardPeriod, type LockOverride } from "../periodLock";
-import { type Actor, type Opts, type Tx, addDays, assertBranch, assertVendorLedger, idList, inActorTx, inTx, nextNumber, optDate, parseDate, resolveFiscalYear, today } from "./common";
+import { type Actor, type Opts, type Tx, addDays, assertBranch, assertVendorLedger, idList, inActorTx, inTx, optDate, parseDate, resolveFiscalYear, today } from "./common";
+import { numberForSave } from "../numberSeries";
 import { assertMandatoryTerms, recalcTerms, saveTerms, type TermInput } from "./docTerms";
 import { landed } from "./landed";
 import { importCostBasis } from "./importCostBasis";
@@ -49,6 +50,7 @@ export type PurchaseBillInput = {
   invoiceNumber?: string;
   invoiceDate: string | Date;
   fiscalYear?: string;
+  numberSeriesId?: number | null; // which number series to number it from (blank = the user's default series)
   invoiceType?: "LOCAL" | "IMPORT";
   purchaseType?: "GOODS_PURCHASE_OTHERS" | "GOODS_PURCHASE_CAPITAL" | "SERVICE_PURCHASE_OTHERS" | "SERVICE_PURCHASE_CAPITAL";
   vendorGLId: number;
@@ -262,7 +264,8 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
 
     // A draft moved into another fiscal year starts that year's numbering; the old number belongs to the old year's sequence.
     const keepsNumber = !!existing && existing.fiscalYear === fy.code;
-    const invoiceNumber = input.invoiceNumber?.trim() || (keepsNumber ? existing!.invoiceNumber : await nextNumber(tx, "PurchaseBill", "invoiceNumber", input.branchId, fy.code));
+    const numbered = await numberForSave(tx, { companyId: input.companyId, userId: actor.userId, documentType: "PURCHASE_BILL", seriesId: input.numberSeriesId, typed: input.invoiceNumber, branchId: input.branchId, fiscalYear: fy.code, existing: keepsNumber ? { number: existing!.invoiceNumber, numberSeriesId: existing!.numberSeriesId } : null });
+    const invoiceNumber = numbered.number;
     const dueDate = input.dueDate ? parseDate(input.dueDate, "dueDate") : addDays(invoiceDate, dueDays);
     const vendorInvoiceNo = input.vendorInvoiceNo?.trim() || null;
     if (vendorInvoiceNo) {
@@ -280,7 +283,7 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
       }
     }
     const header = {
-      companyId: input.companyId, branchId: input.branchId, invoiceNumber, invoiceDate, fiscalYear: fy.code, invoiceType,
+      companyId: input.companyId, branchId: input.branchId, invoiceNumber, numberSeriesId: numbered.seriesId, invoiceDate, fiscalYear: fy.code, invoiceType,
       purchaseType, vendorGLId: input.vendorGLId, subLedgerId: input.subLedgerId ?? null, agentId: input.agentId ?? null,
       vendorInvoiceNo, vendorInvoiceDate: optDate(input.vendorInvoiceDate, "vendorInvoiceDate"),
       purchaseChallanId: input.purchaseChallanId ?? null, purchaseOrderId: input.purchaseOrderId ?? null, mainBillId: input.mainBillId ?? null,
