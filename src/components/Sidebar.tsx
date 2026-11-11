@@ -2,12 +2,12 @@ import { useState } from "react";
 import {
   BarChart3, BookOpen, BookText, Boxes, ChevronDown, ChevronRight, ClipboardList, FileText, FolderTree, Landmark,
   LayoutDashboard, Layers, Map, MapPin, Package, PanelLeftClose, PanelLeftOpen, Percent, Ruler, Settings,
-  Scale, Tag, UserCheck, UserSquare, Users, Warehouse, Building2, Network, CalendarRange, UserCog, KeyRound, Receipt, ShoppingCart,
+  Scale, Hash, Tag, UserCheck, UserSquare, Users, Warehouse, Building2, Network, CalendarRange, UserCog, KeyRound, Receipt, ShoppingCart,
 } from "lucide-react";
 import { MASTERS } from "../../shared/masters";
 
 // Master-engine ke bahar ki custom screens (grid etc.)
-export const CUSTOM_SCREENS = ["opening-balance", "stock-opening", "purchase-orders", "purchase-challans", "purchase-bills", "purchase-import-assessments"];
+export const CUSTOM_SCREENS = ["opening-balance", "stock-opening", "purchase-orders", "purchase-challans", "purchase-bills", "purchase-import-assessments", "code-numbering"];
 
 type Item = { id: string; label: string; icon: React.ElementType };
 type Section = { id: string; label: string; icon: React.ElementType; items: Item[] };
@@ -70,6 +70,7 @@ const sections: Section[] = [
       { id: "fiscal-years", label: "Fiscal Year", icon: CalendarRange },
       { id: "users", label: "User", icon: UserCog },
       { id: "user-access", label: "User Access", icon: KeyRound },
+      { id: "code-numbering", label: "Code Numbering", icon: Hash },
     ],
   },
   {

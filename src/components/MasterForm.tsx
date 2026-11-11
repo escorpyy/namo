@@ -26,6 +26,8 @@ interface Props {
   calendar: "BS" | "AD";
   tab: string;
   onTab: (t: string) => void;
+  /** a small note under a field (the code field says where its suggestion came from) */
+  hints?: Record<string, string>;
   actions: { save: () => void; clear: () => void; edit: () => void; del: () => void; newRec: () => void; cancel: () => void };
 }
 
@@ -33,7 +35,7 @@ const fmt = (iso: string | undefined) => (iso ? new Date(iso).toLocaleString("en
 const Err = ({ msg }: { msg?: string }) => (msg ? <p role="alert" className="mt-0.5 text-[12px] text-red-700">{msg}</p> : null);
 const Kbd = ({ k }: { k: string }) => <span className="kbd">{k}</span>;
 
-export function MasterForm({ def, companyId, mode, form, setForm, errors, onBlurField, selected, dirty, saving, lookups, calendar, tab, onTab, actions }: Props) {
+export function MasterForm({ def, companyId, mode, form, setForm, errors, onBlurField, selected, dirty, saving, lookups, calendar, tab, onTab, actions, hints }: Props) {
   const formRef = useRef<HTMLDivElement>(null);
   const editable = mode !== "view";
   const two = def.cols === 2;
@@ -158,7 +160,7 @@ export function MasterForm({ def, companyId, mode, form, setForm, errors, onBlur
         )}
         <div className={`grid ${two ? "grid-cols-[130px_1fr]" : "grid-cols-[120px_1fr]"} items-start gap-3 py-1 ${f.span === 2 ? "col-span-2" : ""}`}>
           <div className="pt-1.5 font-medium">{f.label} {isRequired(f, form) && live && <span className="text-red-600" aria-hidden>*</span>}</div>
-          <div>{live ? <>{editor(f)}<Err msg={errors[f.name]} /></> : display(f)}</div>
+          <div>{live ? <>{editor(f)}<Err msg={errors[f.name]} />{hints?.[f.name] && !errors[f.name] && <p className="mt-0.5 text-[11px] text-slate-500">{hints[f.name]}</p>}</> : display(f)}</div>
         </div>
       </Fragment>
     );

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { codeSpec } from "../../shared/codeRules";
 import { MASTERS, matchWhere, type MasterDef, type Opt } from "../../shared/masters";
-import { ApiError, masterApi } from "../api";
+import { ApiError, codeRulesApi, masterApi } from "../api";
 import { emptyForm, recordLabel, recordTitle, sameForm, tabsOf, toForm, toPayload, validate, type Errors, type FormState, type Row } from "../lib/form";
 import type { Mode, MsgKind, StatusInfo } from "../types";
 import { MasterForm } from "../components/MasterForm";
@@ -43,6 +44,11 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ text: string; kind: MsgKind }>({ text: "Ready", kind: "info" });
   const [tab, setTab] = useState("");
+  // Code numbering: a new record's code is suggested from the master's rule (shared/codeRules.ts) until the user types a code of their own.
+  const codeSpecOf = codeSpec(def.key);
+  const [autoCode, setAutoCode] = useState("");
+  const [codeHint, setCodeHint] = useState("");
+  const codeTouched = useRef(false), autoRef = useRef("");
   const savingRef = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -61,7 +67,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
   };
   const selected = items.find((i) => i.id === selectedId) ?? null;
 
-  const baseline = mode === "edit" && selected ? toForm(def, selected) : emptyForm(def);
+  const baseline = mode === "edit" && selected ? toForm(def, selected) : mode === "new" && autoCode ? { ...emptyForm(def), code: autoCode } : emptyForm(def); // a suggested code alone is not a change
   const dirty = mode !== "view" && !sameForm(def, form, baseline);
 
   const filtered = useMemo(() => {
@@ -283,11 +289,34 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
   };
 
   const onChangeForm = (raw: FormState) => {
+    if (codeSpecOf && mode === "new" && raw.code !== form.code) codeTouched.current = !!raw.code && raw.code !== autoRef.current; // typing a code takes over; clearing it hands it back to the rule
     const f = suggested(raw);
     const next: Errors = { ...errors };
     for (const k of Object.keys(f)) if (f[k] !== form[k]) delete next[k]; // typing shuru, purana error hatao
     setForm(f); setErrors(next);
   };
+
+  // ---- suggest the code of a new record (needs the parent / name / type the rule uses; follows them until the user types a code) ----
+  const parentVal = codeSpecOf?.parentField ? String(form[codeSpecOf.parentField] ?? "") : "";
+  const nameVal = codeSpecOf?.nameField ? String(form[codeSpecOf.nameField] ?? "") : "";
+  const typeVal = codeSpecOf?.typeField ? String(form[codeSpecOf.typeField] ?? "") : "";
+  const codeEmpty = !form.code;
+  useEffect(() => {
+    if (!codeSpecOf || mode !== "new") { setCodeHint(""); setAutoCode(""); autoRef.current = ""; codeTouched.current = false; return; }
+    if (codeTouched.current && !codeEmpty) return;
+    let stale = false;
+    const timer = setTimeout(async () => {
+      try {
+        const r = await codeRulesApi.suggest(companyId, def.key, { parentId: parentVal ? Number(parentVal) : null, name: nameVal, type: typeVal });
+        if (stale) return;
+        const prev = autoRef.current;
+        autoRef.current = r.code ?? ""; setAutoCode(r.code ?? "");
+        setForm((f) => (codeTouched.current && f.code ? f : f.code === (r.code ?? "") || (f.code && f.code !== prev) ? f : { ...f, code: r.code ?? "" }));
+        setCodeHint(r.code ? "Suggested by the numbering rule; type a code to use your own." : r.mode === "SUGGESTED" ? (r.reason ?? "") : "");
+      } catch { if (!stale) setCodeHint(""); }
+    }, 250);
+    return () => { stale = true; clearTimeout(timer); };
+  }, [codeSpecOf, mode, selectedId, companyId, def.key, parentVal, nameVal, typeVal, codeEmpty]);
 
   // ---- search box keys ----
   const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -347,7 +376,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
           <div className="double-rule mt-1" />
         </div>
         <MasterForm
-          def={def} companyId={companyId} mode={mode} form={form} setForm={onChangeForm} errors={errors} onBlurField={onBlurField}
+          hints={codeHint ? { code: codeHint } : undefined} def={def} companyId={companyId} mode={mode} form={form} setForm={onChangeForm} errors={errors} onBlurField={onBlurField}
           selected={selected} dirty={dirty} saving={saving} lookups={lookups} calendar={calendar} tab={tab} onTab={setTab}
           actions={{ save: () => void save(), clear, edit, del: askDelete, newRec, cancel: cancelEdit }}
         />

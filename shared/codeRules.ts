@@ -146,3 +146,10 @@ export function exampleCode(spec: CodeSpec, template: string): string {
   const p = prefixOf(spec, template, { parent: spec.parentKey ? "10".slice(0, Math.min(2, codeMax(spec.parentKey))) : undefined, name: "Ramesh Traders", type: letters });
   return p ? nextCode(p.prefix, p.width, []) : "";
 }
+
+/** one master's rule as the settings screen shows it */
+export interface CodeRuleRow {
+  key: string; label: string; module: string; mode: CodeMode; template: string; isDefault: boolean;
+  defaultMode: CodeMode; defaultTemplate: string; example: string; parentLabel: string | null; usesType: boolean; usesName: boolean; codeMax: number;
+}
+export interface CodeSuggestion { mode: CodeMode; code: string | null; reason?: string }

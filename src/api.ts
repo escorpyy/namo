@@ -1,5 +1,6 @@
 import type { ContextData } from "./types";
 import type { Row } from "./lib/form";
+import type { CodeMode, CodeRuleRow, CodeSuggestion } from "../shared/codeRules";
 
 export class ApiError extends Error {
   constructor(
@@ -42,6 +43,15 @@ export const masterApi = (key: string) => ({
   update: (id: number, companyId: number, v: Record<string, unknown>) => req<Row>(`/api/masters/${key}/${id}?companyId=${companyId}`, { method: "PUT", body: JSON.stringify(v) }),
   remove: (id: number, companyId: number) => req<{ ok: true }>(`/api/masters/${key}/${id}?companyId=${companyId}`, { method: "DELETE" }),
 });
+
+// Code numbering rules (shared/codeRules.ts): the rule of every master, and the code to propose for a new record
+export const codeRulesApi = {
+  list: (companyId: number) => req<CodeRuleRow[]>(`/api/code-rules?companyId=${companyId}`),
+  save: (companyId: number, key: string, v: { mode: CodeMode; template: string }, userId?: number) =>
+    req<CodeRuleRow>(`/api/code-rules/${key}`, { method: "PUT", body: JSON.stringify({ companyId, userId, ...v }) }),
+  suggest: (companyId: number, key: string, v: { parentId?: number | null; name?: string; type?: string }) =>
+    req<CodeSuggestion>(`/api/code-rules/${key}/suggest`, { method: "POST", body: JSON.stringify({ companyId, ...v }) }),
+};
 
 // Opening Balance: grid screen ka alag API (company + branch + fiscal year ke saare ledgers)
 export interface ObRow {

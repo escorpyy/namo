@@ -1,5 +1,5 @@
 import { and, eq, getTableColumns, like } from "drizzle-orm";
-import { CODE_SPECS, codeMax, codeSpec, exampleCode, nextCode, prefixOf, templateProblems, type CodeMode, type CodeSpec } from "../../shared/codeRules";
+import { CODE_SPECS, codeMax, codeSpec, exampleCode, nextCode, prefixOf, templateProblems, type CodeMode, type CodeRuleRow, type CodeSpec, type CodeSuggestion } from "../../shared/codeRules";
 import { db } from "../db";
 import * as S from "../db/schema";
 import { HttpError } from "../routes/_util";
@@ -13,11 +13,6 @@ const TABLE: Record<string, any> = {
   "product-sub-groups": S.productSubGroup, products: S.product, "product-units": S.productUnit, "tax-rates": S.taxRate,
   "stock-categories": S.stockCategory, locations: S.location, "purchase-terms": S.purchaseTerm, "sales-terms": S.salesTerm,
 };
-
-export interface CodeRuleRow {
-  key: string; label: string; module: string; mode: CodeMode; template: string; isDefault: boolean;
-  defaultMode: CodeMode; defaultTemplate: string; example: string; parentLabel: string | null; usesType: boolean; usesName: boolean; codeMax: number;
-}
 
 const specOf = (key: string): CodeSpec => {
   const s = codeSpec(key);
@@ -59,7 +54,7 @@ export async function saveRule(companyId: number, key: string, input: { mode: un
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 export interface SuggestInput { parentId?: number | null; name?: string | null; type?: string | null }
-export interface Suggestion { mode: CodeMode; code: string | null; reason?: string }
+export type Suggestion = CodeSuggestion;
 
 /** The code to propose for a new record: MANUAL gives none; otherwise the next number under the prefix the rule makes from what is known so far. */
 export async function suggestCode(companyId: number, key: string, input: SuggestInput): Promise<Suggestion> {
