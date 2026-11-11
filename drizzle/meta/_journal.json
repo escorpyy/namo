@@ -162,6 +162,13 @@
       "when": 1794332048752,
       "tag": "0022_costing_flags_product_hsn",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794387775382,
+      "tag": "0023_number_series",
+      "breakpoints": true
     }
   ]
 }
