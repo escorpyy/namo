@@ -79,7 +79,7 @@ interface Props {
   rateLabel?: string;
   onOpenTerms?: (index: number) => void;
   termSummary?: (index: number) => { amount: string; count: number };
-  fill?: boolean; // take the height of the parent and scroll the rows inside it (the fixed bill entry screen)
+  fill?: boolean; // grow with the rows, but never taller than the parent: past that the rows scroll inside (the fixed bill entry screen)
 }
 
 export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, errors, calendar, clearError, contextKey, lockProducts, onOpenTerms, termSummary, fill }: Props) {
@@ -185,8 +185,8 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
   const live = lines.filter((l) => !isBlankLine(l)).length;
 
   return (
-    <div className={`lg-card lg-grid ${fill ? "flex min-h-0 flex-1 flex-col" : ""}`}>
-      <div className={`${fill ? "min-h-0 flex-1 overflow-auto" : "overflow-x-auto"} lg-scroll outline-none`} data-grid="lines" data-nav="lines-grid" {...gridRows.gridProps} onKeyDown={gridRows.handleKey} onKeyDownCapture={onKeyCapture} aria-label={`${kind} line items`}>
+    <div className={`lg-card lg-grid ${fill ? "flex min-h-0 flex-col" : ""}`}>
+      <div className={`${fill ? "min-h-0 overflow-auto" : "overflow-x-auto"} lg-scroll outline-none`} data-grid="lines" data-nav="lines-grid" {...gridRows.gridProps} onKeyDown={gridRows.handleKey} onKeyDownCapture={onKeyCapture} aria-label={`${kind} line items`}>
         <div className="min-w-max">
           <div style={{ gridTemplateColumns: layout.template }} className="lg-th xl-head">
             {layout.heads.map((h, i) => <span key={i} className={i === 0 ? "xl-rowhead" : RIGHT_HEAD.has(h) ? "text-right" : kind === "bill" && CENTER_HEAD.has(h) ? "text-center" : ""}>{h}</span>)}

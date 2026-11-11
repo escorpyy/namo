@@ -83,7 +83,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     emptyForm: (lk) => ({
       numberSeriesId: "", docNumber: "", invoiceDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), invoiceType: "LOCAL", purchaseType: "GOODS_PURCHASE_OTHERS", vendorGLId: "", subLedgerId: "", agentId: "",
       vendorInvoiceNo: "", vendorInvoiceDate: "", dueDays: "", dueDate: "", remarks: "", purchaseChallanId: "", purchaseOrderId: "", importCostForBillId: "", importCostAllocationBasis: "VALUE", importCostTreatment: "CIF", challanNo: "", orderNo: "",
-      lines: Array.from({ length: 10 }, () => blankLine()), terms: alwaysShowTerms(lk.terms), imp: {},
+      lines: [blankLine()], terms: alwaysShowTerms(lk.terms), imp: {},
     }),
     toForm: (d: PDoc, lk) => {
       const prods = new Map(lk.products.map((x) => [String(x.id), x]));
@@ -516,6 +516,13 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   const shown = (v: string) => (v === "" ? "—" : v.startsWith("-") ? `− ${money(v.slice(1))}` : money(v));
   const dialogFilled = termDraft.filter((term) => !isBlankTerm(term) && (ro || !isZeroTerm(term))).length;
 
+  // The lines grid, shared by the two stages: it starts as one blank line and grows with every product. `fill` caps it at the height of the
+  // lines stage (the rows then scroll inside); in the header stage the page itself scrolls.
+  const linesGrid = (fill: boolean) => (
+    <LinesGrid fill={fill} kind="bill" lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
+      onOpenTerms={(index) => openTerms({ scope: "line", lineNumber: lineNumberAt(index), lineIndex: index })} termSummary={lineTermsSummary} />
+  );
+
   return (
     <>
       <section data-purchase-document className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -610,22 +617,28 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
               )}
             </section>
           )}
+                <section className="lg-card flex flex-col" aria-label="Lines">
+                  <header className="lg-card-head">
+                    <h2 className="lg-card-title">Lines</h2>
+                    <p className="lg-card-hint">Product, quantity and rate. The grid grows as you add products.</p>
+                  </header>
+                  {linesGrid(false)}
+                </section>
                 <div className="flex justify-end pb-2">
                   <button type="button" data-nav="header-continue" className="btn btn-primary" onClick={confirmHeader}>
-                    {doc ? "Done — back to lines" : "Continue to lines"} <ArrowRight size={14} />{!doc && <span className="kbd">Ctrl+S</span>}
+                    {doc ? "Done — back to lines" : "Header done"} <ArrowRight size={14} />{!doc && <span className="kbd">Ctrl+S</span>}
                   </button>
                 </div>
               </div>
             ) : (
               <>
-                <section className="lg-card flex min-h-0 flex-1 flex-col">
+                <section className="lg-card flex min-h-0 flex-col">
                   <header className="lg-card-head">
                     <h2 className="lg-card-title">Lines</h2>
                     <p className="lg-card-hint">Product, quantity and rate. Click a line's term amount to assess its terms.</p>
                   </header>
-                  <div className="flex min-h-0 flex-1 flex-col">
-                    <LinesGrid fill kind="bill" lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
-                      onOpenTerms={(index) => openTerms({ scope: "line", lineNumber: lineNumberAt(index), lineIndex: index })} termSummary={lineTermsSummary} />
+                  <div className="flex min-h-0 flex-col">
+                    {linesGrid(true)}
                   </div>
                 </section>
           <section className="lg-card flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3" aria-label="Header terms and conditions">
@@ -707,7 +720,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
           <div className="flex flex-wrap items-center justify-end gap-2">
             {!ro ? (
               <>
-                <button data-nav className="btn btn-primary" disabled={s.saving || (stage === "header" && !doc)} title={stage === "header" && !doc ? "Finish the header first (Continue to lines)" : undefined} onClick={() => void s.save()}><Save size={14} /> {s.mode === "edit" ? "Update" : "Save"} <span className="kbd">Ctrl+S</span></button>
+                <button data-nav className="btn btn-primary" disabled={s.saving || (stage === "header" && !doc)} title={stage === "header" && !doc ? "Finish the header first (Header done)" : undefined} onClick={() => void s.save()}><Save size={14} /> {s.mode === "edit" ? "Update" : "Save"} <span className="kbd">Ctrl+S</span></button>
                 <button data-nav className="btn" onClick={() => (doc ? s.cancel() : s.guard(() => p.onClose(p.tabId)))}><X size={14} /> Cancel {doc && <span className="kbd">Esc</span>}</button>
               </>
             ) : (
