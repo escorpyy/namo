@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { numberSeriesApi, type AvailableSeries } from "../../api";
 import { Field } from "./Bits";
+import { NumberSeriesDialog } from "../NumberSeriesDialog";
 
 // The document number box of a purchase form. For a NEW document it offers the series the user may use (default first) and, by the
 // series' mode, shows the number that will be given (Automatic), lets the user overtype the suggestion (Suggested) or asks for a number (Manual).
@@ -14,6 +15,7 @@ interface Props {
 
 export function NumberField({ label, documentType, companyId, branchId, fyCode, userId, existingNumber, readOnly, seriesId, number, onChange }: Props) {
   const [list, setList] = useState<AvailableSeries[]>([]);
+  const [asking, setAsking] = useState(false);
   const isNew = existingNumber === undefined;
 
   useEffect(() => {
@@ -23,6 +25,8 @@ export function NumberField({ label, documentType, companyId, branchId, fyCode, 
       .then((r) => {
         if (!live) return;
         setList(r);
+        // a module with several series asks which numbering to use, once, when a new document starts
+        if (r.length > 1 && !seriesId && !readOnly) setAsking(true);
         if (seriesId && !r.some((x) => String(x.id) === seriesId)) onChange({ numberSeriesId: "", docNumber: "" }); // the chosen series is not offered here (other branch / year)
       })
       .catch(() => live && setList([]));
@@ -32,12 +36,14 @@ export function NumberField({ label, documentType, companyId, branchId, fyCode, 
   // a blank choice means "the default": the first offered series, which is also the one the server uses
   const chosen = seriesId || String(list[0]?.id ?? "");
   const cur = list.find((x) => String(x.id) === chosen);
+  const dialog = asking && <NumberSeriesDialog title={`${label.replace(/ No$/, "")} numbering`} items={list} onPick={(id) => { setAsking(false); onChange({ numberSeriesId: String(id), docNumber: "" }); }} />;
   if (!isNew || !list.length || readOnly) {
     return <Field label={label}><input disabled className="fld bg-slate-100 text-slate-600" value={existingNumber ?? ""} placeholder="(next number)" aria-label={label} /></Field>;
   }
   const auto = cur?.mode === "AUTOMATIC";
   return (
     <div className="min-w-0">
+      {dialog}
       <Field label={label} required={cur?.mode === "MANUAL"}>
         <div className="flex gap-1">
           {list.length > 1 && (
