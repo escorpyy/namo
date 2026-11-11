@@ -516,8 +516,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   const shown = (v: string) => (v === "" ? "—" : v.startsWith("-") ? `− ${money(v.slice(1))}` : money(v));
   const dialogFilled = termDraft.filter((term) => !isBlankTerm(term) && (ro || !isZeroTerm(term))).length;
 
-  // The lines grid, shared by the two stages: it starts as one blank line and grows with every product. `fill` caps it at the height of the
-  // lines stage (the rows then scroll inside); in the header stage the page itself scrolls.
+  // The lines grid starts as one blank line and grows with every product. `fill` caps it at the height of the lines stage (the rows then scroll inside).
   const linesGrid = (fill: boolean) => (
     <LinesGrid fill={fill} kind="bill" lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
       onOpenTerms={(index) => openTerms({ scope: "line", lineNumber: lineNumberAt(index), lineIndex: index })} termSummary={lineTermsSummary} />
@@ -617,13 +616,6 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
               )}
             </section>
           )}
-                <section className="lg-card flex flex-col" aria-label="Lines">
-                  <header className="lg-card-head">
-                    <h2 className="lg-card-title">Lines</h2>
-                    <p className="lg-card-hint">Product, quantity and rate. The grid grows as you add products.</p>
-                  </header>
-                  {linesGrid(false)}
-                </section>
                 <div className="flex justify-end pb-2">
                   <button type="button" data-nav="header-continue" className="btn btn-primary" onClick={confirmHeader}>
                     {doc ? "Done — back to lines" : "Header done"} <ArrowRight size={14} />{!doc && <span className="kbd">Ctrl+S</span>}
