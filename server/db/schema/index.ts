@@ -13,3 +13,4 @@ export * from "./importAssessment";
 export * from "./periodLock";
 export * from "./codeRule";
 export * from "./relations";
+export * from "./numberSeries";

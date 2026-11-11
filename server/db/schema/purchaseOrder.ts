@@ -13,6 +13,7 @@ import {
 import { createdAt, money, updatedAt } from "./_helpers";
 import { purchaseOrderStatusEnum } from "./enums";
 import { branch, company, user } from "./core";
+import { numberSeries } from "./numberSeries";
 import { generalLedger, subLedger } from "./accounting";
 import { agent } from "./parties";
 import { product, productUnit } from "./products";
@@ -60,6 +61,8 @@ export const purchaseOrder = pgTable(
 
     // "Order No". Numbering restarts every fiscal year.
     orderNumber: varchar({ length: 30 }).notNull(),
+    // the number series this document's number came from (null = made before series existed, or typed with none)
+    numberSeriesId: integer().references(() => numberSeries.id, { onDelete: "set null" }),
     orderDate: date({ mode: "date" }).notNull(),
     fiscalYear: varchar({ length: 15 }).notNull(),
 

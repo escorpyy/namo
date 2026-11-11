@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { createdAt, money, updatedAt } from "./_helpers";
 import { branch, company, user } from "./core";
+import { numberSeries } from "./numberSeries";
 import { generalLedger, subLedger } from "./accounting";
 import { agent } from "./parties";
 import { location, product, productUnit } from "./products";
@@ -60,6 +61,8 @@ export const purchaseChallan = pgTable(
 
     // "Challan No". Numbering restarts every fiscal year.
     challanNumber: varchar({ length: 30 }).notNull(),
+    // the number series this document's number came from (null = made before series existed, or typed with none)
+    numberSeriesId: integer().references(() => numberSeries.id, { onDelete: "set null" }),
     challanDate: date({ mode: "date" }).notNull(),
     fiscalYear: varchar({ length: 15 }).notNull(),
 
