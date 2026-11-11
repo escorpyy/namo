@@ -96,6 +96,11 @@ export function useGridRows(o: GridRowsOptions) {
     if (e.key === "Escape") { enterRow(grid, cell.row); return use(); }
     if (e.key === "Enter" && o.cellSelector && !isCombo && !(el instanceof HTMLTextAreaElement)) {
       if (!e.shiftKey && o.onCellEnter?.(cell, el)) return use();
+      // Actionable cells (buttons): Enter activates them; readonly inputs are skipped by usable().
+      if (!e.shiftKey && el instanceof HTMLButtonElement && !el.disabled) {
+        el.click();
+        return use();
+      }
       stepFrom(el, e.shiftKey ? -1 : 1); return use();
     }
     if ((e.key === "ArrowDown" || e.key === "ArrowUp") && o.fieldOf && !isCombo && (el instanceof HTMLButtonElement || (el instanceof HTMLInputElement && el.type !== "checkbox" && el.type !== "radio"))) {
