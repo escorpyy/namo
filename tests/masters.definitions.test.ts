@@ -5,7 +5,7 @@ const defs = Object.values(MASTERS);
 
 describe("shared/masters.ts is a usable registry", () => {
   it("is not empty and keys match each definition's key", () => {
-    expect(defs.length).toBeGreaterThanOrEqual(22); // README "22 screens" counts 2 grid screens that are not masters
+    expect(defs.length).toBeGreaterThanOrEqual(21); // README "22 screens" counts 2 grid screens that are not masters
     for (const [k, d] of Object.entries(MASTERS)) expect(d.key).toBe(k);
   });
   it("includes the billing term masters", () => {

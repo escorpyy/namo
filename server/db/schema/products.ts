@@ -116,28 +116,6 @@ export const productUnit = pgTable(
 // TAX RATE
 // ------------------------------------------------------------
 
-export const taxRate = pgTable(
-  "TaxRate",
-  {
-    id: serial().primaryKey(),
-    companyId: integer()
-      .notNull()
-      .references(() => company.id, { onDelete: "restrict" }),
-
-    code: varchar({ length: 10 }).notNull(),
-    name: varchar({ length: 50 }).notNull(), // "GST 13%", "VAT 5%"
-    ratePercent: numeric({ precision: 5, scale: 2 }).notNull(),
-    hsnSacCode: varchar({ length: 20 }), // HSN for goods, SAC for services
-    isActive: boolean().notNull().default(true),
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-  },
-  (t) => [
-    uniqueIndex("TaxRate_companyId_code_key").on(t.companyId, t.code),
-    index("TaxRate_companyId_idx").on(t.companyId),
-  ],
-);
-
 // ------------------------------------------------------------
 // STOCK CATEGORY & LOCATION
 // ------------------------------------------------------------
@@ -207,6 +185,7 @@ export const product = pgTable(
     description: varchar({ length: 256 }).notNull(), // not globally unique
     shortName: varchar({ length: 30 }),
     barcode: varchar({ length: 64 }),
+    hsnSacCode: varchar({ length: 20 }), // optional single HSN (goods) / SAC (services) code
     type: productTypeEnum().notNull(),
 
     productSubGroupId: integer()
@@ -250,7 +229,6 @@ export const stockDetail = pgTable(
     defaultLocationId: integer().references(() => location.id, {
       onDelete: "set null",
     }),
-    taxRateId: integer().references(() => taxRate.id, { onDelete: "set null" }),
 
     valuationMethod: valuationMethodEnum().notNull().default("WEIGHTED_AVERAGE"),
     tracksBatch: boolean().notNull().default(false),
@@ -302,7 +280,6 @@ export const stockDetail = pgTable(
     index("StockDetail_stockCategoryId_idx").on(t.stockCategoryId),
     index("StockDetail_defaultLocationId_idx").on(t.defaultLocationId),
     index("StockDetail_defaultVendorId_idx").on(t.defaultVendorId),
-    index("StockDetail_taxRateId_idx").on(t.taxRateId),
     index("StockDetail_openingGLId_idx").on(t.openingGLId),
     index("StockDetail_closingPLGLId_idx").on(t.closingPLGLId),
     index("StockDetail_closingBSGLId_idx").on(t.closingBSGLId),
@@ -353,7 +330,6 @@ export const nonStockDetail = pgTable(
     unitId: integer()
       .notNull()
       .references(() => productUnit.id, { onDelete: "restrict" }),
-    taxRateId: integer().references(() => taxRate.id, { onDelete: "set null" }),
 
     salesGLId: integer()
       .notNull()
@@ -368,7 +344,6 @@ export const nonStockDetail = pgTable(
   (t) => [
     uniqueIndex("NonStockDetail_productId_key").on(t.productId),
     index("NonStockDetail_unitId_idx").on(t.unitId),
-    index("NonStockDetail_taxRateId_idx").on(t.taxRateId),
     index("NonStockDetail_salesGLId_idx").on(t.salesGLId),
     index("NonStockDetail_purchaseGLId_idx").on(t.purchaseGLId),
   ],
@@ -390,7 +365,6 @@ export const serviceDetail = pgTable(
     unitId: integer().references(() => productUnit.id, {
       onDelete: "set null",
     }),
-    taxRateId: integer().references(() => taxRate.id, { onDelete: "set null" }),
 
     salesGLId: integer()
       .notNull()
@@ -405,7 +379,6 @@ export const serviceDetail = pgTable(
   (t) => [
     uniqueIndex("ServiceDetail_productId_key").on(t.productId),
     index("ServiceDetail_unitId_idx").on(t.unitId),
-    index("ServiceDetail_taxRateId_idx").on(t.taxRateId),
     index("ServiceDetail_salesGLId_idx").on(t.salesGLId),
     index("ServiceDetail_purchaseGLId_idx").on(t.purchaseGLId),
   ],

@@ -5,7 +5,7 @@ import { COMMON_HELP, DocShell, Field, HINTS, Pill, money } from "../../componen
 import { DateField, TextField, VendorFields } from "../../components/purchase/HeadFields";
 import { LinesGrid, TermsGrid } from "../../components/purchase/LinesGrid";
 import {
-  blankLine, dateErr, defaultDate, isBlankLine, isBlankTerm, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, validateLines, validateTerms,
+  alwaysShowTerms, blankLine, dateErr, defaultDate, isBlankLine, isBlankTerm, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, validateLines, validateTerms,
   type LineRow, type TermRow,
 } from "../../lib/purchaseForm";
 import type { StatusInfo } from "../../types";
@@ -29,7 +29,7 @@ export default function PurchaseOrderScreen(p: PurchaseScreenProps) {
     kind: "orders", title: "Purchase Order", singular: "Order", statusOptions: OPTIONS,
     emptyForm: (lk) => ({
       orderDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), vendorGLId: "", subLedgerId: "", agentId: "", vendorRefNo: "", vendorRefDate: "", expectedDate: "", remarks: "",
-      lines: [blankLine()], terms: lk.terms.filter((t) => t.isMandatory && t.isActive && !t.isProductwise && t.category === "GENERAL").map((t) => ({ key: Math.random().toString(36).slice(2), termId: String(t.id), lineNumber: "", calcType: t.defaultCalcType, rate: t.defaultCalcType === "PERCENT" ? t.defaultValue.replace(/\.?0+$/, "") : "", inputAmount: t.defaultCalcType === "AMOUNT" ? t.defaultValue.replace(/\.?0+$/, "") : "", isOverridden: false, overrideAmount: "", finalAmount: "" })),
+      lines: [blankLine()], terms: alwaysShowTerms(lk.terms),
     }),
     toForm: (d: PDoc, lk) => {
       const prods = new Map(lk.products.map((x) => [String(x.id), x]));

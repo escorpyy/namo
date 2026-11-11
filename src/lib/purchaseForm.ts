@@ -166,7 +166,8 @@ export function validateTerms(terms: TermRow[], masters: Map<string, Term>, line
     const k = `${t.termId}:${m.isProductwise ? t.lineNumber : ""}`;
     if (seen.has(k)) set("t", `${m.code} is entered twice.`);
     seen.add(k);
-    if (t.calcType === "PERCENT") { if (t.rate === "" || !parseDec(t.rate)) set("v", "enter a rate (percent)."); }
+    if (m.category === "ROUNDED") { /* a Round Off term has no rate or amount to enter */ }
+    else if (t.calcType === "PERCENT") { if (t.rate === "" || !parseDec(t.rate)) set("v", "enter a rate (percent)."); }
     else if (t.inputAmount === "" || !parseDec(t.inputAmount)) set("v", "enter an amount.");
     if (t.isOverridden && (t.overrideAmount === "" || !parseDec(t.overrideAmount))) set("o", "enter the amount to use instead.");
   });
@@ -182,7 +183,19 @@ export function addDaysIso(iso: string, days: number): string {
   return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + days)).toISOString().slice(0, 10);
 }
 
-// The charge terms a picker offers: optionally only one category, or everything except one (a bill hides ADDITIONAL terms but keeps GENERAL and
+// The document-wise terms a new document starts with: every active "always show" term (GENERAL or ROUNDED) in the master's sequence order, at the
+// master's default value (zero unless the master says otherwise). The user can change the value but not skip the term.
+export function alwaysShowTerms(masters: Term[]): TermRow[] {
+  return masters
+    .filter((m) => m.isMandatory && m.isActive && !m.isProductwise && (m.category === "GENERAL" || m.category === "ROUNDED"))
+    .sort((a, b) => a.sequence - b.sequence || a.code.localeCompare(b.code))
+    .map((m) => blankTerm({
+      termId: String(m.id), calcType: m.defaultCalcType,
+      rate: m.defaultCalcType === "PERCENT" ? trimDec(m.defaultValue) : "", inputAmount: m.defaultCalcType === "AMOUNT" ? trimDec(m.defaultValue) : "",
+    }));
+}
+
+// The charge terms a picker offers: optionally only one category, or everything except one (a bill hides COSTING terms but keeps GENERAL and
 // ROUNDED ones such as Round Off), and optionally only line-wise or only document-wise terms.
 export function pickableTerms<T extends { category: string; isProductwise: boolean }>(terms: T[], f: { category?: string; excludeCategory?: string; productwiseOnly?: boolean }): T[] {
   return terms.filter((t) => (!f.category || t.category === f.category) && (!f.excludeCategory || t.category !== f.excludeCategory) && (f.productwiseOnly === undefined || t.isProductwise === f.productwiseOnly));
@@ -195,9 +208,9 @@ const zeroTermRow = (m: Term, lineNumber?: number): TermRow => blankTerm({
 
 // The rows the terms dialog opens with: every active term of its kind (line-wise for a line, document-wise for the header) in the master's
 // sequence order. A term already on the document keeps its values; every other term starts at zero, so the user only types the ones that apply.
-// Terms already on the document that the picker would no longer offer (inactive, ADDITIONAL) stay visible at the end instead of vanishing.
+// Terms already on the document that the picker would no longer offer (inactive, COSTING) stay visible at the end instead of vanishing.
 export function dialogTermRows(masters: Term[], existing: TermRow[], scope: { productwise: boolean; lineNumber?: number }): TermRow[] {
-  const offered = pickableTerms(masters, { excludeCategory: "ADDITIONAL", productwiseOnly: scope.productwise })
+  const offered = pickableTerms(masters, { excludeCategory: "COSTING", productwiseOnly: scope.productwise })
     .filter((m) => m.isActive || existing.some((t) => t.termId === String(m.id)))
     .sort((a, b) => a.sequence - b.sequence || a.code.localeCompare(b.code));
   const used = new Set<string>();

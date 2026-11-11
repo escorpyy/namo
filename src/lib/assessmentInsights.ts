@@ -92,8 +92,8 @@ export const toCsv = (rows: (string | number)[][]) => rows.map((r) => r.map(csvC
 export interface GridLine { lineNumber: number; productCode?: string; description?: string; quantity?: string; goodsValue: string; customsValue: string; capitalizedSources: string; existingPurchaseTermCosts: string; capitalizedAssessments: string; landedValue: string; landedRate: string }
 
 // The product allocation grid as a sheet: one row per product line, a total row, and the percentage the charges added.
-export function allocationCsv(lines: GridLine[]): string {
-  const head = ["Line", "Product", "Qty", "Goods value", "Customs value", "Invoiced services", "Bill terms", "Assessed costs", "Landed value", "Landed unit cost", "Uplift %"];
+export function allocationCsv(lines: GridLine[], isImport = false): string {
+  const head = ["Line", "Product", "Qty", "Goods value", isImport ? "Customs value" : "Assessable value", "Invoiced services", "Bill terms", "Assessed costs", "Landed value", "Landed unit cost", "Uplift %"];
   const body = lines.map((l) => {
     const goods = num(l.goodsValue), landed = num(l.landedValue);
     return [l.lineNumber, l.productCode ?? l.description ?? "", l.quantity ?? "", l.goodsValue, l.customsValue, l.capitalizedSources, l.existingPurchaseTermCosts, l.capitalizedAssessments, l.landedValue, l.landedRate, goods > 0 ? round2(((landed - goods) / goods) * 100) : ""];

@@ -76,4 +76,22 @@ describe("live purchase invoice preview", () => {
     expect(incompleteTerm.status).toBe("incomplete");
     expect(incompleteTerm.netAmount).toBeNull();
   });
+  it("prices a rounding term on its own, with no rate or amount entered, and reports the sign it came to", () => {
+    const masters = new Map<number, PreviewTermMaster>([
+      [1, master({ id: 1, sequence: 30, calcBase: "RUNNING_TOTAL" })],
+      [2, master({ id: 2, sequence: 900, calcBase: "RUNNING_TOTAL", category: "ROUNDED" })],
+    ]);
+    const preview = previewPurchase(
+      [{ lineNumber: 1, basicAmount: "1005.55" }],
+      [
+        { rowKey: "vat", termId: 1, calcType: "PERCENT", rate: "13", isOverridden: false },
+        { rowKey: "round", termId: 2, calcType: "AMOUNT", inputAmount: "", isOverridden: false },
+      ],
+      masters,
+    );
+    expect(preview.status).toBe("ready");
+    expect(preview.netAmount).toBe("1136.00");
+    expect(preview.terms.get("round")).toMatchObject({ baseAmount: "1136.27", finalAmount: "0.27", signedAmount: "-0.27", nature: "DEDUCTIVE" });
+    expect(preview.deductions).toBe("0.27");
+  });
 });

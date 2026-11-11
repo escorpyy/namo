@@ -95,8 +95,11 @@ export type EngineTerm = {
   isOverridden: boolean;
   overrideAmount?: Micro | null;
   lineKey?: number | null;
+  /** A Round Off term: it works out its own amount and sign so the document total comes to a whole rupee (see priceTerms). */
+  rounded?: boolean;
 };
-export type EngineResult = { key: number; baseAmount: Micro; calculatedAmount: Micro; finalAmount: Micro; signed: Micro };
+/** `nature` is the term's own, except for a rounding term where it follows the result (ADDITIVE rounds up, DEDUCTIVE rounds down). */
+export type EngineResult = { key: number; baseAmount: Micro; calculatedAmount: Micro; finalAmount: Micro; signed: Micro; nature: "ADDITIVE" | "DEDUCTIVE" };
 export type EngineOutput = { results: Map<number, EngineResult>; itemTotal: Micro; termNet: Micro; total: Micro };
 
 /** Price all terms in stable sequence order. This is the single implementation used for previews and persisted bills. */
@@ -115,7 +118,9 @@ export function priceTerms(lines: EngineLine[], terms: EngineTerm[]): EngineOutp
     if (inLine && !lineBy.has(term.lineKey as number)) throw new PurchaseCalculationError(`Term ${term.termId} points at a line that is not on this document.`);
 
     let base: Micro;
-    if (term.calcBase === "ITEM_VALUE") {
+    if (term.rounded) {
+      base = docRunning; // a rounding term always works on the running total, whatever its master says
+    } else if (term.calcBase === "ITEM_VALUE") {
       base = inLine ? lineBy.get(term.lineKey as number)!.basicAmount : itemTotal;
     } else if (term.calcBase === "RUNNING_TOTAL") {
       base = inLine ? lineRunning.get(term.lineKey as number)! : docRunning;
@@ -130,7 +135,16 @@ export function priceTerms(lines: EngineLine[], terms: EngineTerm[]): EngineOutp
     }
 
     let calculated: Micro;
-    if (term.calcType === "PERCENT") {
+    let nature = term.nature;
+    if (term.rounded) {
+      // Round Off: works on the document total at its own place in the sequence, to the nearest whole rupee (half a rupee rounds up).
+      // It must be the last term, so nothing is added after the rounding, and there can only be one. The nature follows the result.
+      if (inLine) throw new PurchaseCalculationError(`Term ${term.termId} is a rounding term; it works on the whole document, not on one line.`);
+      if (idx !== order.length - 1) throw new PurchaseCalculationError(`Term ${term.termId} is a rounding term and must be the last term (highest sequence); only one is allowed.`);
+      const diff = roundTo(base, 0) - base; // base is the running total here
+      calculated = diff < ZERO ? -diff : diff;
+      nature = diff < ZERO ? "DEDUCTIVE" : "ADDITIVE";
+    } else if (term.calcType === "PERCENT") {
       if (term.rate === null || term.rate === undefined) throw new PurchaseCalculationError(`Term ${term.termId} is a percentage but has no rate.`);
       calculated = percentOf(base, term.rate);
     } else {
@@ -146,8 +160,8 @@ export function priceTerms(lines: EngineLine[], terms: EngineTerm[]): EngineOutp
       if (finalAmount < ZERO) throw new PurchaseCalculationError(`Term ${term.termId} override cannot be negative.`);
     }
 
-    const signed = term.nature === "ADDITIVE" ? finalAmount : -finalAmount;
-    results.set(term.key, { key: term.key, baseAmount: base, calculatedAmount: calculated, finalAmount, signed });
+    const signed = nature === "ADDITIVE" ? finalAmount : -finalAmount;
+    results.set(term.key, { key: term.key, baseAmount: base, calculatedAmount: calculated, finalAmount, signed, nature });
     docRunning += signed;
     if (inLine) lineRunning.set(term.lineKey as number, lineRunning.get(term.lineKey as number)! + signed);
     done.push(term);

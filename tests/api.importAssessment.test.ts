@@ -59,8 +59,8 @@ describe.skipIf(!DB_READY)("Import cost assessment (API)", () => {
     W.service = await ins("Product", { companyId: W.co, code: c("SERVICE").slice(0, 10), description: "Insurance service", type: "NON_STOCK", productSubGroupId: subGroup, updatedAt: NOW });
     await ins("NonStockDetail", { productId: W.service, unitId: W.unit, purchaseGLId: W.purchase, salesGLId: W.purchase, updatedAt: NOW });
     W.vat = await ins("PurchaseTerm", { companyId: W.co, code: c("VAT"), name: "Input VAT", nature: "ADDITIVE", sequence: 90, defaultCalcType: "PERCENT", defaultValue: "13", generalLedgerId: W.inputTax, updatedAt: NOW });
-    W.duty = await ins("PurchaseTerm", { companyId: W.co, code: c("DUTY"), name: "Import duty", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 10, defaultCalcType: "PERCENT", defaultValue: "10", distributeToLines: true, allocationBasis: "QUANTITY", generalLedgerId: W.purchase, updatedAt: NOW });
-    W.excise = await ins("PurchaseTerm", { companyId: W.co, code: c("EXCISE"), name: "Excise", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 20, defaultCalcType: "AMOUNT", defaultValue: "50", generalLedgerId: W.exciseGL, updatedAt: NOW });
+    W.duty = await ins("PurchaseTerm", { companyId: W.co, code: c("DUTY"), name: "Import duty", category: "COSTING", nature: "ADDITIVE", sequence: 10, defaultCalcType: "PERCENT", defaultValue: "10", distributeToLines: true, allocationBasis: "QUANTITY", generalLedgerId: W.purchase, updatedAt: NOW });
+    W.excise = await ins("PurchaseTerm", { companyId: W.co, code: c("EXCISE"), name: "Excise", category: "COSTING", nature: "ADDITIVE", sequence: 20, defaultCalcType: "AMOUNT", defaultValue: "50", generalLedgerId: W.exciseGL, updatedAt: NOW });
   });
 
   afterAll(async () => {

@@ -25,10 +25,10 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 export interface SummaryProps {
-  assessmentNumber?: string; date: string; billLabel: string; referenceNo: string; remarks: string; calendar: "BS" | "AD"; readOnly: boolean; onEdit: () => void;
+  assessmentNumber?: string; date: string; billLabel: string; referenceNo: string; remarks: string; calendar: "BS" | "AD"; readOnly: boolean; onEdit: () => void; isImport?: boolean;
 }
 
-export function AssessmentSummary({ assessmentNumber, date, billLabel, referenceNo, remarks, calendar, readOnly, onEdit }: SummaryProps) {
+export function AssessmentSummary({ assessmentNumber, date, billLabel, referenceNo, remarks, calendar, readOnly, onEdit, isImport }: SummaryProps) {
   const shown = !date || date.startsWith("?") ? "" : calendar === "BS" ? (adToBs(date) ?? date) : date;
   return (
     <div>
@@ -36,7 +36,7 @@ export function AssessmentSummary({ assessmentNumber, date, billLabel, reference
         <Row label="Assessment no"><span className="font-mono">{assessmentNumber || "(next number)"}</span></Row>
         <Row label={`Assessment date (${calendar})`}>{shown}</Row>
         <Row label="Goods bill">{billLabel}</Row>
-        <Row label="Customs / reference">{referenceNo}</Row>
+        <Row label={isImport ? "Customs / reference" : "Reference no"}>{referenceNo}</Row>
         {remarks.trim() && <Row label="Remarks"><span className="whitespace-pre-wrap">{remarks}</span></Row>}
       </dl>
       <button type="button" className="btn mt-3 w-full justify-center" onClick={onEdit}>
@@ -48,7 +48,7 @@ export function AssessmentSummary({ assessmentNumber, date, billLabel, reference
 
 export interface InsightsProps {
   preview: PreviewLike | null; previewError: string; previewPending: boolean;
-  source?: { label: string; cif: string; lineCount: number };
+  source?: { label: string; cif: string; lineCount: number; isImport?: boolean };
   charges: { key: string; label: string; amount: number; inStock: boolean }[];
   duplicates: { id: number; assessmentNumber: string; state: string }[];
   checks: ReadinessCheck[]; showChecks: boolean; onJump: (field: string) => void;
@@ -76,7 +76,7 @@ export function AssessmentInsights({ preview, previewError, previewPending, sour
       {source && (
         <Section title="Goods bill">
           <p className="text-[13px] font-semibold text-ink">{source.label}</p>
-          <p className="text-[12px] text-slate-500">{money(source.cif)} CIF · {source.lineCount} product line{source.lineCount === 1 ? "" : "s"}</p>
+          <p className="text-[12px] text-slate-500">{money(source.cif)} {source.isImport ? "CIF" : "base value"} · {source.lineCount} product line{source.lineCount === 1 ? "" : "s"}</p>
         </Section>
       )}
 

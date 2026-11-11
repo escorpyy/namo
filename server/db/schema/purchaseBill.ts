@@ -124,7 +124,7 @@ export const purchaseBill = pgTable(
 
     // ADDITIONAL PURCHASE. When set, this bill is an additional invoice of the
     // main bill: it carries the actual additional charges (import duty, excise,
-    // exchange charges, rounding variance, CSF, CVF, ...) as ADDITIONAL-category
+    // exchange charges, rounding variance, CSF, CVF, ...) as COSTING-category
     // purchase terms. Terms that distribute to lines re-value the MAIN bill's
     // stock (see the allocation rules in migration 0005). One level only: a main
     // bill cannot itself be additional.

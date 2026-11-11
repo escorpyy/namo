@@ -20,11 +20,10 @@ export function productRouter(def: MasterDef) {
   const selectRows = async (o: { companyId?: number; id?: number }) => {
     const rows = await db
       .select({
-        id: P.id, code: P.code, description: P.description, shortName: P.shortName, barcode: P.barcode, type: P.type,
+        id: P.id, code: P.code, description: P.description, shortName: P.shortName, barcode: P.barcode, hsnSacCode: P.hsnSacCode, type: P.type,
         productSubGroupId: P.productSubGroupId, isActive: P.isActive, createdAt: P.createdAt, updatedAt: P.updatedAt,
         // Jo naam kai type me common hain, unhe coalesce se ek field banaya (ek product me ek hi detail row hoti hai)
         unitId: co(SD.baseUnitId, NS.unitId), serviceUnitId: SV.unitId, locationId: co(SD.defaultLocationId, FA.locationId),
-        taxRateId: co(SD.taxRateId, NS.taxRateId, SV.taxRateId),
         salesGLId: co(SD.salesGLId, NS.salesGLId, SV.salesGLId, BD.salesGLId), purchaseGLId: co(SD.purchaseGLId, NS.purchaseGLId, SV.purchaseGLId),
         stockCategoryId: SD.stockCategoryId, valuationMethod: SD.valuationMethod, tracksBatch: SD.tracksBatch, tracksExpiry: SD.tracksExpiry,
         purchaseRate: SD.purchaseRate, salesRate: SD.salesRate, mrp: SD.mrp, tradePrice: SD.tradePrice,
@@ -78,7 +77,6 @@ export function productRouter(def: MasterDef) {
     await owned(S.productUnit, [d.serviceUnitId], companyId, "Unit", "serviceUnitId");
     await owned(S.stockCategory, [d.stockCategoryId], companyId, "Stock Category", "stockCategoryId");
     await owned(S.location, [d.locationId], companyId, "Location", "locationId");
-    await owned(S.taxRate, [d.taxRateId], companyId, "Tax Rate", "taxRateId");
     await owned(S.party, [d.defaultVendorId], companyId, "Default Vendor", "defaultVendorId");
     for (const f of ["openingGLId", "closingPLGLId", "closingBSGLId", "purchaseGLId", "purchaseReturnGLId", "salesGLId", "salesReturnGLId", "assetGLId", "accumulatedDeprGLId", "depreciationExpenseGLId"])
       await owned(S.generalLedger, [d[f]], companyId, "Ledger", f);
@@ -120,7 +118,7 @@ export function productRouter(def: MasterDef) {
     switch (d.type) {
       case "STOCK": {
         const sdId = await upsert(SD, {
-          baseUnitId: d.unitId, stockCategoryId: d.stockCategoryId, defaultLocationId: d.locationId, taxRateId: d.taxRateId,
+          baseUnitId: d.unitId, stockCategoryId: d.stockCategoryId, defaultLocationId: d.locationId,
           valuationMethod: d.valuationMethod, tracksBatch: d.tracksBatch, tracksExpiry: d.tracksExpiry,
           purchaseRate: str(d.purchaseRate), salesRate: str(d.salesRate), mrp: str(d.mrp), tradePrice: str(d.tradePrice),
           minStock: str(d.minStock), maxStock: str(d.maxStock), reorderLevel: str(d.reorderLevel), reorderQty: str(d.reorderQty),
@@ -132,8 +130,8 @@ export function productRouter(def: MasterDef) {
         if (d.alternateUnits.length) await tx.insert(AU).values(d.alternateUnits.map((a: any) => ({ stockDetailId: sdId, unitId: a.unitId, conversionFactor: String(a.conversionFactor) })));
         break;
       }
-      case "NON_STOCK": await upsert(NS, { unitId: d.unitId, taxRateId: d.taxRateId, salesGLId: d.salesGLId, purchaseGLId: d.purchaseGLId }); break;
-      case "SERVICE": await upsert(SV, { unitId: d.serviceUnitId, taxRateId: d.taxRateId, salesGLId: d.salesGLId, purchaseGLId: d.purchaseGLId }); break;
+      case "NON_STOCK": await upsert(NS, { unitId: d.unitId, salesGLId: d.salesGLId, purchaseGLId: d.purchaseGLId }); break;
+      case "SERVICE": await upsert(SV, { unitId: d.serviceUnitId, salesGLId: d.salesGLId, purchaseGLId: d.purchaseGLId }); break;
       case "FIXED_ASSET":
         await upsert(FA, {
           assetGLId: d.assetGLId, accumulatedDeprGLId: d.accumulatedDeprGLId, depreciationExpenseGLId: d.depreciationExpenseGLId, locationId: d.locationId,
@@ -150,7 +148,7 @@ export function productRouter(def: MasterDef) {
     }
   }
 
-  const headerVals = (d: Record<string, any>) => ({ code: d.code, description: d.description, shortName: d.shortName, barcode: d.barcode, productSubGroupId: d.productSubGroupId, isActive: d.isActive });
+  const headerVals = (d: Record<string, any>) => ({ code: d.code, description: d.description, shortName: d.shortName, barcode: d.barcode, hsnSacCode: d.hsnSacCode, productSubGroupId: d.productSubGroupId, isActive: d.isActive });
 
   r.get("/", wrap(async (req, res) => {
     const companyId = Number(req.query.companyId);

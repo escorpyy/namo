@@ -10,7 +10,7 @@ import { DateField, TextField, VendorFields } from "../../components/purchase/He
 import { LinesGrid, TermsGrid } from "../../components/purchase/LinesGrid";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
 import {
-  addDaysIso, blankLine, copyBillForm, dateErr, defaultDate, dialogTermRows, dialogTermsToApply, effectiveQty, isBlankLine, isBlankTerm, isZeroTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
+  addDaysIso, alwaysShowTerms, blankLine, copyBillForm, dateErr, defaultDate, dialogTermRows, dialogTermsToApply, effectiveQty, isBlankLine, isBlankTerm, isZeroTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
   type LineRow, type TermRow,
 } from "../../lib/purchaseForm";
 import { parseDec } from "../../../shared/decimal";
@@ -82,7 +82,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     emptyForm: (lk) => ({
       invoiceDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), invoiceType: "LOCAL", purchaseType: "GOODS_PURCHASE_OTHERS", vendorGLId: "", subLedgerId: "", agentId: "",
       vendorInvoiceNo: "", vendorInvoiceDate: "", dueDays: "", dueDate: "", remarks: "", purchaseChallanId: "", purchaseOrderId: "", importCostForBillId: "", importCostAllocationBasis: "VALUE", importCostTreatment: "CIF", challanNo: "", orderNo: "",
-      lines: Array.from({ length: 10 }, () => blankLine()), terms: [], imp: {},
+      lines: Array.from({ length: 10 }, () => blankLine()), terms: alwaysShowTerms(lk.terms), imp: {},
     }),
     toForm: (d: PDoc, lk) => {
       const prods = new Map(lk.products.map((x) => [String(x.id), x]));
@@ -750,7 +750,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
             </div>
             <div className="min-h-0 flex-1 overflow-auto p-3">
               <TermsGrid terms={termDraft} onChange={setTermDraft} lookups={lk} masters={masters} lineCount={liveLines} readOnly={ro} errors={dialogErrors} clearError={clearDialogError} contextKey={String(p.companyId)} calculationPreview={ro ? undefined : dialogPreview?.terms} previewError={dialogPreview?.message}
-                excludeCategory="ADDITIONAL" productwiseOnly={termDialog.scope === "line"} fixedLineNumber={termDialog.scope === "line" ? termDialog.lineNumber : undefined} />
+                excludeCategory="COSTING" productwiseOnly={termDialog.scope === "line"} fixedLineNumber={termDialog.scope === "line" ? termDialog.lineNumber : undefined} />
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-300 bg-slate-50 px-3 py-2">
               <span className="text-[12px] text-slate-600">{dialogFilled} term(s) with a value</span>

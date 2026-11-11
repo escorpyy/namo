@@ -103,7 +103,10 @@ describe.skipIf(!DB_READY)("Purchase documents (API)", () => {
     W.tDisc = await term("DISC10", { nature: "DEDUCTIVE", sequence: 10, defaultCalcType: "PERCENT", defaultValue: 10, generalLedgerId: W.discount });
     W.tFreight = await term("FRT", { nature: "ADDITIVE", sequence: 20, defaultCalcType: "AMOUNT", distributeToLines: true, allocationBasis: "VALUE", generalLedgerId: W.freight });
     W.tVat = await term("VAT13", { nature: "ADDITIVE", sequence: 30, defaultCalcType: "PERCENT", defaultValue: 13, calcBase: "RUNNING_TOTAL", generalLedgerId: W.vat });
-    W.tDuty = await term("DUTY", { nature: "ADDITIVE", category: "ADDITIONAL", sequence: 10, defaultCalcType: "AMOUNT", distributeToLines: true, allocationBasis: "QUANTITY", generalLedgerId: W.duty });
+    W.tFixed = await term("FIXED5", { nature: "ADDITIVE", sequence: 40, defaultCalcType: "PERCENT", defaultValue: 5, isEditable: false, generalLedgerId: W.vat });
+    W.tRound = await term("ROUND", { nature: "ADDITIVE", category: "ROUNDED", sequence: 900, defaultCalcType: "AMOUNT", defaultValue: 0, calcBase: "RUNNING_TOTAL", generalLedgerId: W.discount });
+    W.tLate = await term("LATE", { nature: "ADDITIVE", sequence: 950, defaultCalcType: "AMOUNT", defaultValue: 0, generalLedgerId: W.freight });
+    W.tDuty = await term("DUTY", { nature: "ADDITIVE", category: "COSTING", sequence: 10, defaultCalcType: "AMOUNT", distributeToLines: true, allocationBasis: "QUANTITY", generalLedgerId: W.duty });
   });
 
   afterAll(async () => {
@@ -157,8 +160,8 @@ describe.skipIf(!DB_READY)("Purchase documents (API)", () => {
       expect(b.products.find((p: any) => p.id === W.consult)).toMatchObject({ type: "NON_STOCK", baseUnitId: W.pcs });
       expect(b.units.map((u: any) => u.id).sort()).toEqual([W.pcs, W.box].sort());
       expect(b.locations.map((l: any) => l.id)).toEqual([W.loc]);
-      expect(b.terms.map((t: any) => t.id).sort()).toEqual([W.tDisc, W.tFreight, W.tVat, W.tDuty].sort());
-      expect(b.terms.find((t: any) => t.id === W.tDuty)).toMatchObject({ category: "ADDITIONAL", nature: "ADDITIVE", distributeToLines: true });
+      expect(b.terms.map((t: any) => t.id).sort()).toEqual([W.tDisc, W.tFreight, W.tVat, W.tFixed, W.tRound, W.tLate, W.tDuty].sort());
+      expect(b.terms.find((t: any) => t.id === W.tDuty)).toMatchObject({ category: "COSTING", nature: "ADDITIVE", distributeToLines: true });
       expect(b.fiscalYears).toEqual([{ id: W.fy, code: "2082/83", startDate: "2025-07-17", endDate: "2026-07-16", isActive: true, isClosed: false, isCurrent: true }]);
       // nothing of another company leaks in
       const other = (await call("GET", `/api/purchase/lookups?companyId=${otherCompanyId}`)).body;
@@ -189,6 +192,26 @@ describe.skipIf(!DB_READY)("Purchase documents (API)", () => {
       const next = await call("POST", base("orders"), orderBody());
       expect(next.body.result.orderNumber).toBe("0002");
       expect((await get("orders", d.id)).body.orderNumber).toBe("0001");
+    });
+
+    it("a term the master marks as not editable takes its master value and refuses a changed rate, type or own amount", async () => {
+      const ok = await call("POST", base("orders"), orderBody({ terms: [{ termId: W.tFixed }] }));
+      expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+      expect(ok.body.result.termAmount).toBe("100.00"); // 5% of 2000.00
+      const same = await call("POST", base("orders"), orderBody({ terms: [{ termId: W.tFixed, calcType: "PERCENT", rate: 5 }] }));
+      expect(same.status, JSON.stringify(same.body)).toBe(201);
+      for (const bad of [{ rate: 6 }, { calcType: "AMOUNT", inputAmount: 100 }, { isOverridden: true, overrideAmount: 90 }]) {
+        const r = await call("POST", base("orders"), orderBody({ terms: [{ termId: W.tFixed, ...bad }] }));
+        expect(r.status, JSON.stringify(bad)).toBe(409);
+        expect(r.body.error ?? r.body.message ?? JSON.stringify(r.body)).toMatch(/fixed by its master/);
+      }
+    });
+
+    it("lookups tell the screen which terms are editable", async () => {
+      const r = await call("GET", `/api/purchase/lookups?${qs()}`);
+      const byId = new Map<number, any>(r.body.terms.map((t: any) => [t.id, t]));
+      expect(byId.get(W.tFixed).isEditable).toBe(false);
+      expect(byId.get(W.tVat).isEditable).toBe(true);
     });
 
     it("a draft can be edited with PUT: lines and terms are replaced, totals recomputed, company and branch stay", async () => {
@@ -644,6 +667,36 @@ describe.skipIf(!DB_READY)("Purchase documents (API)", () => {
       const p = await call("POST", base("orders"), orderBody({ lines: [{ productId: otherProduct, qty: 1, rate: 1 }] }));
       expect(p.status).toBe(400);
       expect(p.body.message).toMatch(/product not found in this company/);
+    });
+  });
+
+  // =====================================================================================================================
+  describe("rounding term on a bill", () => {
+    it("a rounding term brings the bill to a whole rupee by itself and posts as a credit or a debit by the result", async () => {
+      // 1000.30 + 13% VAT (130.04) = 1130.34: Round Off takes 0.34 off (a credit). 1000.50 + 130.07 = 1130.57: it adds 0.43 (a debit).
+      const cases = [{ rate: 1000.3, nature: "DEDUCTIVE", amount: "0.34", total: "1130.00" }, { rate: 1000.5, nature: "ADDITIVE", amount: "0.43", total: "1131.00" }];
+      for (const [i, k] of cases.entries()) {
+        const saved = await call("POST", base("bills"), billBody({ lines: [{ productId: W.rice, qty: 1, rate: k.rate }], vendorInvoiceNo: `RND-${i}-${tag}`, terms: [{ termId: W.tVat }, { termId: W.tRound }] }));
+        expect(saved.status, JSON.stringify(saved.body)).toBe(201);
+        expect(saved.body.result.totalAmount).toBe(k.total);
+        const round = saved.body.document.terms.find((t: any) => t.termCode === c("ROUND"));
+        expect(round).toMatchObject({ nature: k.nature });
+        expect(n2(round.finalAmount)).toBe(k.amount);
+        const posted = await act("bills", saved.body.result.id, "post");
+        expect(posted.status, JSON.stringify(posted.body)).toBe(200);
+        const v = await voucherOf(posted.body.document.journalVoucher.id);
+        expect(v.dr).toBe(v.cr);
+        expect(v.rows.some((r: any) => r.gl === W.vendor && n2(r.credit) === k.total)).toBe(true);
+        const line = v.rows.find((r: any) => r.gl === W.discount); // the Round Off ledger
+        expect(k.nature === "ADDITIVE" ? n2(line.debit) : n2(line.credit)).toBe(k.amount);
+      }
+    });
+
+    it("a rounding term must be the last term of the document", async () => {
+      const r = await call("POST", base("bills"), billBody({ vendorInvoiceNo: `RLT-${tag}`, terms: [{ termId: W.tRound }, { termId: W.tLate, inputAmount: 5 }] }));
+      expect(r.status).toBeGreaterThanOrEqual(400);
+      expect(r.status).toBeLessThan(500);
+      expect(JSON.stringify(r.body)).toMatch(/must be the last term/);
     });
   });
 });

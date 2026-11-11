@@ -151,7 +151,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
   const masters = lookups.terms ?? [];
   const termById = useMemo(() => new Map(masters.map((t) => [String(t.id), t])), [masters]);
   const termOptions: ReferenceOption[] = useMemo(
-    () => masters.filter((t: any) => t.category === "ADDITIONAL").map((t: any) => ({
+    () => masters.filter((t: any) => t.category === "COSTING").map((t: any) => ({
       value: String(t.id), label: `${t.code} — ${t.name}`, code: t.code, name: t.name,
       detail: `${t.category} · ${t.nature ?? "charge"}${t.distributeToLines ? " · normally capitalized" : ""}`, isActive: t.isActive,
     })),
@@ -160,11 +160,12 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
   const importOptions: ReferenceOption[] = useMemo(
     () => imports.map((b) => ({
       value: String(b.id), label: `${b.invoiceNumber} — ${b.invoiceDate}`, code: b.invoiceNumber, name: b.invoiceNumber,
-      detail: `${safeMoney(b.cifValue)} CIF · ${b.lines?.length ?? 0} product lines`, isActive: true,
+      detail: `${safeMoney(b.cifValue)} ${b.invoiceType === "IMPORT" ? "CIF" : "base value"} · ${b.lines?.length ?? 0} product lines`, isActive: true,
     })),
     [imports],
   );
   const selectedImport = imports.find((b) => String(b.id) === form?.importBillId);
+  const isImport = selectedImport?.invoiceType === "IMPORT";
 
   const requestTerms = (f: Form): ImportAssessmentTermInput[] => f.terms.filter((t) => t.termId).map((t) => ({
     termId: Number(t.termId), calcType: t.calcType, rate: t.calcType === "PERCENT" ? t.rate : undefined,
@@ -499,7 +500,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
     .map((r) => ({ id: r.id, assessmentNumber: r.assessmentNumber, state: String(r.state ?? "") }));
   const downloadCsv = () => {
     if (!lineRows.length) return;
-    const blob = new Blob(["﻿" + allocationCsv(lineRows as any)], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob(["﻿" + allocationCsv(lineRows as any, isImport)], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = `${doc?.assessmentNumber ?? "cost-assessment"}-landed-cost.csv`;
@@ -514,7 +515,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
   const headerReady = stage === "work" || !!doc;
   const billLabel = source ? `${source.invoiceNumber}${source.invoiceDate ? ` · ${source.invoiceDate}` : ""}` : "";
   const stats = ([
-    ["Goods value", preview?.goodsValue], ["CIF base", preview?.cifValue], ["Invoiced services", preview?.invoicedCapitalizedCosts],
+    ["Goods value", preview?.goodsValue], [isImport ? "CIF base" : "Base value", preview?.cifValue], ["Invoiced services", preview?.invoicedCapitalizedCosts],
     ["Earlier costs", preview?.existingPurchaseTermCosts], ["Assessed net", preview?.assessedNet], ["Final landed value", preview?.totalLandedValue],
   ] as const);
 
@@ -527,7 +528,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
       <div className="flex min-h-0 flex-1">
         <SidePanel side="left" title="Header" collapsed={leftCollapsed} onToggle={toggleLeft} shortcut="Alt+[">
           {headerReady
-            ? <AssessmentSummary assessmentNumber={doc?.assessmentNumber} date={form.assessmentDate} billLabel={billLabel} referenceNo={form.referenceNo} remarks={form.remarks} calendar={p.calendar} readOnly={!editing} onEdit={editHeader} />
+            ? <AssessmentSummary assessmentNumber={doc?.assessmentNumber} date={form.assessmentDate} billLabel={billLabel} referenceNo={form.referenceNo} remarks={form.remarks} calendar={p.calendar} readOnly={!editing} onEdit={editHeader} isImport={isImport} />
             : <EmptyPanel>The header you enter in the middle appears here.</EmptyPanel>}
         </SidePanel>
 
@@ -556,7 +557,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                     />
                     {errors.importBillId && <p className="mt-0.5 text-[11px] text-red-700" role="alert">{errors.importBillId}</p>}
                   </div>
-                  <label className="block lg-label [&>input]:mt-1 [&>textarea]:mt-1">Customs / reference no
+                  <label className="block lg-label [&>input]:mt-1 [&>textarea]:mt-1">{isImport ? "Customs / reference no" : "Reference no"}
                     <input data-assessment-field data-field="referenceNo" className={fieldClass} maxLength={60} disabled={!editing || busy} value={form.referenceNo} onChange={(e) => setForm({ ...form, referenceNo: e.target.value })} />
                   </label>
                   <label className="block lg-label [&>input]:mt-1 [&>textarea]:mt-1">Linked goods invoice
@@ -643,6 +644,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                     <tbody>
                       {form.terms.map((t, i) => {
                         const m: any = termById.get(t.termId);
+                        const fixed = m?.isEditable === false; // the master fixes this charge's type and value
                         const result = preview?.termResults?.find?.((x: any) => x.termId === Number(t.termId) || x.termId === t.termId)
                           ?? preview?.terms?.find?.((x: any) => x.termId === Number(t.termId));
                         const subs = (lookups?.subLedgers ?? []).filter((x) => String(x.generalLedgerId) === t.againstLedgerId);
@@ -656,17 +658,17 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                                   contextKey={`${p.companyId}:${p.branchId}`} placeholder="Choose charge…" hasError={!!errors.terms && !t.termId} />
                               </td>
                               <td className="px-2 py-2">
-                                <select data-field={`terms.${i}.calcType`} className={fieldClass} disabled={!editing || busy || !t.termId} aria-label={`Calculation type for charge ${i + 1}`}
+                                <select data-field={`terms.${i}.calcType`} className={fieldClass} disabled={!editing || busy || !t.termId || fixed} aria-label={`Calculation type for charge ${i + 1}`}
                                   value={t.calcType} onChange={(e) => updateTerm(i, { calcType: e.target.value as AssessmentTerm["calcType"] })}>
                                   <option value="PERCENT">Percent</option>
                                   <option value="AMOUNT">Fixed amount</option>
                                 </select>
-                                <div className="mt-1 truncate text-[11px] text-slate-500" title={`${m?.nature ?? "Charge"} · ${m?.calcBase ?? "CIF / running total"}`}>{m?.nature ?? "Charge"} · {m?.calcBase ?? "CIF / running total"}</div>
+                                <div className="mt-1 truncate text-[11px] text-slate-500" title={`${m?.nature ?? "Charge"} · ${m?.calcBase ?? "base value / running total"}`}>{m?.nature ?? "Charge"} · {m?.calcBase ?? "CIF / running total"}</div>
                               </td>
                               <td className="px-2 py-2">
                                 <div className="flex gap-1.5">
                                   <input data-field={`terms.${i}.amount`} aria-label={t.calcType === "PERCENT" ? `Rate for charge ${i + 1}` : `Amount for charge ${i + 1}`}
-                                    className={`${fieldClass} text-right tabular-nums`} disabled={!editing || busy || !t.termId}
+                                    className={`${fieldClass} text-right tabular-nums`} disabled={!editing || busy || !t.termId || fixed}
                                     value={t.calcType === "PERCENT" ? t.rate : t.inputAmount} inputMode="decimal"
                                     onChange={(e) => updateTerm(i, t.calcType === "PERCENT" ? { rate: e.target.value } : { inputAmount: e.target.value })}
                                     placeholder={t.calcType === "PERCENT" ? "Percent" : "Amount"} />
@@ -676,7 +678,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                                   )}
                                 </div>
                                 <label className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-slate-500">
-                                  <input data-field={`terms.${i}.isOverridden`} type="checkbox" disabled={!editing || busy || !t.termId} checked={t.isOverridden} onChange={(e) => updateTerm(i, { isOverridden: e.target.checked })} />
+                                  <input data-field={`terms.${i}.isOverridden`} type="checkbox" disabled={!editing || busy || !t.termId || fixed} checked={t.isOverridden} onChange={(e) => updateTerm(i, { isOverridden: e.target.checked })} />
                                   <span>Override calculated amount</span>
                                 </label>
                               </td>
@@ -750,7 +752,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
         <SidePanel side="right" title="Landed cost" collapsed={rightCollapsed} onToggle={toggleRight} shortcut="Alt+]">
           {headerReady
             ? <AssessmentInsights preview={preview ?? doc?.preview ?? null} previewError={previewError} previewPending={previewPending}
-                source={selectedImport ? { label: billLabel, cif: String(selectedImport.cifValue ?? "0"), lineCount: selectedImport.lines?.length ?? 0 } : undefined}
+                source={selectedImport ? { label: billLabel, cif: String(selectedImport.cifValue ?? "0"), isImport, lineCount: selectedImport.lines?.length ?? 0 } : undefined}
                 charges={insightCharges} duplicates={duplicates} checks={allChecks} showChecks={!isApplied && !doc?.reversedAt} onJump={jump} />
             : <EmptyPanel>What the charges do to the landed cost appears here once the header is complete.</EmptyPanel>}
         </SidePanel>

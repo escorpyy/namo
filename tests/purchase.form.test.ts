@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDaysIso, blankLine, blankTerm, copyBillForm, dialogTermRows, dialogTermsToApply, isZeroTerm, pickableTerms, type Term } from "../src/lib/purchaseForm";
+import { addDaysIso, alwaysShowTerms, blankLine, blankTerm, copyBillForm, dialogTermRows, dialogTermsToApply, isZeroTerm, pickableTerms, type Term } from "../src/lib/purchaseForm";
 
 // Copying a bill keeps what is worth re-using and drops everything that identifies the original or links it to other documents.
 describe("copyBillForm", () => {
@@ -32,22 +32,22 @@ describe("copyBillForm", () => {
   });
 });
 
-// A purchase bill's term picker hides ADDITIONAL terms only. Round Off (ROUNDED) and the ordinary GENERAL terms must stay selectable.
+// A purchase bill's term picker hides COSTING terms only. Round Off (ROUNDED) and the ordinary GENERAL terms must stay selectable.
 describe("pickableTerms", () => {
   const terms = [
     { code: "DISC", category: "GENERAL", isProductwise: true },
     { code: "VAT", category: "GENERAL", isProductwise: false },
     { code: "ROUND", category: "ROUNDED", isProductwise: false },
-    { code: "CUSTOMS", category: "ADDITIONAL", isProductwise: false },
+    { code: "CUSTOMS", category: "COSTING", isProductwise: false },
   ];
   const codes = (r: { code: string }[]) => r.map((t) => t.code);
-  it("a bill (exclude ADDITIONAL) keeps GENERAL and ROUNDED terms and hides the additional charge", () => {
-    expect(codes(pickableTerms(terms, { excludeCategory: "ADDITIONAL" }))).toEqual(["DISC", "VAT", "ROUND"]);
+  it("a bill (exclude COSTING) keeps GENERAL and ROUNDED terms and hides the additional charge", () => {
+    expect(codes(pickableTerms(terms, { excludeCategory: "COSTING" }))).toEqual(["DISC", "VAT", "ROUND"]);
   });
   it("still filters by one category and by line-wise or document-wise", () => {
-    expect(codes(pickableTerms(terms, { category: "ADDITIONAL" }))).toEqual(["CUSTOMS"]);
-    expect(codes(pickableTerms(terms, { excludeCategory: "ADDITIONAL", productwiseOnly: true }))).toEqual(["DISC"]);
-    expect(codes(pickableTerms(terms, { excludeCategory: "ADDITIONAL", productwiseOnly: false }))).toEqual(["VAT", "ROUND"]);
+    expect(codes(pickableTerms(terms, { category: "COSTING" }))).toEqual(["CUSTOMS"]);
+    expect(codes(pickableTerms(terms, { excludeCategory: "COSTING", productwiseOnly: true }))).toEqual(["DISC"]);
+    expect(codes(pickableTerms(terms, { excludeCategory: "COSTING", productwiseOnly: false }))).toEqual(["VAT", "ROUND"]);
     expect(codes(pickableTerms(terms, {}))).toEqual(["DISC", "VAT", "ROUND", "CUSTOMS"]);
   });
 });
@@ -81,12 +81,12 @@ describe("terms dialog rows", () => {
     term({ id: 2, code: "DISC", sequence: 10, isProductwise: true, nature: "DEDUCTIVE" }),
     term({ id: 3, code: "FREIGHT", sequence: 20, isProductwise: true, defaultCalcType: "AMOUNT", defaultValue: "100" }),
     term({ id: 4, code: "OLD", sequence: 5, isProductwise: true, isActive: false }),
-    term({ id: 5, code: "CUSTOMS", sequence: 1, isProductwise: true, category: "ADDITIONAL" }),
+    term({ id: 5, code: "CUSTOMS", sequence: 1, isProductwise: true, category: "COSTING" }),
     term({ id: 6, code: "SCHEME", sequence: 10, isProductwise: true }),
   ];
   const byId = new Map(masters.map((m) => [String(m.id), m]));
 
-  it("lists the line-wise terms by sequence (ties by code), skipping inactive and ADDITIONAL ones, every value at zero", () => {
+  it("lists the line-wise terms by sequence (ties by code), skipping inactive and COSTING ones, every value at zero", () => {
     const rows = dialogTermRows(masters, [], { productwise: true, lineNumber: 3 });
     expect(rows.map((r) => r.termId)).toEqual(["2", "6", "3"]);
     expect(rows.every((r) => r.lineNumber === "3")).toBe(true);
@@ -105,7 +105,7 @@ describe("terms dialog rows", () => {
     expect(rows.map((r) => r.termId)).toEqual(["2", "6", "3"]);
     expect(rows[2]).toBe(saved);
   });
-  it("keeps a saved inactive term in its sequence slot, and a saved ADDITIONAL term (never offered) at the end", () => {
+  it("keeps a saved inactive term in its sequence slot, and a saved COSTING term (never offered) at the end", () => {
     const inactive = blankTerm({ termId: "4", lineNumber: "1", rate: "5" });
     const additional = blankTerm({ termId: "5", lineNumber: "1", rate: "2" });
     const rows = dialogTermRows(masters, [inactive, additional], { productwise: true, lineNumber: 1 });
@@ -128,5 +128,36 @@ describe("terms dialog rows", () => {
     const kept = dialogTermsToApply(header.map((r) => ({ ...r, rate: "" })), byId);
     expect(kept).toHaveLength(1);
     expect(kept[0]).toMatchObject({ termId: "1", rate: "0" });
+  });
+});
+
+
+// A new document starts with every "always show" term, so nobody can forget VAT or Round Off.
+describe("alwaysShowTerms", () => {
+  const term = (over: Partial<Term> & { id: number; code: string }): Term => ({
+    name: over.code, category: "GENERAL", nature: "ADDITIVE", isProductwise: false, isMandatory: true, isEditable: true, sequence: 10, defaultCalcType: "PERCENT", defaultValue: "13.0000",
+    calcBase: "ITEM_VALUE", baseTermId: null, distributeToLines: false, isActive: true, ...over,
+  });
+  it("offers the active, document-wise, always-show GENERAL and ROUNDED terms in sequence order, at their default value", () => {
+    const rows = alwaysShowTerms([
+      term({ id: 1, code: "ROUND", category: "ROUNDED", sequence: 900, defaultCalcType: "AMOUNT", defaultValue: "0.0000" }),
+      term({ id: 2, code: "VAT", sequence: 30 }),
+      term({ id: 3, code: "DISC", sequence: 10, defaultValue: "0.0000" }),
+    ]);
+    expect(rows.map((r) => r.termId)).toEqual(["3", "2", "1"]);
+    expect(rows[0]).toMatchObject({ calcType: "PERCENT", rate: "0", inputAmount: "" });
+    expect(rows[1]).toMatchObject({ calcType: "PERCENT", rate: "13", inputAmount: "" });
+    expect(rows[2]).toMatchObject({ calcType: "AMOUNT", rate: "", inputAmount: "0" });
+    expect(new Set(rows.map((r) => r.key)).size).toBe(3);
+  });
+  it("leaves out terms that are not always-show, inactive, line-wise or Costing", () => {
+    const rows = alwaysShowTerms([
+      term({ id: 1, code: "OPTIONAL", isMandatory: false }),
+      term({ id: 2, code: "OFF", isActive: false }),
+      term({ id: 3, code: "LINE", isProductwise: true }),
+      term({ id: 4, code: "DUTY", category: "COSTING" }),
+      term({ id: 5, code: "VAT" }),
+    ]);
+    expect(rows.map((r) => r.termId)).toEqual(["5"]);
   });
 });

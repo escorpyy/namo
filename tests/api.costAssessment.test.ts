@@ -49,8 +49,8 @@ describe.skipIf(!DB_READY)("Cost assessment: local and import, against ledgers, 
     W.service = await ins("Product", { companyId: W.co, code: c("SERVICE").slice(0, 10), description: "Insurance service", type: "NON_STOCK", productSubGroupId: subGroup, updatedAt: NOW });
     await ins("NonStockDetail", { productId: W.service, unitId: W.unit, purchaseGLId: W.purchase, salesGLId: W.purchase, updatedAt: NOW });
     W.vat = await ins("PurchaseTerm", { companyId: W.co, code: c("VAT"), name: "Input VAT", nature: "ADDITIVE", sequence: 90, defaultCalcType: "PERCENT", defaultValue: "13", generalLedgerId: W.inputTax, updatedAt: NOW });
-    W.duty = await ins("PurchaseTerm", { companyId: W.co, code: c("DUTY"), name: "Import duty", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 10, defaultCalcType: "PERCENT", defaultValue: "10", distributeToLines: true, allocationBasis: "QUANTITY", generalLedgerId: W.purchase, updatedAt: NOW });
-    W.excise = await ins("PurchaseTerm", { companyId: W.co, code: c("EXCISE"), name: "Excise", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 20, defaultCalcType: "AMOUNT", defaultValue: "50", generalLedgerId: W.exciseGL, updatedAt: NOW });
+    W.duty = await ins("PurchaseTerm", { companyId: W.co, code: c("DUTY"), name: "Import duty", category: "COSTING", nature: "ADDITIVE", sequence: 10, defaultCalcType: "PERCENT", defaultValue: "10", distributeToLines: true, allocationBasis: "QUANTITY", generalLedgerId: W.purchase, updatedAt: NOW });
+    W.excise = await ins("PurchaseTerm", { companyId: W.co, code: c("EXCISE"), name: "Excise", category: "COSTING", nature: "ADDITIVE", sequence: 20, defaultCalcType: "AMOUNT", defaultValue: "50", generalLedgerId: W.exciseGL, updatedAt: NOW });
     W.cash = await gl("CASH");
     W.ram = await gl("RAMTRANS", "CREDIT");
     W.seraj = await gl("SERAJ", "CREDIT");
@@ -60,10 +60,10 @@ describe.skipIf(!DB_READY)("Cost assessment: local and import, against ledgers, 
     W.vatGL = await gl("IMPVAT");
     W.rebateGL = await gl("REBATE");
     // Terms as the owner described them: own ledger fixed in the master, the against ledger chosen per case (a default may exist).
-    W.labour = await ins("PurchaseTerm", { companyId: W.co, code: c("LABOUR"), name: "Unloading labour", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 5, defaultCalcType: "AMOUNT", defaultValue: "200", generalLedgerId: W.labourGL, affectsStockValue: true, updatedAt: NOW });
-    W.idty = await ins("PurchaseTerm", { companyId: W.co, code: c("IDUTY"), name: "Customs duty", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 10, defaultCalcType: "PERCENT", defaultValue: "10", generalLedgerId: W.dutyGL, defaultAgainstLedgerId: W.bank, affectsStockValue: true, updatedAt: NOW });
-    W.ivat = await ins("PurchaseTerm", { companyId: W.co, code: c("IVAT"), name: "Import VAT", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 20, defaultCalcType: "PERCENT", defaultValue: "13", calcBase: "RUNNING_TOTAL", generalLedgerId: W.vatGL, defaultAgainstLedgerId: W.bank, affectsStockValue: false, updatedAt: NOW });
-    W.rebate = await ins("PurchaseTerm", { companyId: W.co, code: c("REBATE"), name: "Supplier rebate", category: "ADDITIONAL", nature: "DEDUCTIVE", sequence: 30, defaultCalcType: "AMOUNT", defaultValue: "20", generalLedgerId: W.rebateGL, affectsStockValue: true, updatedAt: NOW });
+    W.labour = await ins("PurchaseTerm", { companyId: W.co, code: c("LABOUR"), name: "Unloading labour", category: "COSTING", nature: "ADDITIVE", sequence: 5, defaultCalcType: "AMOUNT", defaultValue: "200", generalLedgerId: W.labourGL, affectsStockValue: true, updatedAt: NOW });
+    W.idty = await ins("PurchaseTerm", { companyId: W.co, code: c("IDUTY"), name: "Customs duty", category: "COSTING", nature: "ADDITIVE", sequence: 10, defaultCalcType: "PERCENT", defaultValue: "10", generalLedgerId: W.dutyGL, defaultAgainstLedgerId: W.bank, affectsStockValue: true, updatedAt: NOW });
+    W.ivat = await ins("PurchaseTerm", { companyId: W.co, code: c("IVAT"), name: "Import VAT", category: "COSTING", nature: "ADDITIVE", sequence: 20, defaultCalcType: "PERCENT", defaultValue: "13", calcBase: "RUNNING_TOTAL", generalLedgerId: W.vatGL, defaultAgainstLedgerId: W.bank, affectsStockValue: false, updatedAt: NOW });
+    W.rebate = await ins("PurchaseTerm", { companyId: W.co, code: c("REBATE"), name: "Supplier rebate", category: "COSTING", nature: "DEDUCTIVE", sequence: 30, defaultCalcType: "AMOUNT", defaultValue: "20", generalLedgerId: W.rebateGL, affectsStockValue: true, updatedAt: NOW });
   });
 
   afterAll(async () => {

@@ -56,7 +56,7 @@ describe.skipIf(!DB_READY)("purchase service layer", () => {
     const tDisc = await term("DISC10", { nature: "DEDUCTIVE", sequence: 10, defaultCalcType: "PERCENT", defaultValue: 10, generalLedgerId: discount });
     const tFreight = await term("FRT", { nature: "ADDITIVE", sequence: 20, defaultCalcType: "AMOUNT", distributeToLines: true, allocationBasis: "VALUE", generalLedgerId: freight });
     const tVat = await term("VAT13", { nature: "ADDITIVE", sequence: 30, defaultCalcType: "PERCENT", defaultValue: 13, calcBase: "RUNNING_TOTAL", generalLedgerId: vat });
-    const tDuty = await term("DUTY", { nature: "ADDITIVE", category: "ADDITIONAL", sequence: 10, defaultCalcType: "AMOUNT", distributeToLines: true, allocationBasis: "QUANTITY", generalLedgerId: duty });
+    const tDuty = await term("DUTY", { nature: "ADDITIVE", category: "COSTING", sequence: 10, defaultCalcType: "AMOUNT", distributeToLines: true, allocationBasis: "QUANTITY", generalLedgerId: duty });
     const tLineDisc = await term("LDISC", { nature: "DEDUCTIVE", sequence: 5, isProductwise: true, defaultCalcType: "PERCENT", defaultValue: 5, generalLedgerId: discount });
     const tNoGL = await term("NOGLT", { nature: "ADDITIVE", sequence: 40, defaultCalcType: "AMOUNT" });
     return { co, br, vendor, customs, purchase, vat, freight, discount, duty, pcs, box, rice, oil, med, nogl, consult, loc, tDisc, tFreight, tVat, tDuty, tLineDisc, tNoGL };
@@ -579,7 +579,7 @@ describe.skipIf(!DB_READY)("purchase service layer", () => {
       });
     });
 
-    it("rules for additional bills: main must be posted, one level, no lines, needs a charge, ADDITIONAL terms only here", async () => {
+    it("rules for additional bills: main must be posted, one level, no lines, needs a charge, COSTING terms only here", async () => {
       await run(async (tx, W) => {
         const draftMain = await svc.savePurchaseBill(billIn(W), ACTOR, { tx });
         await rejects(tx, additional(tx, W, draftMain.id), 409, /Post the main bill/);

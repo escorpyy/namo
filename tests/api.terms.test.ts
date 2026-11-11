@@ -23,7 +23,7 @@ describe.skipIf(!DB_READY)("Purchase / Sales Term masters (API)", () => {
     await close();
   });
 
-  const base = { category: "GENERAL", nature: "ADDITIVE", isProductwise: false, isMandatory: false, defaultCalcType: "PERCENT", defaultValue: 13, calcBase: "ITEM_VALUE", baseTermId: null, generalLedgerId: null, isActive: true };
+  const base = { category: "GENERAL", nature: "ADDITIVE", isProductwise: false, isMandatory: false, isEditable: true, defaultCalcType: "PERCENT", defaultValue: 13, calcBase: "ITEM_VALUE", baseTermId: null, generalLedgerId: null, isActive: true };
   const purchase: Record<string, unknown> = { ...base, distributeToLines: false, allocationBasis: null, affectsStockValue: true, defaultAgainstLedgerId: null };
   const post = async (key: string, body: Record<string, unknown>) => {
     const r = await call("POST", `/api/masters/${key}?companyId=${companyId}`, body);
@@ -53,12 +53,45 @@ describe.skipIf(!DB_READY)("Purchase / Sales Term masters (API)", () => {
   });
 
   it("saves the stock-value flag and a default against ledger, and the against ledger must differ from the term's own ledger", async () => {
-    const ok = await post(P, { ...purchase, code: `V${tag}`, name: "Import VAT", category: "ADDITIONAL", sequence: 603, affectsStockValue: false, defaultAgainstLedgerId: glB });
+    const ok = await post(P, { ...purchase, code: `V${tag}`, name: "Import VAT", category: "COSTING", sequence: 603, affectsStockValue: false, defaultAgainstLedgerId: glB });
     expect(ok.status, JSON.stringify(ok.body)).toBe(201);
     expect(ok.body.affectsStockValue).toBe(false);
     expect(ok.body.defaultAgainstLedgerId).toBe(glB);
-    const same = await post(P, { ...purchase, code: `W${tag}`, name: "Same ledger", category: "ADDITIONAL", sequence: 604, defaultAgainstLedgerId: glA });
+    const same = await post(P, { ...purchase, code: `W${tag}`, name: "Same ledger", category: "COSTING", sequence: 604, defaultAgainstLedgerId: glA });
     expect(same.status).toBe(400);
+  });
+
+  it("Always show and Editable are saved, and Always show is refused on a Costing term", async () => {
+    const ok = await post(P, { ...purchase, code: `S${tag}`, name: "Always there", sequence: 605, isMandatory: true, isEditable: false });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+    expect(ok.body).toMatchObject({ isMandatory: true, isEditable: false });
+    const plain = await post(P, { ...purchase, code: `T${tag}`, name: "Plain", sequence: 606 });
+    expect(plain.body.isEditable).toBe(true); // editable unless the master says otherwise
+    const bad = await post(P, { ...purchase, code: `U${tag}`, name: "Costing always", category: "COSTING", sequence: 607, isMandatory: true });
+    expect(bad.status).toBe(400);
+    const sales = await post("sales-terms", { ...base, code: `X${tag}`, name: "Sales costing", category: "COSTING", sequence: 608, isMandatory: true, generalLedgerId: glA });
+    expect(sales.status).toBe(400);
+  });
+
+  it("a Rounded term is document-wise, on the running total, not distributed, and there is only one active", async () => {
+    const round = { ...purchase, category: "ROUNDED", calcBase: "RUNNING_TOTAL", defaultCalcType: "AMOUNT", defaultValue: 0, isProductwise: false };
+    const list = (await call("GET", `/api/masters/${P}?companyId=${companyId}`)).body;
+    const seeded = list.find((t: any) => t.category === "ROUNDED" && t.isActive);
+    if (seeded) { const off = await call("PUT", `/api/masters/${P}/${seeded.id}?companyId=${companyId}`, { ...seeded, defaultValue: Number(seeded.defaultValue), isActive: false }); expect(off.status, JSON.stringify(off.body)).toBe(200); } // make room for this test's own
+    try {
+      expect((await post(P, { ...round, code: `R1${tag}`, name: "r", sequence: 900, isProductwise: true })).status).toBe(400);
+      expect((await post(P, { ...round, code: `R2${tag}`, name: "r", sequence: 900, calcBase: "ITEM_VALUE" })).status).toBe(400);
+      expect((await post(P, { ...round, code: `R3${tag}`, name: "r", sequence: 900, distributeToLines: true, allocationBasis: "VALUE" })).status).toBe(400);
+      const ok = await post(P, { ...round, code: `R4${tag}`, name: "Round Off", sequence: 900 });
+      expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+      const second = await post(P, { ...round, code: `R5${tag}`, name: "Second", sequence: 901 });
+      expect(second.status).toBe(409);
+      // an inactive one is fine, and the active one can still be edited
+      expect((await post(P, { ...round, code: `R6${tag}`, name: "Spare", sequence: 902, isActive: false })).status).toBe(201);
+      expect((await call("PUT", `/api/masters/${P}/${ok.body.id}?companyId=${companyId}`, { ...ok.body, defaultValue: Number(ok.body.defaultValue), name: "Round Off 2" })).status).toBe(200);
+    } finally {
+      if (seeded) await call("PUT", `/api/masters/${P}/${seeded.id}?companyId=${companyId}`, { ...seeded, defaultValue: Number(seeded.defaultValue), isActive: true });
+    }
   });
 
   it("rejects a duplicate code (case-insensitive) with 409", async () => {

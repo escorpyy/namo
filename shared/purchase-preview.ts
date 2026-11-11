@@ -25,6 +25,8 @@ export interface PreviewTermMaster {
   isProductwise: boolean;
   calcBase: "ITEM_VALUE" | "RUNNING_TOTAL" | "SINGLE_TERM";
   baseTermId?: number | null;
+  /** "ROUNDED" marks a Round Off term, which needs no rate or amount: the engine works it out. */
+  category?: string;
 }
 export interface PreviewTermResult {
   baseAmount: string;
@@ -84,10 +86,11 @@ export function previewPurchase(
     if (seen.has(dup)) return empty("error", `Term ${term.termId} is entered more than once for the same scope.`);
     seen.add(dup);
 
-    const rate = term.calcType === "PERCENT" ? term.rate : undefined;
-    const inputAmount = term.calcType === "AMOUNT" ? term.inputAmount : undefined;
+    const rounded = master.category === "ROUNDED";
+    const rate = !rounded && term.calcType === "PERCENT" ? term.rate : undefined;
+    const inputAmount = !rounded && term.calcType === "AMOUNT" ? term.inputAmount : undefined;
     const overrideAmount = term.isOverridden ? term.overrideAmount : undefined;
-    if ((term.calcType === "PERCENT" && !rate) || (term.calcType === "AMOUNT" && !inputAmount) || (term.isOverridden && !overrideAmount)) {
+    if ((!rounded && term.calcType === "PERCENT" && !rate) || (!rounded && term.calcType === "AMOUNT" && !inputAmount) || (term.isOverridden && !overrideAmount)) {
       return empty("incomplete", "Complete each billing term's rate or amount (and any override) to calculate the invoice total.");
     }
 
@@ -100,12 +103,13 @@ export function previewPurchase(
         nature: master.nature,
         calcBase: master.calcBase,
         baseTermId: master.baseTermId,
-        calcType: term.calcType,
+        calcType: rounded ? "AMOUNT" : term.calcType,
         rate: rate === undefined ? null : toMicro(rate),
-        inputAmount: inputAmount === undefined ? null : toMicro(inputAmount),
+        inputAmount: rounded ? ZERO : inputAmount === undefined ? null : toMicro(inputAmount),
         isOverridden: term.isOverridden,
         overrideAmount: overrideAmount === undefined ? null : toMicro(overrideAmount),
         lineKey: lineNumber,
+        rounded,
       });
       rowKeyByIndex.set(index, term.rowKey);
     } catch (error) {
@@ -122,13 +126,12 @@ export function previewPurchase(
       if (row.signed >= ZERO) additions += row.signed;
       else deductions -= row.signed;
       const rowKey = rowKeyByIndex.get(index);
-      const engineTerm = engineTerms.find((term) => term.key === index)!;
       if (rowKey) termResults.set(rowKey, {
         baseAmount: fmt(row.baseAmount, 2),
         calculatedAmount: fmt(row.calculatedAmount, 2),
         finalAmount: fmt(row.finalAmount, 2),
         signedAmount: fmt(row.signed, 2),
-        nature: engineTerm.nature,
+        nature: row.nature, // a rounding term's nature follows its result
       });
     }
     return {

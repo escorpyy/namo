@@ -37,7 +37,7 @@ describe.skipIf(!DB_READY)("purchase order and challan (database level)", () => 
     const product2 = await ins(tx, "Product", { companyId: co, code: c("P2"), description: "Prod 2", type: "STOCK", productSubGroupId: psg, updatedAt: NOW });
     const loc = await ins(tx, "Location", { companyId: co, code: c("LC"), name: "Loc", updatedAt: NOW });
     const general = await ins(tx, "PurchaseTerm", { companyId: co, code: c("T1"), name: "Discount", nature: "DEDUCTIVE", category: "GENERAL", updatedAt: NOW });
-    const additional = await ins(tx, "PurchaseTerm", { companyId: co, code: c("T2"), name: "Import duty", nature: "ADDITIVE", category: "ADDITIONAL", updatedAt: NOW });
+    const additional = await ins(tx, "PurchaseTerm", { companyId: co, code: c("T2"), name: "Import duty", nature: "ADDITIVE", category: "COSTING", updatedAt: NOW });
     return { co, br, vendor, vendor2, product, product2, unit, loc, general, additional };
   }
 
@@ -141,7 +141,7 @@ describe.skipIf(!DB_READY)("purchase order and challan (database level)", () => 
     const term = (tx: any, A: Co, orderId: number, termId: number, over: Record<string, unknown> = {}) =>
       ins(tx, "PurchaseDocumentTerm", { companyId: A.co, documentType: "PURCHASE_ORDER", documentId: orderId, termId, sequence: 100, nature: "ADDITIVE", calcBase: "ITEM_VALUE", calcType: "AMOUNT", inputAmount: 100, updatedAt: NOW, ...over });
 
-    it("a GENERAL term is fine on an order; an ADDITIONAL term (actual charge) is refused", async () => {
+    it("a GENERAL term is fine on an order; a COSTING term (actual charge) is refused", async () => {
       await run(async (tx, A) => {
         const id = await order(tx, A);
         await term(tx, A, id, A.general, { nature: "DEDUCTIVE" });

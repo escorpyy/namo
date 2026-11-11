@@ -29,7 +29,7 @@ import { product, productUnit } from "./products";
 // Billing terms (VAT, discount, freight, ...) are not columns: they live in
 // PurchaseDocumentTerm with documentType = 'PURCHASE_ORDER' and
 // documentId = PurchaseOrder.id. PurchaseOrder.termAmount is their stored sum.
-// ADDITIONAL-category terms (import duty, excise, ...) are actual charges and
+// COSTING-category terms (import duty, excise, ...) are actual charges and
 // belong on additional purchase bills only; the database refuses them here.
 //
 // Not stored on purpose (derived from challans / bills, computed on read):

@@ -85,7 +85,7 @@ export const depreciationMethodEnum = pgEnum("DepreciationMethod", [
 
 export const billingTermCategoryEnum = pgEnum("BillingTermCategory", [
   "GENERAL",
-  "ADDITIONAL",
+  "COSTING",
   "ROUNDED",
 ]);
 

@@ -57,7 +57,6 @@ describe.skipIf(!DB_READY)("Product master (API)", () => {
     id.sgRice = sgs.find((s) => s.name === "Rice & Grains").id;
     id.sgMob = sgs.find((s) => s.name === "Mobiles").id;
     for (const [k, c] of [["kg", "KG"], ["pcs", "PCS"], ["box", "BOX"], ["ltr", "LTR"]] as const) id[k] = await idByCode("product-units", c);
-    id.vat = await idByCode("tax-rates", "VAT13");
     id.trd = await idByCode("stock-categories", "TRD");
     id.gd1 = await idByCode("locations", "GD1");
     id.rackA = await idByCode("locations", "GD1-A");
@@ -128,7 +127,7 @@ describe.skipIf(!DB_READY)("Product master (API)", () => {
   describe("STOCK", () => {
     it("creates a stock product: code upper-cased, detail + alternate unit saved, fields of other types ignored", async () => {
       const r = await post(stock({
-        code: `s${tag}`.toLowerCase(), stockCategoryId: id.trd, locationId: id.gd1, taxRateId: id.vat, defaultVendorId: id.vendor, tracksBatch: true,
+        code: `s${tag}`.toLowerCase(), stockCategoryId: id.trd, locationId: id.gd1, defaultVendorId: id.vendor, tracksBatch: true,
         purchaseRate: 99.5, salesRate: 120, mrp: 130, minStock: 5, maxStock: 50, reorderLevel: 10, reorderQty: 20,
         alternateUnits: [{ unitId: id.box, conversionFactor: 12 }],
         bundlePrice: 999, originalCost: 1000, // belong to other types: must be dropped
@@ -137,7 +136,7 @@ describe.skipIf(!DB_READY)("Product master (API)", () => {
       expect(r.body.code).toBe(`S${tag}`);
       expect(r.body.type).toBe("STOCK");
       expect(r.body.unitId).toBe(id.kg);
-      expect([r.body.stockCategoryId, r.body.locationId, r.body.taxRateId, r.body.defaultVendorId]).toEqual([id.trd, id.gd1, id.vat, id.vendor]);
+      expect([r.body.stockCategoryId, r.body.locationId, r.body.defaultVendorId]).toEqual([id.trd, id.gd1, id.vendor]);
       expect(r.body.tracksBatch).toBe(true);
       expect(Number(r.body.purchaseRate)).toBe(99.5);
       expect([Number(r.body.minStock), Number(r.body.maxStock), Number(r.body.reorderLevel), Number(r.body.reorderQty)]).toEqual([5, 50, 10, 20]);
@@ -200,10 +199,10 @@ describe.skipIf(!DB_READY)("Product master (API)", () => {
     });
 
     it("creates a NON_STOCK product; stock-only fields are dropped", async () => {
-      const r = await post(nonStock({ taxRateId: id.vat, minStock: 5, alternateUnits: [{ unitId: id.box, conversionFactor: 2 }] }));
+      const r = await post(nonStock({ hsnSacCode: "8471.30", minStock: 5, alternateUnits: [{ unitId: id.box, conversionFactor: 2 }] }));
       expect(r.status).toBe(201);
       expect(r.body.unitId).toBe(id.pcs);
-      expect(r.body.taxRateId).toBe(id.vat);
+      expect(r.body.hsnSacCode).toBe("8471.30");
       expect(r.body.salesGLId).toBe(id.sales);
       expect(r.body.purchaseGLId).toBe(id.purchases);
       expect(r.body.minStock).toBeNull();
@@ -360,12 +359,11 @@ describe.skipIf(!DB_READY)("Product master (API)", () => {
       expect((await post(stock({ code: `L2${tag}`, productSubGroupId: 999999 }))).status).toBe(400);
     });
 
-    it("a Unit, Location, Tax Rate, Stock Category or Vendor of another company (or that does not exist) is refused with the field named", async () => {
+    it("a Unit, Location, Stock Category or Vendor of another company (or that does not exist) is refused with the field named", async () => {
       const own = { productSubGroupId: otherSubGroup, unitId: otherUnit };
       const cases: [string, Record<string, unknown>][] = [
         ["unitId", { unitId: id.kg }],
         ["locationId", { locationId: id.gd1 }],
-        ["taxRateId", { taxRateId: id.vat }],
         ["stockCategoryId", { stockCategoryId: id.trd }],
         ["defaultVendorId", { defaultVendorId: id.vendor }],
       ];

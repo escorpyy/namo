@@ -213,6 +213,8 @@ async function main() {
         { companyId: co.id, code: "GL020", name: "Sales", accountSubGroupId: sales.id, normalBalance: "CREDIT" },
         { companyId: co.id, code: "GL030", name: "Rent Expense", accountSubGroupId: adm.id, normalBalance: "DEBIT" },
         { companyId: co.id, code: "GL031", name: "Salary Expense", accountSubGroupId: adm.id, normalBalance: "DEBIT" },
+        // Where the Round Off term posts for now (it can be a debit or a credit); point the term at an income ledger later if that is wanted.
+        { companyId: co.id, code: "GL032", name: "Other Expenses", accountSubGroupId: adm.id, normalBalance: "DEBIT" },
       ]);
     }
 
@@ -312,12 +314,6 @@ async function main() {
         { companyId: co.id, code: "BOX", name: "Box", decimalPlaces: 0 },
       ]);
 
-    if (!(await hasRows(S.taxRate, co.id)))
-      await db.insert(S.taxRate).values([
-        { companyId: co.id, code: "VAT13", name: "VAT 13%", ratePercent: "13.00" },
-        { companyId: co.id, code: "VAT0", name: "VAT 0% (Exempt)", ratePercent: "0.00" },
-      ]);
-
     if (!(await hasRows(S.stockCategory, co.id)))
       await db.insert(S.stockCategory).values([
         { companyId: co.id, code: "RAW", name: "Raw Material" },
@@ -363,7 +359,6 @@ async function main() {
 
       const unit = async (c: string) => (await db.select().from(S.productUnit).where(and(eq(S.productUnit.companyId, co.id), eq(S.productUnit.code, c))))[0];
       const [kg, ltr, pcs, box] = [await unit("KG"), await unit("LTR"), await unit("PCS"), await unit("BOX")];
-      const [vat] = await db.select().from(S.taxRate).where(and(eq(S.taxRate.companyId, co.id), eq(S.taxRate.code, "VAT13")));
       const [trd] = await db.select().from(S.stockCategory).where(and(eq(S.stockCategory.companyId, co.id), eq(S.stockCategory.code, "TRD")));
       const [gd1] = await db.select().from(S.location).where(and(eq(S.location.companyId, co.id), eq(S.location.code, "GD1")));
       const [vend] = await db.select({ id: S.party.id }).from(S.party).innerJoin(S.generalLedger, eq(S.party.generalLedgerId, S.generalLedger.id)).where(and(eq(S.party.companyId, co.id), eq(S.generalLedger.code, "V001")));
@@ -374,7 +369,7 @@ async function main() {
 
       const p1 = await mk("P001", "Basmati Rice", "STOCK", rice, "8901000000011");
       const sd1 = (await db.insert(S.stockDetail).values({
-        productId: p1.id, baseUnitId: kg.id, stockCategoryId: trd?.id, defaultLocationId: gd1?.id, taxRateId: vat?.id, valuationMethod: "WEIGHTED_AVERAGE",
+        productId: p1.id, baseUnitId: kg.id, stockCategoryId: trd?.id, defaultLocationId: gd1?.id, valuationMethod: "WEIGHTED_AVERAGE",
         purchaseRate: "110.00", salesRate: "125.00", mrp: "140.00", minStock: "50", maxStock: "1000", reorderLevel: "100", reorderQty: "200",
         openingGLId: openStock.id, closingPLGLId: closePL.id, closingBSGLId: closeBS.id, purchaseGLId: purchases.id, purchaseReturnGLId: purchRet.id,
         salesGLId: sales.id, salesReturnGLId: salesRet.id, defaultVendorId: vend?.id,
@@ -383,13 +378,13 @@ async function main() {
 
       const p2 = await mk("P002", "Sunflower Oil 1L", "STOCK", oil, "8901000000028");
       const sd2 = (await db.insert(S.stockDetail).values({
-        productId: p2.id, baseUnitId: ltr.id, stockCategoryId: trd?.id, taxRateId: vat?.id, tracksBatch: true, tracksExpiry: true,
+        productId: p2.id, baseUnitId: ltr.id, stockCategoryId: trd?.id, tracksBatch: true, tracksExpiry: true,
         purchaseRate: "180.00", salesRate: "210.00", openingGLId: openStock.id, closingPLGLId: closePL.id, closingBSGLId: closeBS.id,
         purchaseGLId: purchases.id, salesGLId: sales.id,
       }).returning())[0];
 
       const p3 = await mk("P003", "Delivery Charge", "SERVICE", mob);
-      await db.insert(S.serviceDetail).values({ productId: p3.id, taxRateId: vat?.id, salesGLId: sales.id, purchaseGLId: purchases.id });
+      await db.insert(S.serviceDetail).values({ productId: p3.id, salesGLId: sales.id, purchaseGLId: purchases.id });
       const p4 = await mk("P004", "Packing Material", "NON_STOCK", mob);
       await db.insert(S.nonStockDetail).values({ productId: p4.id, unitId: pcs.id, salesGLId: sales.id, purchaseGLId: purchases.id });
       const p5 = await mk("P005", "Delivery Truck", "FIXED_ASSET", mob);
@@ -419,14 +414,14 @@ async function main() {
     if (!(await hasRows(S.purchaseTerm, co.id))) {
       const gl = async (code: string) => (await db.select().from(S.generalLedger).where(and(eq(S.generalLedger.companyId, co.id), eq(S.generalLedger.code, code))))[0];
       const purchases = await gl("GL040");
-      const rent = await gl("GL030");
+      const otherExpenses = (await gl("GL032")) ?? (await gl("GL030")); // an older seeded database has no Other Expenses ledger
       await db.insert(S.purchaseTerm).values([
         { companyId: co.id, code: "DISC", name: "Trade Discount", category: "GENERAL", nature: "DEDUCTIVE", sequence: 10, isProductwise: true, defaultCalcType: "PERCENT", defaultValue: "5", calcBase: "ITEM_VALUE", generalLedgerId: purchases?.id ?? null },
-        { companyId: co.id, code: "FREIGHT", name: "Freight Inward", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 50, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "VALUE", generalLedgerId: purchases?.id ?? null },
-        { companyId: co.id, code: "ROUND", name: "Round Off", category: "ROUNDED", nature: "ADDITIVE", sequence: 900, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "RUNNING_TOTAL", generalLedgerId: rent?.id ?? null },
+        { companyId: co.id, code: "FREIGHT", name: "Freight Inward", category: "COSTING", nature: "ADDITIVE", sequence: 50, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "VALUE", generalLedgerId: purchases?.id ?? null },
+        { companyId: co.id, code: "ROUND", name: "Round Off", category: "ROUNDED", nature: "ADDITIVE", sequence: 900, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "RUNNING_TOTAL", generalLedgerId: otherExpenses?.id ?? null },
       ]);
     }
-    // Charges for trying out cost assessments and service bills: customs duty and excise (ADDITIONAL, so a cost assessment can use them; each posts
+    // Charges for trying out cost assessments and service bills: customs duty and excise (COSTING, so a cost assessment can use them; each posts
     // Dr Purchases / Cr the against ledger chosen on the assessment) and an input VAT for service bills. Added one by code, so `pnpm db:seed`
     // also adds them to a database that already has terms.
     {
@@ -443,17 +438,18 @@ async function main() {
         const [ex] = await db.select({ id: S.purchaseTerm.id }).from(S.purchaseTerm).where(and(eq(S.purchaseTerm.companyId, co.id), eq(S.purchaseTerm.code, t.code)));
         if (!ex) await db.insert(S.purchaseTerm).values(t);
       };
-      await ensureTerm({ companyId: co.id, code: "CUSTOMS", name: "Customs Duty", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 10, isProductwise: false, defaultCalcType: "PERCENT", defaultValue: "10", calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "VALUE", generalLedgerId: purchases?.id ?? null });
-      await ensureTerm({ companyId: co.id, code: "EXCISE", name: "Excise Duty", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 20, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "QUANTITY", generalLedgerId: purchases?.id ?? null });
+      await ensureTerm({ companyId: co.id, code: "CUSTOMS", name: "Customs Duty", category: "COSTING", nature: "ADDITIVE", sequence: 10, isProductwise: false, defaultCalcType: "PERCENT", defaultValue: "10", calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "VALUE", generalLedgerId: purchases?.id ?? null });
+      await ensureTerm({ companyId: co.id, code: "EXCISE", name: "Excise Duty", category: "COSTING", nature: "ADDITIVE", sequence: 20, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "QUANTITY", generalLedgerId: purchases?.id ?? null });
       await ensureTerm({ companyId: co.id, code: "VAT", name: "Input VAT", category: "GENERAL", nature: "ADDITIVE", sequence: 90, isProductwise: false, defaultCalcType: "PERCENT", defaultValue: "13", generalLedgerId: vatInput.id });
     }
     if (!(await hasRows(S.salesTerm, co.id))) {
       const gl = async (code: string) => (await db.select().from(S.generalLedger).where(and(eq(S.generalLedger.companyId, co.id), eq(S.generalLedger.code, code))))[0];
       const sales = await gl("GL020");
+      const otherExpenses = (await gl("GL032")) ?? sales; // an older seeded database has no Other Expenses ledger
       await db.insert(S.salesTerm).values([
         { companyId: co.id, code: "DISC", name: "Trade Discount", category: "GENERAL", nature: "DEDUCTIVE", sequence: 10, isProductwise: true, defaultCalcType: "PERCENT", defaultValue: "5", calcBase: "ITEM_VALUE", generalLedgerId: sales?.id ?? null },
-        { companyId: co.id, code: "PACK", name: "Packing Charges", category: "ADDITIONAL", nature: "ADDITIVE", sequence: 40, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "ITEM_VALUE", generalLedgerId: sales?.id ?? null },
-        { companyId: co.id, code: "ROUND", name: "Round Off", category: "ROUNDED", nature: "ADDITIVE", sequence: 900, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "RUNNING_TOTAL", generalLedgerId: sales?.id ?? null },
+        { companyId: co.id, code: "PACK", name: "Packing Charges", category: "COSTING", nature: "ADDITIVE", sequence: 40, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "ITEM_VALUE", generalLedgerId: sales?.id ?? null },
+        { companyId: co.id, code: "ROUND", name: "Round Off", category: "ROUNDED", nature: "ADDITIVE", sequence: 900, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "RUNNING_TOTAL", generalLedgerId: otherExpenses?.id ?? null },
       ]);
     }
   }

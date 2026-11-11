@@ -53,7 +53,6 @@ export const CODE_SPECS: CodeSpec[] = [
   { key: "product-sub-groups", label: "Product Sub Group", module: "Products", parentField: "productGroupId", parentLabel: "Product Group", parentKey: "product-groups", nameField: "name", defaultMode: "SUGGESTED", defaultTemplate: "{PARENT}{SEQ:2}" },
   { key: "products", label: "Product", module: "Products", parentField: "productSubGroupId", parentLabel: "Sub Group", parentKey: "product-sub-groups", typeField: "type", typeLetters: PRODUCT_LETTERS, nameField: "description", defaultMode: "SUGGESTED", defaultTemplate: "{PARENT}{SEQ:3}" },
   manual("product-units", "Unit", "Products"),
-  manual("tax-rates", "Tax Rate", "Products"),
   manual("stock-categories", "Stock Category", "Products"),
   manual("locations", "Location", "Products"),
   manual("purchase-terms", "Purchase Billing Term", "Billing"),

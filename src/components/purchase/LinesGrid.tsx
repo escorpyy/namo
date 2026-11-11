@@ -297,8 +297,8 @@ interface TProps {
   contextKey: string;
   calculationPreview?: Map<string, PreviewTermResult>;
   previewError?: string;
-  category?: "GENERAL" | "ADDITIONAL";
-  excludeCategory?: "ADDITIONAL";
+  category?: "GENERAL" | "COSTING";
+  excludeCategory?: "COSTING";
   productwiseOnly?: boolean;
   fixedLineNumber?: number;
 }
@@ -354,6 +354,8 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
           {terms.map((t, i) => {
             const m = masters.get(t.termId);
             const off = readOnly;
+            const fixed = m?.isEditable === false; // the master fixes this term's type and value
+            const auto = m?.category === "ROUNDED"; // a Round Off term works out its own amount: nothing to enter
             const bad = (c: string) => !!errors[`T.${i}.${c}`];
             const cls = (c: string, extra = "") => `fld h-8 ${extra} ${bad(c) ? "fld-err" : ""} ${off ? "bg-slate-100 text-slate-600" : ""}`;
             const msg = Object.entries(errors).find(([k, v]) => k.startsWith(`T.${i}.`) && v)?.[1];
@@ -363,12 +365,12 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
                   <button type="button" className="xl-rowhead" {...gridRows.rowHeadProps(i)}>{i + 1}</button>
                   <MasterReferencePicker fieldName={`T.${i}.t`} label="Billing term" required scopeKey="purchase-terms" contextKey={contextKey} placeholder="Choose term…" value={t.termId} hasError={bad("t")} options={opts} disabled={off} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
                   <input data-field={`T.${i}.l`} disabled={off || !m?.isProductwise || fixedLineNumber !== undefined} inputMode="numeric" value={fixedLineNumber === undefined ? t.lineNumber : String(fixedLineNumber)} placeholder={m?.isProductwise ? "Line" : "—"} onChange={decOnly(INT, (v) => patch(i, { lineNumber: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("l", "text-right tabular-nums")} aria-label={fixedLineNumber === undefined ? `Line number (1-${lineCount})` : `Line ${fixedLineNumber}`} />
-                  <select data-field={`T.${i}.c`} disabled={off || !m} value={t.calcType} onChange={(e) => patch(i, { calcType: e.target.value as TermRow["calcType"] })} className={cls("c")} aria-label="Calculated as">
+                  <select data-field={`T.${i}.c`} disabled={off || !m || fixed || auto} title={fixed ? "Fixed by the term master" : undefined} value={t.calcType} onChange={(e) => patch(i, { calcType: e.target.value as TermRow["calcType"] })} className={cls("c")} aria-label="Calculated as">
                     <option value="PERCENT">Percent (%)</option><option value="AMOUNT">Fixed amount</option>
                   </select>
-                  <input data-field={`T.${i}.v`} disabled={off || !m} inputMode="decimal" autoComplete="off" placeholder={t.calcType === "PERCENT" ? "0.00 %" : "0.00"}
-                    value={t.calcType === "PERCENT" ? t.rate : t.inputAmount} onChange={decOnly(RATE, (v) => patch(i, t.calcType === "PERCENT" ? { rate: v } : { inputAmount: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("v", "text-right tabular-nums")} aria-label="Rate or amount" />
-                  <label className="flex items-center justify-center gap-1 px-2 text-[12px]"><input data-field={`T.${i}.ov`} type="checkbox" disabled={off || !m} checked={t.isOverridden} onChange={(e) => patch(i, { isOverridden: e.target.checked, overrideAmount: e.target.checked ? t.overrideAmount : "" })} /> use own</label>
+                  <input data-field={`T.${i}.v`} disabled={off || !m || fixed || auto} title={auto ? "Worked out automatically" : fixed ? "Fixed by the term master" : undefined} inputMode="decimal" autoComplete="off" placeholder={auto ? "Auto" : t.calcType === "PERCENT" ? "0.00 %" : "0.00"}
+                    value={auto ? "" : t.calcType === "PERCENT" ? t.rate : t.inputAmount} onChange={decOnly(RATE, (v) => patch(i, t.calcType === "PERCENT" ? { rate: v } : { inputAmount: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("v", "text-right tabular-nums")} aria-label="Rate or amount" />
+                  <label className="flex items-center justify-center gap-1 px-2 text-[12px]"><input data-field={`T.${i}.ov`} type="checkbox" disabled={off || !m || fixed} checked={t.isOverridden} onChange={(e) => patch(i, { isOverridden: e.target.checked, overrideAmount: e.target.checked ? t.overrideAmount : "" })} /> use own</label>
                   <input data-field={`T.${i}.o`} disabled={off || !t.isOverridden} inputMode="decimal" autoComplete="off" placeholder="0.00" value={t.overrideAmount} onChange={decOnly(RATE, (v) => patch(i, { overrideAmount: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("o", "text-right tabular-nums")} aria-label="Amount to use instead" />
                   {(() => {
                     const live = calculationPreview !== undefined;
@@ -376,7 +378,7 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
                     const amount = live ? result?.finalAmount : t.finalAmount;
                     const nature = live ? result?.nature : t.nature ?? m?.nature;
                     const formula = result
-                      ? `${t.calcType === "PERCENT" ? `Live: base ${money(result.baseAmount)} × ${t.rate || "0"}% = ${money(result.calculatedAmount)}` : `Live: fixed amount ${money(t.inputAmount || "0")} = ${money(result.calculatedAmount)}`}${t.isOverridden ? `; using override ${money(t.overrideAmount)}` : ""}.`
+                      ? `${auto ? `Live: ${money(result.baseAmount)} rounded to the nearest rupee = ${money(result.calculatedAmount)}` : t.calcType === "PERCENT" ? `Live: base ${money(result.baseAmount)} × ${t.rate || "0"}% = ${money(result.calculatedAmount)}` : `Live: fixed amount ${money(t.inputAmount || "0")} = ${money(result.calculatedAmount)}`}${t.isOverridden ? `; using override ${money(t.overrideAmount)}` : ""}.`
                       : live ? (previewError || "Complete the bill inputs to calculate this term.") : "Calculated when the bill was last saved.";
                     const shown = amount !== undefined && amount !== "" ? `${nature === "DEDUCTIVE" ? "− " : "+ "}${money(amount)}` : "—";
                     return <span className="text-right tabular-nums text-slate-700" title={formula} aria-label={`${m?.name ?? "Billing term"}: ${shown}. ${formula}`}>{shown}</span>;

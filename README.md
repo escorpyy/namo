@@ -95,7 +95,7 @@ src/components/     Header, Sidebar, StatusBar, MasterForm, MasterList, Combobox
 
 ## Ready screens (22)
 
-Account Group, Account Sub Group, General Ledger, Sub Ledger, Party, Company, Branch, Fiscal Year, User, User Access, Area, Sub Area, Agent, Product Group, Product Sub Group, Unit, Tax Rate, Stock Category, Location, **Product (5 types)**, plus Opening Balance and Stock Opening Balance (grid screens).
+Account Group, Account Sub Group, General Ledger, Sub Ledger, Party, Company, Branch, Fiscal Year, User, User Access, Area, Sub Area, Agent, Product Group, Product Sub Group, Unit, Stock Category, Location, **Product (5 types)**, plus Opening Balance and Stock Opening Balance (grid screens).
 
 ## Abhi ke limits
 

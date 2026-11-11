@@ -56,16 +56,20 @@ export async function saveTerms(
     if (seen.has(dupKey)) throw new HttpError(400, `${label} is entered twice${lineNumber !== null ? ` on line ${lineNumber}` : ""}.`, "terms");
     seen.add(dupKey);
 
-    if (m.category === "ADDITIONAL") {
+    if (m.category === "COSTING") {
       if (ctx.docType === "PURCHASE_ORDER") throw new HttpError(400, `${label} is an additional charge; it belongs on an additional purchase bill, not on an order.`, "terms");
       if (!ctx.isAdditionalBill) throw new HttpError(400, `${label} is an additional charge; it can only be entered on an additional purchase bill.`, "terms");
     }
 
-    const calcType = t.calcType ?? m.defaultCalcType;
+    // A rounding term has no rate or amount to enter: its amount and sign are worked out from the document total (see priceTerms).
+    const rounded = m.category === "ROUNDED";
+    const calcType = rounded ? "AMOUNT" : (t.calcType ?? m.defaultCalcType);
     const fallback = calcType === m.defaultCalcType ? m.defaultValue : null;
     let rate: string | null = null;
     let inputAmount: string | null = null;
-    if (calcType === "PERCENT") {
+    if (rounded) {
+      inputAmount = fmt(ZERO);
+    } else if (calcType === "PERCENT") {
       const v = isNil(t.rate) ? fallback : t.rate;
       if (isNil(v)) throw new HttpError(400, `${label}: a percentage needs a rate.`, "terms");
       const r = toMicro(v as string);
@@ -79,6 +83,13 @@ export async function saveTerms(
       inputAmount = fmt(a);
     }
     const isOverridden = !!t.isOverridden;
+    // A term the master marks as not editable keeps the master's type and value, and cannot take an own amount.
+    if (!m.isEditable) {
+      const used = calcType === "PERCENT" ? rate : inputAmount;
+      if (isOverridden || (!rounded && (calcType !== m.defaultCalcType || used === null || toMicro(used) !== toMicro(m.defaultValue)))) {
+        throw new HttpError(409, `${label} is fixed by its master: its type and value cannot be changed on a document.`, "terms");
+      }
+    }
     let finalAmount = "0";
     if (isOverridden) {
       if (isNil(t.overrideAmount)) throw new HttpError(400, `${label}: an overridden term needs the amount to use.`, "terms");
@@ -108,19 +119,21 @@ export async function recalcTerms(tx: Tx, docType: DocType, docId: number): Prom
 
   const rows = await tx.select().from(S.purchaseDocumentTerm).where(and(eq(S.purchaseDocumentTerm.documentType, docType), eq(S.purchaseDocumentTerm.documentId, docId))).orderBy(asc(S.purchaseDocumentTerm.id));
   const masterIds = [...new Set(rows.map((r) => r.termId))];
-  const masters = masterIds.length ? await tx.select({ id: S.purchaseTerm.id, baseTermId: S.purchaseTerm.baseTermId }).from(S.purchaseTerm).where(inArray(S.purchaseTerm.id, masterIds)) : [];
+  const masters = masterIds.length ? await tx.select({ id: S.purchaseTerm.id, baseTermId: S.purchaseTerm.baseTermId, category: S.purchaseTerm.category }).from(S.purchaseTerm).where(inArray(S.purchaseTerm.id, masterIds)) : [];
   const baseOf = new Map(masters.map((m) => [m.id, m.baseTermId]));
+  const roundedIds = new Set(masters.filter((m) => m.category === "ROUNDED").map((m) => m.id));
 
   const engineTerms: EngineTerm[] = rows.map((r) => ({
     key: r.id, termId: r.termId, sequence: r.sequence, nature: r.nature, calcBase: r.calcBase, baseTermId: baseOf.get(r.termId) ?? null,
     calcType: r.calcType, rate: isNil(r.rate) ? null : toMicro(r.rate), inputAmount: isNil(r.inputAmount) ? null : toMicro(r.inputAmount),
     isOverridden: r.isOverridden, overrideAmount: r.isOverridden ? toMicro(r.finalAmount) : null, lineKey: r.documentLineId,
+    rounded: roundedIds.has(r.termId),
   }));
   const out = priceTerms(lines.map((l) => ({ key: l.id, basicAmount: toMicro(l.basic) })), engineTerms);
 
   for (const r of rows) {
     const x = out.results.get(r.id)!;
-    await tx.update(S.purchaseDocumentTerm).set({ baseAmount: fmt(x.baseAmount), calculatedAmount: fmt(x.calculatedAmount), finalAmount: fmt(x.finalAmount), updatedAt: new Date() }).where(eq(S.purchaseDocumentTerm.id, r.id));
+    await tx.update(S.purchaseDocumentTerm).set({ baseAmount: fmt(x.baseAmount), calculatedAmount: fmt(x.calculatedAmount), finalAmount: fmt(x.finalAmount), nature: x.nature, updatedAt: new Date() }).where(eq(S.purchaseDocumentTerm.id, r.id));
   }
 
   // Allocations: wipe and rebuild for every term of this document.
@@ -151,10 +164,10 @@ export async function recalcTerms(tx: Tx, docType: DocType, docId: number): Prom
   return { itemTotal: out.itemTotal, termNet: out.termNet, total: out.total };
 }
 
-// Mandatory terms (e.g. VAT) must be on the document before it is approved / posted.
-// Additional charges are not mandatory on a main document, and an additional bill carries only what it carries.
+// "Always show" (mandatory) terms, GENERAL or ROUNDED ones such as VAT or Round Off, must be on the document before it is approved / posted.
+// Costing charges are never mandatory, and an additional bill carries only what it carries.
 export async function assertMandatoryTerms(tx: Tx, companyId: number, docType: DocType, docId: number) {
-  const mandatory = await tx.select({ id: S.purchaseTerm.id, code: S.purchaseTerm.code }).from(S.purchaseTerm).where(and(eq(S.purchaseTerm.companyId, companyId), eq(S.purchaseTerm.isMandatory, true), eq(S.purchaseTerm.isActive, true)));
+  const mandatory = await tx.select({ id: S.purchaseTerm.id, code: S.purchaseTerm.code }).from(S.purchaseTerm).where(and(eq(S.purchaseTerm.companyId, companyId), eq(S.purchaseTerm.isMandatory, true), eq(S.purchaseTerm.isActive, true), inArray(S.purchaseTerm.category, ["GENERAL", "ROUNDED"])));
   if (!mandatory.length) return;
   const have = new Set((await tx.select({ termId: S.purchaseDocumentTerm.termId }).from(S.purchaseDocumentTerm).where(and(eq(S.purchaseDocumentTerm.documentType, docType), eq(S.purchaseDocumentTerm.documentId, docId)))).map((r) => r.termId));
   const missing = mandatory.filter((m) => !have.has(m.id)).map((m) => m.code);

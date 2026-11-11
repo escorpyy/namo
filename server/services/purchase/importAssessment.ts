@@ -72,7 +72,7 @@ async function resolveTerms(tx: Tx, companyId: number, input: TermInput[]) {
   for (const value of input) {
     const master = byId.get(value.termId)!;
     if (!master.isActive) throw new HttpError(409, `Charge term ${master.code} is inactive.`, "terms");
-    if (master.category !== "ADDITIONAL") throw new HttpError(400, `Charge term ${master.code} is not in the additional assessed-charge category.`, "terms");
+    if (master.category !== "COSTING") throw new HttpError(400, `Charge term ${master.code} is not in the Costing category.`, "terms");
     if (master.isProductwise) throw new HttpError(400, `Charge term ${master.code} must be a header-level term.`, "terms");
     if (!basisOk(value.allocationBasis)) throw new HttpError(400, `Charge term ${master.code} needs VALUE or QUANTITY allocation.`, "terms");
     const capitalizable = value.capitalizable ?? master.affectsStockValue;
@@ -83,6 +83,13 @@ async function resolveTerms(tx: Tx, companyId: number, input: TermInput[]) {
     const inputAmount = calcType === "AMOUNT" ? amountText(value.inputAmount ?? master.defaultValue, `${master.code} amount`) : null;
     const isOverridden = value.isOverridden === true;
     const overrideAmount = isOverridden ? amountText(value.overrideAmount, `${master.code} override`) : null;
+    // A term the master marks as not editable keeps the master's type and value, and cannot take an own amount.
+    if (!master.isEditable) {
+      const used = calcType === "PERCENT" ? rate : inputAmount;
+      if (isOverridden || calcType !== master.defaultCalcType || used === null || toMicro(used) !== toMicro(master.defaultValue)) {
+        throw new HttpError(409, `Charge ${master.code} is fixed by its master: its type and value cannot be changed here.`, "terms");
+      }
+    }
     const baseTermId = master.calcBase === "SINGLE_TERM" ? master.baseTermId : null;
     if (master.calcBase === "SINGLE_TERM" && !baseTermId) throw new HttpError(400, `Charge term ${master.code} has no single-term base configured.`, "terms");
 

@@ -68,7 +68,7 @@ describe.skipIf(!DB_READY)("company consistency across all tenant-scoped tables 
     const q = sql`insert into ${sql.identifier(table)} (${sql.join(keys.map((k) => sql.identifier(k)), sql`, `)}) values (${sql.join(keys.map((k) => sql`${vals[k]}`), sql`, `)}) returning id`;
     return (await tx.execute(q))[0].id as number;
   };
-  type Co = { co: number; br: number; fy: number; gl: number; gl2: number; agent: number; party: number; unit: number; tax: number; product: number; stock: number; loc: number; term: number; term2: number; area: number; subArea: number; jv: number; ob: number; sub: number; vendorGl: number };
+  type Co = { co: number; br: number; fy: number; gl: number; gl2: number; agent: number; party: number; unit: number; product: number; stock: number; loc: number; term: number; term2: number; area: number; subArea: number; jv: number; ob: number; sub: number; vendorGl: number };
   type World = { A: Co; B: Co; tag: string };
 
   async function company(tx: any, tag: string, side: string): Promise<Co> {
@@ -84,7 +84,6 @@ describe.skipIf(!DB_READY)("company consistency across all tenant-scoped tables 
     const agent = await ins(tx, "Agent", { companyId: co, code: c("AG"), name: "Agent", updatedAt: NOW });
     const party = await ins(tx, "Party", { companyId: co, generalLedgerId: vendorGl, updatedAt: NOW });
     const unit = await ins(tx, "ProductUnit", { companyId: co, code: c("U"), name: "Unit", updatedAt: NOW });
-    const tax = await ins(tx, "TaxRate", { companyId: co, code: c("TX"), name: "Tax", ratePercent: 13, updatedAt: NOW });
     const pg = await ins(tx, "ProductGroup", { companyId: co, code: c("PG"), name: "PG", updatedAt: NOW });
     const psg = await ins(tx, "ProductSubGroup", { code: c("PS"), name: "PSG", productGroupId: pg, updatedAt: NOW });
     const product = await ins(tx, "Product", { companyId: co, code: c("P"), description: "Prod", type: "STOCK", productSubGroupId: psg, updatedAt: NOW });
@@ -98,7 +97,7 @@ describe.skipIf(!DB_READY)("company consistency across all tenant-scoped tables 
     await ins(tx, "JournalVoucherLine", { journalVoucherId: jv, lineNumber: 1, generalLedgerId: gl });
     const ob = await ins(tx, "OpeningBalance", { companyId: co, branchId: br, fiscalYearId: fy, generalLedgerId: gl, updatedAt: NOW });
     const sub = await ins(tx, "SubLedger", { code: c("SL"), name: "Sub", generalLedgerId: gl, updatedAt: NOW });
-    return { co, br, fy, gl, gl2, agent, party, unit, tax, product, stock, loc, term, term2, area, subArea, jv, ob, sub, vendorGl };
+    return { co, br, fy, gl, gl2, agent, party, unit, product, stock, loc, term, term2, area, subArea, jv, ob, sub, vendorGl };
   }
   async function world(tx: any): Promise<World> {
     const tag = uniq();
@@ -174,8 +173,6 @@ describe.skipIf(!DB_READY)("company consistency across all tenant-scoped tables 
       await run(async (tx, { A, B }) => {
         await refused(tx, () => upd(tx, "StockDetail", A.stock, "purchaseGLId", B.gl));
         await refused(tx, () => upd(tx, "StockDetail", A.stock, "baseUnitId", B.unit));
-        await refused(tx, () => upd(tx, "StockDetail", A.stock, "taxRateId", B.tax));
-        await upd(tx, "StockDetail", A.stock, "taxRateId", A.tax); // control
       });
     });
     it("SubLedger: ledger and party must agree; party-only is allowed; owner-less is not", async () => {

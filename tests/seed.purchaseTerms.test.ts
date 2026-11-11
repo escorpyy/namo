@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { DB_READY } from "./helpers";
 
-// The demo company's charge terms, so a cost assessment (ADDITIONAL terms) and a service bill (VAT) can be tried right after `pnpm db:seed` / `pnpm db:reset`.
+// The demo company's charge terms, so a cost assessment (COSTING terms) and a service bill (VAT) can be tried right after `pnpm db:seed` / `pnpm db:reset`.
 describe.skipIf(!DB_READY)("Seeded purchase terms (demo company)", () => {
   let terms: any[] = [];
   beforeAll(async () => {
@@ -14,10 +14,10 @@ describe.skipIf(!DB_READY)("Seeded purchase terms (demo company)", () => {
   });
   const term = (code: string) => terms.find((t) => t.code === code);
 
-  it("has customs duty and excise as ADDITIONAL charges that are capitalised into the lines and post to a ledger", () => {
+  it("has customs duty and excise as COSTING charges that are capitalised into the lines and post to a ledger", () => {
     expect(terms.length, "the demo company is not seeded: run pnpm db:seed").toBeGreaterThan(0);
-    expect(term("CUSTOMS")).toMatchObject({ category: "ADDITIONAL", nature: "ADDITIVE", distribute: true, basis: "VALUE", ledger: "GL040" });
-    expect(term("EXCISE")).toMatchObject({ category: "ADDITIONAL", nature: "ADDITIVE", distribute: true, basis: "QUANTITY", ledger: "GL040" });
+    expect(term("CUSTOMS")).toMatchObject({ category: "COSTING", nature: "ADDITIVE", distribute: true, basis: "VALUE", ledger: "GL040" });
+    expect(term("EXCISE")).toMatchObject({ category: "COSTING", nature: "ADDITIVE", distribute: true, basis: "QUANTITY", ledger: "GL040" });
   });
 
   it("has an input VAT term for service bills with its own VAT ledger, and keeps the original terms", () => {

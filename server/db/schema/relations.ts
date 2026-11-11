@@ -25,7 +25,6 @@ import {
   productGroup,
   productSubGroup,
   productUnit,
-  taxRate,
   stockCategory,
   location,
   product,
@@ -64,7 +63,6 @@ export const companyRelations = relations(company, ({ one, many }) => ({
 
   productGroups: many(productGroup),
   productUnits: many(productUnit),
-  taxRates: many(taxRate),
   stockCategories: many(stockCategory),
   locations: many(location),
   products: many(product),
@@ -535,16 +533,6 @@ export const productUnitRelations = relations(productUnit, ({ one, many }) => ({
   alternateUnitFor: many(alternateUnit, { relationName: "AltUnit" }),
 }));
 
-export const taxRateRelations = relations(taxRate, ({ one, many }) => ({
-  company: one(company, {
-    fields: [taxRate.companyId],
-    references: [company.id],
-  }),
-  stockDetails: many(stockDetail),
-  nonStockDetails: many(nonStockDetail),
-  serviceDetails: many(serviceDetail),
-}));
-
 export const stockCategoryRelations = relations(
   stockCategory,
   ({ one, many }) => ({
@@ -615,10 +603,6 @@ export const stockDetailRelations = relations(stockDetail, ({ one, many }) => ({
     references: [location.id],
     relationName: "StockDefaultLocation",
   }),
-  taxRate: one(taxRate, {
-    fields: [stockDetail.taxRateId],
-    references: [taxRate.id],
-  }),
 
   openingGL: one(generalLedger, {
     fields: [stockDetail.openingGLId],
@@ -688,10 +672,6 @@ export const nonStockDetailRelations = relations(nonStockDetail, ({ one }) => ({
     references: [productUnit.id],
     relationName: "NonStockUnit",
   }),
-  taxRate: one(taxRate, {
-    fields: [nonStockDetail.taxRateId],
-    references: [taxRate.id],
-  }),
   salesGL: one(generalLedger, {
     fields: [nonStockDetail.salesGLId],
     references: [generalLedger.id],
@@ -713,10 +693,6 @@ export const serviceDetailRelations = relations(serviceDetail, ({ one }) => ({
     fields: [serviceDetail.unitId],
     references: [productUnit.id],
     relationName: "ServiceUnit",
-  }),
-  taxRate: one(taxRate, {
-    fields: [serviceDetail.taxRateId],
-    references: [taxRate.id],
   }),
   salesGL: one(generalLedger, {
     fields: [serviceDetail.salesGLId],

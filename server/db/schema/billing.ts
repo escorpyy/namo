@@ -76,7 +76,10 @@ export const purchaseTerm = pgTable(
 
     // true = line level, false = header level
     isProductwise: boolean().notNull().default(false),
+    // "Always show": a GENERAL or ROUNDED term that every new document starts with and must keep (even at zero).
     isMandatory: boolean().notNull().default(false),
+    // false = the value is fixed by this master: a document cannot change its type, rate/amount or use an own amount.
+    isEditable: boolean().notNull().default(true),
     sequence: integer().notNull().default(100),
 
     // Starting values; the user may change type and value on the document.
@@ -262,6 +265,7 @@ export const salesTerm = pgTable(
 
     isProductwise: boolean().notNull().default(false),
     isMandatory: boolean().notNull().default(false),
+    isEditable: boolean().notNull().default(true),
     sequence: integer().notNull().default(100),
 
     defaultCalcType: billingCalcTypeEnum().notNull().default("PERCENT"),

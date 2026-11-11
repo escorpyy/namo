@@ -28,6 +28,7 @@ interface Props {
   previewReady: boolean;
   onCellsChange: (updates: AssessmentAllocationCellUpdate[]) => void;
   onMessage: (message: string) => void;
+  isImport?: boolean; // import bills show "Customs value"; local bills show the neutral "Assessable value"
   fill?: boolean; // take the height of the parent and scroll inside it (the fixed assessment screen)
 }
 
@@ -47,7 +48,7 @@ const totalEntered = (term: AssessmentAllocationColumn) => {
   return { amount, valid };
 };
 
-export function AssessmentAllocationGrid({ lines, terms, editing, busy, previewReady, onCellsChange, onMessage, fill }: Props) {
+export function AssessmentAllocationGrid({ lines, terms, editing, busy, previewReady, onCellsChange, onMessage, fill, isImport = false }: Props) {
   const dlg = useDialog();
   const targetsReady = terms.every((term) => term.result?.finalAmount != null || term.result?.amount != null);
   const pasteRange = (event: React.ClipboardEvent<HTMLInputElement>, startRow: number, startColumn: number) => {
@@ -117,7 +118,7 @@ export function AssessmentAllocationGrid({ lines, terms, editing, busy, previewR
               <th className="sticky left-0 z-30 w-[180px] border-r border-slate-200 bg-slate-50 px-3 py-2 text-left">Product</th>
               <th className="w-[96px] px-3 py-2 text-right">Qty</th>
               <th className="w-[90px] px-3 py-2 text-right">Goods value</th>
-              <th className="w-[90px] px-3 py-2 text-right">Customs value</th>
+              <th className="w-[90px] px-3 py-2 text-right">{isImport ? "Customs value" : "Assessable value"}</th>
               <th className="w-[90px] px-3 py-2 text-right">Invoiced services</th>
               <th className="w-[90px] px-3 py-2 text-right">Bill terms</th>
               {terms.map((term, index) => <th key={term.key} className="w-[112px] px-3 py-2 text-right" title={`${term.code} — ${term.name}; basis: ${term.allocationBasis.toLowerCase()}`}>

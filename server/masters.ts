@@ -8,6 +8,25 @@ import { assertAgent, assertSubArea, assertSubGroup } from "./routes/links";
 import { partyRouter } from "./routes/party";
 import { productRouter } from "./routes/product";
 
+// "Always show" (isMandatory) is for GENERAL and ROUNDED terms only: a costing charge (duty, freight...) is never on every document.
+function checkTermFlags(data: { isMandatory?: boolean; category?: string }) {
+  if (data.isMandatory && data.category === "COSTING") throw new HttpError(400, "Always show is only for General and Rounded terms.", "isMandatory");
+}
+
+// A Rounded (Round Off) term works out its own amount and sign from the document total, so it is document-wise, on the running total, never
+// spread over lines, and there is only one active one per company (a document can only carry one, and it has to be the last term).
+async function checkRoundedTerm(table: typeof S.purchaseTerm | typeof S.salesTerm, data: Record<string, any>, companyId: number, id?: number | null) {
+  if (data.category !== "ROUNDED") return;
+  if (data.isProductwise) throw new HttpError(400, "A Rounded term works on the whole document, not on one line.", "isProductwise");
+  if (data.calcBase !== "RUNNING_TOTAL") throw new HttpError(400, "A Rounded term works on the running total.", "calcBase");
+  if (data.distributeToLines) throw new HttpError(400, "A Rounded term cannot be distributed over lines.", "distributeToLines");
+  if (data.isActive) {
+    const others = await db.select({ id: table.id }).from(table).where(and(eq(table.companyId, companyId), eq(table.category, "ROUNDED"), eq(table.isActive, true)));
+    if (others.some((o) => o.id !== id)) throw new HttpError(409, "There is already an active Rounded term; a document can only have one.", "category");
+  }
+}
+
+
 // Hierarchy (parent) check: same company, khud ya apne child ke andar nahi
 async function checkHierarchy(table: any, parentId: number | null, ctx: { companyId: number; id?: number }, label: string) {
   let cur = parentId;
@@ -37,7 +56,6 @@ const CFG: Record<string, ServerCfg> = {
     counts: { productCount: { table: S.product, column: "productSubGroupId" } },
   },
   "product-units": { table: S.productUnit },
-  "tax-rates": { table: S.taxRate },
   "stock-categories": { table: S.stockCategory },
   "general-ledger": {
     table: S.generalLedger,
@@ -192,6 +210,8 @@ const CFG: Record<string, ServerCfg> = {
       dependentCount: { table: S.purchaseTerm, column: "baseTermId" },
     },
     validate: async (data, { companyId, id }) => {
+      checkTermFlags(data);
+      await checkRoundedTerm(S.purchaseTerm, data, companyId, id);
       if (data.generalLedgerId != null) {
         const [g] = await db.select({ c: S.generalLedger.companyId }).from(S.generalLedger).where(eq(S.generalLedger.id, data.generalLedgerId));
         if (g?.c !== companyId) throw new HttpError(400, "General Ledger not found in this company.", "generalLedgerId");
@@ -225,6 +245,8 @@ const CFG: Record<string, ServerCfg> = {
       dependentCount: { table: S.salesTerm, column: "baseTermId" },
     },
     validate: async (data, { companyId, id }) => {
+      checkTermFlags(data);
+      await checkRoundedTerm(S.salesTerm, data, companyId, id);
       if (data.generalLedgerId != null) {
         const [g] = await db.select({ c: S.generalLedger.companyId }).from(S.generalLedger).where(eq(S.generalLedger.id, data.generalLedgerId));
         if (g?.c !== companyId) throw new HttpError(400, "General Ledger not found in this company.", "generalLedgerId");

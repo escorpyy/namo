@@ -36,10 +36,10 @@ describe.skipIf(!DB_READY)("purchase bill (database level)", () => {
     const loc = await ins(tx, "Location", { companyId: co, code: c("LC"), name: "Loc", updatedAt: NOW });
     const jv = await ins(tx, "JournalVoucher", { companyId: co, branchId: br, voucherNumber: c("JV"), voucherDate: "2025-08-01", fiscalYear: "2082/83", updatedAt: NOW });
     await ins(tx, "JournalVoucherLine", { journalVoucherId: jv, lineNumber: 1, generalLedgerId: vendor });
-    // Terms: a GENERAL one, and two ADDITIONAL ones (one spreads over item lines = landed cost).
+    // Terms: a GENERAL one, and two COSTING ones (one spreads over item lines = landed cost).
     const general = await ins(tx, "PurchaseTerm", { companyId: co, code: c("T1"), name: "Discount", nature: "DEDUCTIVE", category: "GENERAL", updatedAt: NOW });
-    const additional = await ins(tx, "PurchaseTerm", { companyId: co, code: c("T2"), name: "Exchange charge", nature: "ADDITIVE", category: "ADDITIONAL", updatedAt: NOW });
-    const additionalDistr = await ins(tx, "PurchaseTerm", { companyId: co, code: c("T3"), name: "Import duty", nature: "ADDITIVE", category: "ADDITIONAL", distributeToLines: true, allocationBasis: "VALUE", updatedAt: NOW });
+    const additional = await ins(tx, "PurchaseTerm", { companyId: co, code: c("T2"), name: "Exchange charge", nature: "ADDITIVE", category: "COSTING", updatedAt: NOW });
+    const additionalDistr = await ins(tx, "PurchaseTerm", { companyId: co, code: c("T3"), name: "Import duty", nature: "ADDITIVE", category: "COSTING", distributeToLines: true, allocationBasis: "VALUE", updatedAt: NOW });
     return { co, br, vendor, product, unit, loc, jv, general, additional, additionalDistr };
   }
 
@@ -196,7 +196,7 @@ describe.skipIf(!DB_READY)("purchase bill (database level)", () => {
       });
     });
 
-    it("an ADDITIONAL term (import duty, excise, CSF...) is allowed on an additional bill, refused on a main bill", async () => {
+    it("a COSTING term (import duty, excise, CSF...) is allowed on an additional bill, refused on a main bill", async () => {
       await run(async (tx, A) => {
         const main = await bill(tx, A, { invoiceType: "IMPORT" });
         const add = await bill(tx, A, { mainBillId: main });

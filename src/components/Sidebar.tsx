@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   BarChart3, BookOpen, BookText, Boxes, ChevronDown, ChevronRight, ClipboardList, FileText, FolderTree, Landmark,
-  LayoutDashboard, Layers, Map, MapPin, Package, PanelLeftClose, PanelLeftOpen, Percent, Ruler, Settings,
+  LayoutDashboard, Layers, Map, MapPin, Package, PanelLeftClose, PanelLeftOpen, Ruler, Settings,
   Scale, Hash, Tag, UserCheck, UserSquare, Users, Warehouse, Building2, Network, CalendarRange, UserCog, KeyRound, Receipt, ShoppingCart,
 } from "lucide-react";
 import { MASTERS } from "../../shared/masters";
@@ -39,7 +39,6 @@ const sections: Section[] = [
       { id: "product-groups", label: "Product Group", icon: Boxes },
       { id: "product-sub-groups", label: "Product Sub Group", icon: Layers },
       { id: "product-units", label: "Unit", icon: Ruler },
-      { id: "tax-rates", label: "Tax Rate", icon: Percent },
       { id: "stock-categories", label: "Stock Category", icon: Tag },
       { id: "locations", label: "Location", icon: Warehouse },
       { id: "stock-opening", label: "Stock Opening Balance", icon: Scale },

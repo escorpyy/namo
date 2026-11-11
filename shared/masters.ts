@@ -150,7 +150,7 @@ const ON_COL: ColumnDef = { name: "isActive", label: "On", width: "28px", kind: 
 // --- Billing terms (Purchase Term / Sales Term): same shape, purchase adds landed-cost allocation ---
 const TERM_CATEGORY: Opt[] = [
   { value: "GENERAL", label: "GENERAL", hotkey: "G", badge: "bg-slate-100 text-slate-700 border-slate-300" },
-  { value: "ADDITIONAL", label: "ADDITIONAL", hotkey: "A", badge: "bg-blue-100 text-blue-800 border-blue-300" },
+  { value: "COSTING", label: "COSTING", hotkey: "C", badge: "bg-blue-100 text-blue-800 border-blue-300" },
   { value: "ROUNDED", label: "ROUNDED", hotkey: "R", badge: "bg-purple-100 text-purple-800 border-purple-300" },
 ];
 const TERM_NATURE: Opt[] = [
@@ -180,7 +180,10 @@ function termMaster(kind: "purchase" | "sales"): MasterDef {
     { name: "category", label: "Category", type: "select", required: true, options: TERM_CATEGORY, default: "GENERAL" },
     { name: "nature", label: "Nature", type: "select", required: true, options: TERM_NATURE },
     { name: "isProductwise", label: "Productwise (line level)", type: "checkbox", default: false },
-    { name: "isMandatory", label: "Mandatory", type: "checkbox", default: false },
+    // "Always show": every new document starts with this term and cannot drop it (it may be zero). Only for GENERAL and ROUNDED terms.
+    { name: "isMandatory", label: "Always show on documents", type: "checkbox", default: false, showIf: { field: "category", in: ["GENERAL", "ROUNDED"] } },
+    // Off = the value is fixed by this master: a document cannot change the rate/amount or use its own amount.
+    { name: "isEditable", label: "Editable on documents", type: "checkbox", default: true },
     { name: "sequence", label: "Sequence", type: "number", required: true, decimals: 0, min: 0, default: "100", placeholder: "Calculation order (lower runs first)" },
     { name: "defaultCalcType", label: "Default Calc Type", type: "select", required: true, options: CALC_TYPE, default: "PERCENT" },
     { name: "defaultValue", label: "Default Value", type: "number", required: true, decimals: 4, min: 0, default: "0" },
@@ -197,10 +200,10 @@ function termMaster(kind: "purchase" | "sales"): MasterDef {
   fields.push(purchase ? { ...glf("generalLedgerId", "General Ledger"), required: true } : glf("generalLedgerId", "General Ledger"));
   if (purchase) {
     fields.push(
-      // Cost assessment (ADDITIONAL terms): does the amount enter the stock value of the goods? Claimable import VAT does not.
-      { name: "affectsStockValue", label: "Affects stock value (landed cost)", type: "checkbox", default: true, showIf: { field: "category", in: ["ADDITIONAL"] } },
+      // Cost assessment (COSTING terms): does the amount enter the stock value of the goods? Claimable import VAT does not.
+      { name: "affectsStockValue", label: "Affects stock value (landed cost)", type: "checkbox", default: true, showIf: { field: "category", in: ["COSTING"] } },
       // Cost assessment: the usual other side of the entry. Only a default; each assessment picks the real one.
-      { ...glf("defaultAgainstLedgerId", "Default Against Ledger"), showIf: { field: "category", in: ["ADDITIONAL"] } },
+      { ...glf("defaultAgainstLedgerId", "Default Against Ledger"), showIf: { field: "category", in: ["COSTING"] } },
     );
   }
   fields.push(active());
@@ -426,6 +429,7 @@ const list: MasterDef[] = [
       { ...text("description", "Description", 256), span: 2 },
       text("shortName", "Short Name", 30, false),
       text("barcode", "Barcode", 64, false),
+      text("hsnSacCode", "HSN / SAC Code", 20, false),
       lookup("productSubGroupId", "Sub Group", "product-sub-groups"),
       active(),
 
@@ -456,7 +460,6 @@ const list: MasterDef[] = [
       },
 
       // ---- Tab: Pricing & Tax ----
-      { ...lookup("taxRateId", "Tax Rate", "tax-rates", false), tab: "Pricing & Tax", showIf: T("STOCK", "NON_STOCK", "SERVICE") },
       { ...lookup("defaultVendorId", "Default Vendor", "party", false), tab: "Pricing & Tax", showIf: T("STOCK"), lookupWhere: { field: "glType", in: ["VENDOR", "BOTH"] } },
       { ...num("purchaseRate", "Purchase Rate", 2), tab: "Pricing & Tax", showIf: T("STOCK") },
       { ...num("salesRate", "Sales Rate", 2), tab: "Pricing & Tax", showIf: T("STOCK") },
@@ -542,12 +545,6 @@ const list: MasterDef[] = [
     fields: [code(), text("name", "Name", 50), { name: "decimalPlaces", label: "Decimal Places", type: "number", required: true, decimals: 0, min: 0, maxValue: 6, default: "0", placeholder: "0 for PCS, 2-3 for KG/LTR" }, active()],
     columns: [CODE_COL, { name: "name", label: "Name", width: "1fr", kind: "text" }, { name: "decimalPlaces", label: "Dec", width: "40px", kind: "number" }, ON_COL],
     unique: [["code"], ["name"]],
-  },
-  {
-    key: "tax-rates", title: "Tax Rate", singular: "Tax Rate", labelFields: ["code", "name"],
-    fields: [code(), text("name", "Name", 50), { name: "ratePercent", label: "Rate %", type: "number", required: true, decimals: 2, min: 0, maxValue: 100 }, text("hsnSacCode", "HSN / SAC Code", 20, false), active()],
-    columns: [CODE_COL, { name: "name", label: "Name", width: "1fr", kind: "text" }, { name: "ratePercent", label: "Rate %", width: "56px", kind: "number" }, ON_COL],
-    unique: [["code"]],
   },
   {
     key: "stock-categories", title: "Stock Category", singular: "Stock Category", labelFields: ["code", "name"],

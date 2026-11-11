@@ -146,3 +146,43 @@ describe("landed cost", () => {
     expect(() => landed({ basicAmount: M("100"), qty: M("1"), allocated: M("-150") })).toThrow(/negative/);
   });
 });
+
+// A Round Off term works out its own amount and sign so the document total comes to a whole rupee.
+describe("rounding term", () => {
+  const price = (lineAmounts: string[], terms: EngineTerm[]) => priceTerms(lineAmounts.map((a, i) => ({ key: i + 1, basicAmount: M(a) })), terms);
+  const round = (o: Partial<EngineTerm> = {}) => t({ key: 9, termId: 9, sequence: 900, rounded: true, calcBase: "RUNNING_TOTAL", calcType: "AMOUNT", inputAmount: 0n, ...o });
+
+  it("rounds a total below half a rupee down, as a deduction", () => {
+    const out = price(["1000.30"], [round()]);
+    expect(out.results.get(9)).toMatchObject({ nature: "DEDUCTIVE", finalAmount: M("0.30"), signed: M("-0.30"), baseAmount: M("1000.30") });
+    expect(fmt(out.total, 2)).toBe("1000.00");
+  });
+  it("rounds half a rupee up, as an addition", () => {
+    const out = price(["1000.50"], [round()]);
+    expect(out.results.get(9)).toMatchObject({ nature: "ADDITIVE", finalAmount: M("0.50"), signed: M("0.50") });
+    expect(fmt(out.total, 2)).toBe("1001.00");
+    expect(fmt(price(["1000.75"], [round()]).total, 2)).toBe("1001.00");
+  });
+  it("is zero when the total is already a whole rupee", () => {
+    const out = price(["1000.00"], [round()]);
+    expect(out.results.get(9)).toMatchObject({ finalAmount: 0n, signed: 0n, nature: "ADDITIVE" });
+    expect(fmt(out.total, 2)).toBe("1000.00");
+  });
+  it("works on the running total after every earlier term, whatever its master base says", () => {
+    // 1005.55 + 13% VAT (130.72) = 1136.27, so the rounding takes 0.27 off.
+    const out = price(["1005.55"], [t({ key: 1, termId: 1, sequence: 30, calcBase: "RUNNING_TOTAL", rate: M("13") }), round({ calcBase: "ITEM_VALUE" })]);
+    expect(out.results.get(9)).toMatchObject({ baseAmount: M("1136.27"), nature: "DEDUCTIVE", finalAmount: M("0.27") });
+    expect(fmt(out.total, 2)).toBe("1136.00");
+  });
+  it("may be overridden; the sign still follows the calculation", () => {
+    const out = price(["1000.30"], [round({ isOverridden: true, overrideAmount: M("0.25") })]);
+    expect(out.results.get(9)).toMatchObject({ nature: "DEDUCTIVE", calculatedAmount: M("0.30"), finalAmount: M("0.25") });
+    expect(fmt(out.total, 2)).toBe("1000.05");
+  });
+  it("must be the last term, only one is allowed, and it cannot sit on a line", () => {
+    const vat = t({ key: 1, termId: 1, sequence: 950, rate: M("13") });
+    expect(() => price(["1000.30"], [round(), vat])).toThrow(/must be the last term/);
+    expect(() => price(["1000.30"], [round(), round({ key: 10, termId: 10, sequence: 901 })])).toThrow(/must be the last term/);
+    expect(() => price(["1000.30"], [round({ lineKey: 1 })])).toThrow(/whole document/);
+  });
+});

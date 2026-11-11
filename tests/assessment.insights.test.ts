@@ -93,7 +93,8 @@ describe("csv", () => {
   it("writes the allocation grid with a total row and the uplift", () => {
     const lines = preview.lines.slice(0, 2).map((l) => ({ ...l, customsValue: l.goodsValue, capitalizedSources: "0.00", existingPurchaseTermCosts: "0.00", capitalizedAssessments: "0.00" }));
     const rows = allocationCsv(lines).split("\r\n");
-    expect(rows[0]).toBe("Line,Product,Qty,Goods value,Customs value,Invoiced services,Bill terms,Assessed costs,Landed value,Landed unit cost,Uplift %");
+    expect(rows[0]).toBe("Line,Product,Qty,Goods value,Assessable value,Invoiced services,Bill terms,Assessed costs,Landed value,Landed unit cost,Uplift %");
+    expect(allocationCsv(lines, true).split("\r\n")[0]).toContain("Goods value,Customs value,");
     expect(rows[1]).toBe("1,RICE,10,600.00,600.00,0.00,0.00,0.00,690.00,69.00,15");
     expect(rows[3]).toBe(",Total,,1000,1000,0,0,0,1250,,25");
   });
