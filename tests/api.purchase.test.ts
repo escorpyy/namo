@@ -486,7 +486,7 @@ describe.skipIf(!DB_READY)("Purchase documents (API)", () => {
       const local = await call("POST", base("bills"), billBody({ importDetail: { customsDeclarationNo: "X" } }));
       expect(local.status).toBe(400);
       expect(local.body.message).toMatch(/IMPORT invoice/);
-      const b = await mkBill({ invoiceType: "IMPORT", purchaseType: "GOODS_PURCHASE_CAPITAL", importDetail: { customsOffice: "Birgunj", transportMode: "ROAD", countryOfOrigin: "India" } });
+      const b = await mkBill({ invoiceType: "IMPORT", purchaseType: "GOODS_PURCHASE_CAPITAL", lines: [{ productId: W.consult, qty: 1, rate: 100 }], importDetail: { customsOffice: "Birgunj", transportMode: "ROAD", countryOfOrigin: "India" } });
       const d = (await get("bills", b.id)).body;
       expect(d).toMatchObject({ invoiceType: "IMPORT", purchaseType: "GOODS_PURCHASE_CAPITAL" });
       expect(d.importDetail).toMatchObject({ customsOffice: "Birgunj", transportMode: "ROAD", countryOfOrigin: "India", customsDeclarationNo: null });
@@ -739,11 +739,63 @@ describe.skipIf(!DB_READY)("Purchase documents (API)", () => {
       }
     });
 
-    it("a rounding term must be the last term of the document", async () => {
-      const r = await call("POST", base("bills"), billBody({ vendorInvoiceNo: `RLT-${tag}`, terms: [{ termId: W.tRound }, { termId: W.tLate, inputAmount: 5 }] }));
-      expect(r.status).toBeGreaterThanOrEqual(400);
-      expect(r.status).toBeLessThan(500);
-      expect(JSON.stringify(r.body)).toMatch(/must be the last term/);
+    it("a rounding term is applied after every other term, even one with a later sequence", async () => {
+      const r = await call("POST", base("bills"), billBody({ vendorInvoiceNo: `RLT-${tag}`, lines: [{ productId: W.rice, qty: 1, rate: 1000.3 }], terms: [{ termId: W.tRound }, { termId: W.tLate, inputAmount: 5.25 }] }));
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      expect(r.body.result.totalAmount).toBe("1006.00"); // 1000.30 + 5.25 = 1005.55: rounding adds 0.45 last
+      const round = r.body.document.terms.find((t: any) => t.termCode === c("ROUND"));
+      expect(round).toMatchObject({ nature: "ADDITIVE" });
+      expect(n2(round.finalAmount)).toBe("0.45");
+    });
+
+    it("the rounding method on the master decides whether the bill rounds up, down or to the nearest rupee", async () => {
+      const master = (await call("GET", `/api/masters/purchase-terms?companyId=${W.co}`)).body.find((m: any) => m.id === W.tRound);
+      const setMethod = async (roundingMethod: string) => {
+        const r = await call("PUT", `/api/masters/purchase-terms/${W.tRound}?companyId=${W.co}`, { ...master, defaultValue: Number(master.defaultValue), roundingMethod });
+        expect(r.status, JSON.stringify(r.body)).toBe(200);
+      };
+      try {
+        // 1000.30 + 13% VAT (130.04) = 1130.34
+        for (const [i, k] of [{ m: "UP", total: "1131.00", nature: "ADDITIVE", amount: "0.66" }, { m: "DOWN", total: "1130.00", nature: "DEDUCTIVE", amount: "0.34" }, { m: "NEAREST", total: "1130.00", nature: "DEDUCTIVE", amount: "0.34" }].entries()) {
+          await setMethod(k.m);
+          const r = await call("POST", base("bills"), billBody({ vendorInvoiceNo: `RMT-${i}-${tag}`, lines: [{ productId: W.rice, qty: 1, rate: 1000.3 }], terms: [{ termId: W.tVat }, { termId: W.tRound }] }));
+          expect(r.status, JSON.stringify(r.body)).toBe(201);
+          expect(r.body.result.totalAmount, k.m).toBe(k.total);
+          const round = r.body.document.terms.find((t: any) => t.termCode === c("ROUND"));
+          expect(round, k.m).toMatchObject({ nature: k.nature });
+          expect(n2(round.finalAmount), k.m).toBe(k.amount);
+        }
+      } finally {
+        await setMethod("NEAREST");
+      }
+    });
+
+    it("an override sent for the rounding term is ignored: the total still comes to a whole rupee", async () => {
+      const r = await call("POST", base("bills"), billBody({ vendorInvoiceNo: `ROV-${tag}`, lines: [{ productId: W.rice, qty: 1, rate: 1000.3 }], terms: [{ termId: W.tVat }, { termId: W.tRound, isOverridden: true, overrideAmount: 5 }] }));
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      expect(r.body.result.totalAmount).toBe("1130.00");
+      const round = r.body.document.terms.find((t: any) => t.termCode === c("ROUND"));
+      expect(n2(round.finalAmount)).toBe("0.34");
+      expect(round.isOverridden).toBe(false);
+    });
+  });
+
+  // =====================================================================================================================
+  describe("bill rules found in the review", () => {
+    it("two bills racing for the same challan line cannot both bill it in full", async () => {
+      const ch = await mkChallan({ lines: [{ productId: W.rice, qty: 10 }] });
+      const start = (await call("GET", `${base("bills")}/from-challan/${ch.id}?${qs()}`)).body;
+      const race = (name: string) => call("POST", base("bills"), { ...start, invoiceDate: "2025-10-14", vendorInvoiceNo: `RACE-${name}-${tag}`, lines: start.lines.map((l: any) => ({ ...l, rate: 100 })) });
+      const [a, b] = await Promise.all([race("A"), race("B")]);
+      expect([a.status, b.status].sort(), JSON.stringify([a.body, b.body])).toEqual([201, 409]);
+      expect(JSON.stringify([a.body, b.body])).toMatch(/would exceed the 10\.000000 received/);
+    });
+
+    it("a service bill cannot carry stock items", async () => {
+      const r = await call("POST", base("bills"), billBody({ purchaseType: "SERVICE_PURCHASE_OTHERS", vendorInvoiceNo: `TYP-${tag}` }));
+      expect(r.status).toBe(400);
+      expect(r.body.message).toMatch(/stock product does not belong on a Service purchase \(others\) bill/);
+      expect(r.body.field).toBe("purchaseType");
     });
   });
 });

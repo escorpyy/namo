@@ -15,11 +15,15 @@ function checkTermFlags(data: { isMandatory?: boolean; category?: string }) {
 
 // A Rounded (Round Off) term works out its own amount and sign from the document total, so it is document-wise, on the running total, never
 // spread over lines, and there is only one active one per company (a document can only carry one, and it has to be the last term).
+// The Round Off form only asks for the rounding method (Nearest / Up / Down), a ledger and the usual code, name and flags. Everything else
+// is fixed here (the form hides it and does not send it): document-wise, on the running total, an automatic amount, always priced last.
+const ROUNDED_FIXED = { nature: "ADDITIVE", isProductwise: false, sequence: 900, defaultCalcType: "AMOUNT", defaultValue: 0, calcBase: "RUNNING_TOTAL", baseTermId: null, distributeToLines: false, allocationBasis: null, isEditable: false };
+const fillRoundedTerm = (raw: Record<string, any>) => (raw.category === "ROUNDED" ? { ...raw, ...ROUNDED_FIXED, roundingMethod: raw.roundingMethod || "NEAREST" } : raw);
+
 async function checkRoundedTerm(table: typeof S.purchaseTerm | typeof S.salesTerm, data: Record<string, any>, companyId: number, id?: number | null) {
-  if (data.category !== "ROUNDED") return;
-  if (data.isProductwise) throw new HttpError(400, "A Rounded term works on the whole document, not on one line.", "isProductwise");
-  if (data.calcBase !== "RUNNING_TOTAL") throw new HttpError(400, "A Rounded term works on the running total.", "calcBase");
-  if (data.distributeToLines) throw new HttpError(400, "A Rounded term cannot be distributed over lines.", "distributeToLines");
+  // Only a Rounded term has a rounding method; every other term stores the default.
+  if (data.category !== "ROUNDED") { data.roundingMethod = "NEAREST"; return; }
+  Object.assign(data, ROUNDED_FIXED, { defaultValue: "0" }); // its amount is automatic: a document cannot change or override it
   if (data.isActive) {
     const others = await db.select({ id: table.id }).from(table).where(and(eq(table.companyId, companyId), eq(table.category, "ROUNDED"), eq(table.isActive, true)));
     if (others.some((o) => o.id !== id)) throw new HttpError(409, "There is already an active Rounded term; a document can only have one.", "category");
@@ -203,6 +207,7 @@ const CFG: Record<string, ServerCfg> = {
 
   "purchase-terms": {
     table: S.purchaseTerm,
+    beforeParse: fillRoundedTerm,
     orderBy: (t) => asc(t.sequence),
     counts: {
       defaultCount: { table: S.purchaseTermDefault, column: "termId" },
@@ -238,6 +243,7 @@ const CFG: Record<string, ServerCfg> = {
   },
   "sales-terms": {
     table: S.salesTerm,
+    beforeParse: fillRoundedTerm,
     orderBy: (t) => asc(t.sequence),
     counts: {
       defaultCount: { table: S.salesTermDefault, column: "termId" },

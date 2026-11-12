@@ -16,6 +16,7 @@ export const visible = (f: FieldDef, form: FormState, mode?: Mode) => {
     if (f.readOnly && mode !== "view") return false;
     if (f.editOnly && mode === "new") return false;
   }
+  if (f.hideIf && f.hideIf.in.includes(String(form[f.hideIf.field]))) return false;
   return !f.showIf || f.showIf.in.includes(String(form[f.showIf.field]));
 };
 export const isRequired = (f: FieldDef, form: FormState) =>

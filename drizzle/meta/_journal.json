@@ -169,6 +169,13 @@
       "when": 1794387775382,
       "tag": "0023_number_series",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794461926136,
+      "tag": "0024_rounding_method",
+      "breakpoints": true
     }
   ]
 }

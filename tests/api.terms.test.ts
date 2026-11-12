@@ -73,22 +73,35 @@ describe.skipIf(!DB_READY)("Purchase / Sales Term masters (API)", () => {
     expect(sales.status).toBe(400);
   });
 
-  it("a Rounded term is document-wise, on the running total, not distributed, and there is only one active", async () => {
-    const round = { ...purchase, category: "ROUNDED", calcBase: "RUNNING_TOTAL", defaultCalcType: "AMOUNT", defaultValue: 0, isProductwise: false };
+  it("a Rounded term keeps only its rounding method, stores fixed values for the rest, and there is only one active", async () => {
+    // what the form sends for a Round Off term: the hidden fields come as null / false
+    const round = { code: "", name: "Round Off", category: "ROUNDED", generalLedgerId: glA, isMandatory: true, isActive: true, nature: null, isProductwise: false, sequence: null, defaultCalcType: null, defaultValue: null, calcBase: null, distributeToLines: false, allocationBasis: null, isEditable: false, affectsStockValue: false, defaultAgainstLedgerId: null };
     const list = (await call("GET", `/api/masters/${P}?companyId=${companyId}`)).body;
     const seeded = list.find((t: any) => t.category === "ROUNDED" && t.isActive);
     if (seeded) { const off = await call("PUT", `/api/masters/${P}/${seeded.id}?companyId=${companyId}`, { ...seeded, defaultValue: Number(seeded.defaultValue), isActive: false }); expect(off.status, JSON.stringify(off.body)).toBe(200); } // make room for this test's own
     try {
-      expect((await post(P, { ...round, code: `R1${tag}`, name: "r", sequence: 900, isProductwise: true })).status).toBe(400);
-      expect((await post(P, { ...round, code: `R2${tag}`, name: "r", sequence: 900, calcBase: "ITEM_VALUE" })).status).toBe(400);
-      expect((await post(P, { ...round, code: `R3${tag}`, name: "r", sequence: 900, distributeToLines: true, allocationBasis: "VALUE" })).status).toBe(400);
-      const ok = await post(P, { ...round, code: `R4${tag}`, name: "Round Off", sequence: 900 });
+      expect((await post(P, { ...round, code: `R1${tag}`, roundingMethod: "SIDEWAYS" })).status).toBe(400);
+      const ok = await post(P, { ...round, code: `R4${tag}`, roundingMethod: "UP" });
       expect(ok.status, JSON.stringify(ok.body)).toBe(201);
-      const second = await post(P, { ...round, code: `R5${tag}`, name: "Second", sequence: 901 });
+      expect(ok.body).toMatchObject({ roundingMethod: "UP", isEditable: false, isProductwise: false, calcBase: "RUNNING_TOTAL", defaultCalcType: "AMOUNT", sequence: 900, distributeToLines: false, nature: "ADDITIVE" });
+      // stray values for the hidden settings are ignored: they are fixed for a Rounded term
+      const stray = await post(P, { ...round, code: `R2${tag}`, isActive: false, isProductwise: true, calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "VALUE", sequence: 5, defaultValue: 7, roundingMethod: "DOWN" });
+      expect(stray.status, JSON.stringify(stray.body)).toBe(201);
+      expect(stray.body).toMatchObject({ roundingMethod: "DOWN", isProductwise: false, calcBase: "RUNNING_TOTAL", distributeToLines: false, sequence: 900, isEditable: false });
+      expect(Number(stray.body.defaultValue)).toBe(0);
+      // no method chosen = nearest
+      const none = await post(P, { ...round, code: `R3${tag}`, isActive: false });
+      expect(none.status, JSON.stringify(none.body)).toBe(201);
+      expect(none.body.roundingMethod).toBe("NEAREST");
+      const second = await post(P, { ...round, code: `R5${tag}`, roundingMethod: "NEAREST" });
       expect(second.status).toBe(409);
-      // an inactive one is fine, and the active one can still be edited
-      expect((await post(P, { ...round, code: `R6${tag}`, name: "Spare", sequence: 902, isActive: false })).status).toBe(201);
-      expect((await call("PUT", `/api/masters/${P}/${ok.body.id}?companyId=${companyId}`, { ...ok.body, defaultValue: Number(ok.body.defaultValue), name: "Round Off 2" })).status).toBe(200);
+      // the method can be changed on the active one; other kinds of term always store NEAREST
+      const upd = await call("PUT", `/api/masters/${P}/${ok.body.id}?companyId=${companyId}`, { ...round, code: `R4${tag}`, name: "Round Off 2", roundingMethod: "DOWN" });
+      expect(upd.status, JSON.stringify(upd.body)).toBe(200);
+      expect(upd.body.roundingMethod).toBe("DOWN");
+      const gen = await post(P, { ...purchase, code: `R7${tag}`, name: "Plain", sequence: 650, roundingMethod: "UP" });
+      expect(gen.status, JSON.stringify(gen.body)).toBe(201);
+      expect(gen.body.roundingMethod).toBe("NEAREST");
     } finally {
       if (seeded) await call("PUT", `/api/masters/${P}/${seeded.id}?companyId=${companyId}`, { ...seeded, defaultValue: Number(seeded.defaultValue), isActive: true });
     }

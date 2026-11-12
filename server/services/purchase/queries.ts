@@ -335,7 +335,7 @@ export function purchaseLookups(companyId: number) {
       vendors: ledgers, subLedgers: subs, agents, locations, units,
       products: products.map(({ stockDetailId, ...p }) => ({ ...p, alternateUnits: stockDetailId ? altBy.get(stockDetailId) ?? [] : [] })),
       terms: terms.map((t) => ({
-        id: t.id, code: t.code, name: t.name, category: t.category, nature: t.nature, isProductwise: t.isProductwise, isMandatory: t.isMandatory, isEditable: t.isEditable, sequence: t.sequence,
+        id: t.id, code: t.code, name: t.name, category: t.category, nature: t.nature, isProductwise: t.isProductwise, isMandatory: t.isMandatory, isEditable: t.isEditable, roundingMethod: t.roundingMethod, sequence: t.sequence,
         defaultCalcType: t.defaultCalcType, defaultValue: t.defaultValue, calcBase: t.calcBase, baseTermId: t.baseTermId, distributeToLines: t.distributeToLines, isActive: t.isActive,
         generalLedgerId: t.generalLedgerId, affectsStockValue: t.affectsStockValue, defaultAgainstLedgerId: t.defaultAgainstLedgerId, lastAgainstLedgerId: lastAgainst.get(t.id) ?? null, allocationBasis: t.allocationBasis,
       })),

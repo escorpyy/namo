@@ -3,6 +3,7 @@ import { db, type DB } from "../../db";
 import { readAuditContext, restoreAuditContext, setAuditContext } from "../../db/audit";
 import * as S from "../../db/schema";
 import { HttpError } from "../../routes/_util";
+import { BUSINESS_TIME_ZONE, dateInZone } from "../../../shared/businessDate";
 
 // Every service takes an optional `tx`. With none it opens its own transaction (the normal case: all or nothing).
 // With one it joins that transaction through a savepoint, so a caller (or a test) can wrap several calls and roll back.
@@ -53,7 +54,8 @@ export function parseDate(v: string | Date | null | undefined, field = "date"): 
 }
 export const optDate = (v: string | Date | null | undefined, field: string) => (v === null || v === undefined || v === "" ? null : parseDate(v, field));
 export const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
-export const today = () => parseDate(new Date());
+// Today's date in the business time zone (Nepal; APP_TIME_ZONE can change it), not the server's UTC date.
+export const today = () => dateInZone(new Date(), process.env.APP_TIME_ZONE || BUSINESS_TIME_ZONE);
 
 // ---- fiscal year ----
 // The document's fiscal year must exist, be active and OPEN, and the document date must fall inside it.

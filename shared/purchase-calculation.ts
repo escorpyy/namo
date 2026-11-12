@@ -59,6 +59,15 @@ export function div(a: Micro, b: Micro): Micro {
   return neg ? -q : q;
 }
 
+export type RoundingMethod = "NEAREST" | "UP" | "DOWN";
+/** Round to a whole rupee. NEAREST: half a rupee goes up (away from zero); UP: toward +infinity (ceiling); DOWN: toward -infinity (floor). */
+export function roundWhole(m: Micro, method: RoundingMethod = "NEAREST"): Micro {
+  if (method === "NEAREST") return roundTo(m, 0);
+  const r = ((m % ONE) + ONE) % ONE; // fractional part, 0 <= r < ONE, also for negative totals
+  const floor = m - r;
+  return method === "DOWN" || r === ZERO ? floor : floor + ONE;
+}
+
 export const percentOf = (base: Micro, ratePercent: Micro): Micro => roundTo(div(mul(base, ratePercent), 100n * ONE), 2);
 export const sum = (values: Micro[]): Micro => values.reduce((a, b) => a + b, ZERO);
 export const lineBasicAmount = (qty: Micro, rate: Micro): Micro => roundTo(mul(qty, rate), 2);
@@ -95,8 +104,13 @@ export type EngineTerm = {
   isOverridden: boolean;
   overrideAmount?: Micro | null;
   lineKey?: number | null;
-  /** A Round Off term: it works out its own amount and sign so the document total comes to a whole rupee (see priceTerms). */
+  /**
+   * A Round Off term: it works out its own amount and sign so the document total comes to a whole rupee (see priceTerms).
+   * It is always priced last, whatever its sequence, and an override on it is ignored: the amount is automatic.
+   */
   rounded?: boolean;
+  /** How a Round Off term rounds the total to a whole rupee. Default NEAREST. Ignored for other terms. */
+  roundingMethod?: RoundingMethod;
 };
 /** `nature` is the term's own, except for a rounding term where it follows the result (ADDITIVE rounds up, DEDUCTIVE rounds down). */
 export type EngineResult = { key: number; baseAmount: Micro; calculatedAmount: Micro; finalAmount: Micro; signed: Micro; nature: "ADDITIVE" | "DEDUCTIVE" };
@@ -106,7 +120,12 @@ export type EngineOutput = { results: Map<number, EngineResult>; itemTotal: Micr
 export function priceTerms(lines: EngineLine[], terms: EngineTerm[]): EngineOutput {
   const lineBy = new Map(lines.map((line) => [line.key, line]));
   const itemTotal = lines.reduce((a, line) => a + line.basicAmount, ZERO);
-  const order = terms.map((term, i) => ({ term, i })).sort((a, b) => a.term.sequence - b.term.sequence || a.i - b.i).map((item) => item.term);
+  // Sequence decides the order, except that a Round Off term always goes last: it rounds the total AFTER every other term, so nothing
+  // (a charge with a higher sequence, a mistyped sequence on the master) can be added after the rounding and break the whole-rupee total.
+  const order = terms
+    .map((term, i) => ({ term, i }))
+    .sort((a, b) => Number(!!a.term.rounded) - Number(!!b.term.rounded) || a.term.sequence - b.term.sequence || a.i - b.i)
+    .map((item) => item.term);
   const results = new Map<number, EngineResult>();
   let docRunning = itemTotal;
   const lineRunning = new Map(lines.map((line) => [line.key, line.basicAmount]));
@@ -137,11 +156,11 @@ export function priceTerms(lines: EngineLine[], terms: EngineTerm[]): EngineOutp
     let calculated: Micro;
     let nature = term.nature;
     if (term.rounded) {
-      // Round Off: works on the document total at its own place in the sequence, to the nearest whole rupee (half a rupee rounds up).
-      // It must be the last term, so nothing is added after the rounding, and there can only be one. The nature follows the result.
+      // Round Off: works on the document total, to a whole rupee by the term's method (nearest, up or down). It is sorted last above, so nothing is
+      // added after the rounding; if another rounding term exists this one is not last, and only one is allowed. The nature follows the result.
       if (inLine) throw new PurchaseCalculationError(`Term ${term.termId} is a rounding term; it works on the whole document, not on one line.`);
-      if (idx !== order.length - 1) throw new PurchaseCalculationError(`Term ${term.termId} is a rounding term and must be the last term (highest sequence); only one is allowed.`);
-      const diff = roundTo(base, 0) - base; // base is the running total here
+      if (idx !== order.length - 1) throw new PurchaseCalculationError(`Term ${term.termId} is a rounding term; only one rounding term is allowed on a document.`);
+      const diff = roundWhole(base, term.roundingMethod ?? "NEAREST") - base; // base is the running total here
       calculated = diff < ZERO ? -diff : diff;
       nature = diff < ZERO ? "DEDUCTIVE" : "ADDITIVE";
     } else if (term.calcType === "PERCENT") {
@@ -154,7 +173,8 @@ export function priceTerms(lines: EngineLine[], terms: EngineTerm[]): EngineOutp
     if (calculated < ZERO) throw new PurchaseCalculationError(`Term ${term.termId} calculates to a negative amount. Amounts are entered positive; the term's nature decides the sign.`);
 
     let finalAmount = calculated;
-    if (term.isOverridden) {
+    // A Round Off amount is automatic: an override would leave the total off the whole rupee, so it is ignored (also for older saved rows).
+    if (term.isOverridden && !term.rounded) {
       if (term.overrideAmount === null || term.overrideAmount === undefined) throw new PurchaseCalculationError(`Term ${term.termId} is overridden but has no amount.`);
       finalAmount = roundTo(term.overrideAmount, 2);
       if (finalAmount < ZERO) throw new PurchaseCalculationError(`Term ${term.termId} override cannot be negative.`);

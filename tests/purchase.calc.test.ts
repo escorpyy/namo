@@ -174,15 +174,43 @@ describe("rounding term", () => {
     expect(out.results.get(9)).toMatchObject({ baseAmount: M("1136.27"), nature: "DEDUCTIVE", finalAmount: M("0.27") });
     expect(fmt(out.total, 2)).toBe("1136.00");
   });
-  it("may be overridden; the sign still follows the calculation", () => {
-    const out = price(["1000.30"], [round({ isOverridden: true, overrideAmount: M("0.25") })]);
-    expect(out.results.get(9)).toMatchObject({ nature: "DEDUCTIVE", calculatedAmount: M("0.30"), finalAmount: M("0.25") });
-    expect(fmt(out.total, 2)).toBe("1000.05");
+  it("cannot be overridden: an override is ignored, so the total always comes to a whole rupee", () => {
+    const out = price(["1000.30"], [round({ isOverridden: true, overrideAmount: M("5") })]);
+    expect(out.results.get(9)).toMatchObject({ nature: "DEDUCTIVE", calculatedAmount: M("0.30"), finalAmount: M("0.30"), signed: M("-0.30") });
+    expect(fmt(out.total, 2)).toBe("1000.00");
+    // an override with no amount is not an error either: nothing is read from it
+    expect(fmt(price(["1000.30"], [round({ isOverridden: true })]).total, 2)).toBe("1000.00");
   });
-  it("must be the last term, only one is allowed, and it cannot sit on a line", () => {
-    const vat = t({ key: 1, termId: 1, sequence: 950, rate: M("13") });
-    expect(() => price(["1000.30"], [round(), vat])).toThrow(/must be the last term/);
-    expect(() => price(["1000.30"], [round(), round({ key: 10, termId: 10, sequence: 901 })])).toThrow(/must be the last term/);
+  it("is always priced last, even when another term has a higher sequence", () => {
+    // 1000.30 + 13% VAT (130.04) = 1130.34; the VAT sequence (950) is after Round Off (900) but the rounding still works on the whole total.
+    const vat = t({ key: 1, termId: 1, sequence: 950, calcBase: "RUNNING_TOTAL", rate: M("13") });
+    const out = price(["1000.30"], [round(), vat]);
+    expect(out.results.get(9)).toMatchObject({ baseAmount: M("1130.34"), nature: "DEDUCTIVE", finalAmount: M("0.34") });
+    expect(fmt(out.total, 2)).toBe("1130.00");
+    expect(out.total).toBe(price(["1000.30"], [vat, round()]).total); // given in either order
+  });
+  it("rounds by the term's method: nearest (default), up (ceiling) or down (floor)", () => {
+    const total = (amount: string, roundingMethod?: EngineTerm["roundingMethod"]) => fmt(price([amount], [round({ roundingMethod })]).total, 2);
+    expect([total("1000.30"), total("1000.50"), total("1000.70")]).toEqual(["1000.00", "1001.00", "1001.00"]); // no method = nearest
+    expect([total("1000.30", "NEAREST"), total("1000.49", "NEAREST")]).toEqual(["1000.00", "1000.00"]);
+    expect([total("1000.01", "UP"), total("1000.30", "UP"), total("1000.99", "UP"), total("1000.00", "UP")]).toEqual(["1001.00", "1001.00", "1001.00", "1000.00"]);
+    expect([total("1000.01", "DOWN"), total("1000.50", "DOWN"), total("1000.99", "DOWN"), total("1000.00", "DOWN")]).toEqual(["1000.00", "1000.00", "1000.00", "1000.00"]);
+    // the sign and amount follow the result
+    expect(price(["1000.30"], [round({ roundingMethod: "UP" })]).results.get(9)).toMatchObject({ nature: "ADDITIVE", finalAmount: M("0.70"), signed: M("0.70") });
+    expect(price(["1000.70"], [round({ roundingMethod: "DOWN" })]).results.get(9)).toMatchObject({ nature: "DEDUCTIVE", finalAmount: M("0.70"), signed: M("-0.70") });
+    expect(price(["1000.00"], [round({ roundingMethod: "UP" })]).results.get(9)).toMatchObject({ finalAmount: 0n, nature: "ADDITIVE" });
+  });
+  it("up and down work on the total after other terms, and on a negative total", () => {
+    const vat = t({ key: 1, termId: 1, sequence: 30, calcBase: "RUNNING_TOTAL", rate: M("13") });
+    expect(fmt(price(["1005.55"], [vat, round({ roundingMethod: "UP" })]).total, 2)).toBe("1137.00"); // 1136.27 -> 1137
+    expect(fmt(price(["1005.55"], [vat, round({ roundingMethod: "DOWN" })]).total, 2)).toBe("1136.00");
+    const credit = t({ key: 2, termId: 2, sequence: 40, nature: "DEDUCTIVE", calcType: "AMOUNT", inputAmount: M("1010") });
+    expect(fmt(price(["1000.00"], [credit, round({ roundingMethod: "UP" })]).total, 2)).toBe("-10.00");
+    expect(fmt(price(["1000.30"], [credit, round({ roundingMethod: "UP" })]).total, 2)).toBe("-9.00"); // -9.70 up is -9
+    expect(fmt(price(["1000.30"], [credit, round({ roundingMethod: "DOWN" })]).total, 2)).toBe("-10.00");
+  });
+  it("only one is allowed, and it cannot sit on a line", () => {
+    expect(() => price(["1000.30"], [round(), round({ key: 10, termId: 10, sequence: 901 })])).toThrow(/only one rounding term/);
     expect(() => price(["1000.30"], [round({ lineKey: 1 })])).toThrow(/whole document/);
   });
 });

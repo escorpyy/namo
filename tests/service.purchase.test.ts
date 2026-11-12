@@ -650,4 +650,39 @@ describe.skipIf(!DB_READY)("purchase service layer", () => {
       });
     });
   });
+
+  // =====================================================================================================
+  describe("bill rules found in the review", () => {
+    it("a draft whose deductions exceed the items and charges is refused, not stored with a negative total", async () => {
+      await run(async (tx, W) => {
+        // items 2000, discount 150% = 3000 off -> total -1000
+        await rejects(tx, svc.savePurchaseBill(billIn(W, { terms: [{ termId: W.tDisc, rate: 150 }] }), ACTOR, { tx }), 400, /total would be -1000\.00/);
+        const ok = await svc.savePurchaseBill(billIn(W, { terms: [{ termId: W.tDisc, rate: 100 }] }), ACTOR, { tx }); // a total of exactly zero is a draft, only posting refuses it
+        expect(ok.totalAmount).toBe("0.00");
+      });
+    });
+
+    it("the lines must be the kind of product the purchase type says (checked when saving and again when posting)", async () => {
+      await run(async (tx, W) => {
+        await rejects(tx, svc.savePurchaseBill(billIn(W, { purchaseType: "SERVICE_PURCHASE_OTHERS" }), ACTOR, { tx }), 400, /stock product does not belong on a Service purchase \(others\) bill/);
+        await rejects(tx, svc.savePurchaseBill(billIn(W, { purchaseType: "GOODS_PURCHASE_CAPITAL" }), ACTOR, { tx }), 400, /Line 1: a stock product does not belong on a Goods purchase \(capital\) bill/);
+        // a non-stock item is an expense-type item and may be bought on a goods or a service bill
+        await svc.savePurchaseBill(billIn(W, { purchaseType: "SERVICE_PURCHASE_OTHERS", lines: [{ productId: W.consult.id, qty: 1, rate: 100 }] }), ACTOR, { tx });
+        // a draft saved before the rule existed is caught at posting: change its type underneath it
+        const draft = await svc.savePurchaseBill(billIn(W), ACTOR, { tx });
+        await tx.execute(sql`update "PurchaseBill" set "purchaseType" = 'SERVICE_PURCHASE_OTHERS' where id = ${draft.id}`);
+        await rejects(tx, svc.postPurchaseBill(draft.id, ACTOR, { tx }), 400, /does not belong on a Service purchase \(others\) bill/);
+      });
+    });
+
+    it("today() (the default invoice and reversal date) is the date in Nepal, not the date in UTC", async () => {
+      const { dateInZone } = await import("../shared/businessDate");
+      expect(dateInZone(new Date("2026-11-11T22:00:00Z")).toISOString().slice(0, 10)).toBe("2026-11-12"); // 03:45 on 12 Nov in Kathmandu
+      expect(dateInZone(new Date("2026-11-11T22:00:00Z"), "UTC").toISOString().slice(0, 10)).toBe("2026-11-11");
+      expect(dateInZone(new Date("2026-11-11T18:14:00Z")).toISOString().slice(0, 10)).toBe("2026-11-11"); // 23:59 in Kathmandu, still the 11th
+      expect(dateInZone(new Date("2026-11-11T18:15:00Z")).toISOString().slice(0, 10)).toBe("2026-11-12"); // 00:00 NPT
+      const { today } = await import("../server/services/purchase/common");
+      expect(today().getTime()).toBe(dateInZone(new Date()).getTime());
+    });
+  });
 });

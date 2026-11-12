@@ -83,6 +83,9 @@ export const depreciationMethodEnum = pgEnum("DepreciationMethod", [
 // BILLING TERMS (purchase & sales share these enums, not tables)
 // ============================================================
 
+// How a Round Off term brings the document total to a whole rupee: to the nearest rupee (half rounds up), always up (ceiling) or always down (floor).
+export const roundingMethodEnum = pgEnum("RoundingMethod", ["NEAREST", "UP", "DOWN"]);
+
 export const billingTermCategoryEnum = pgEnum("BillingTermCategory", [
   "GENERAL",
   "COSTING",

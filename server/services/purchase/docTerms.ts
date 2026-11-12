@@ -82,7 +82,8 @@ export async function saveTerms(
       if (a < ZERO) throw new HttpError(400, `${label}: amount cannot be negative.`, "terms");
       inputAmount = fmt(a);
     }
-    const isOverridden = !!t.isOverridden;
+    // A Round Off amount is automatic and cannot be overridden (the engine ignores it too); an old draft that still carries one is saved without it.
+    const isOverridden = rounded ? false : !!t.isOverridden;
     // A term the master marks as not editable keeps the master's type and value, and cannot take an own amount.
     if (!m.isEditable) {
       const used = calcType === "PERCENT" ? rate : inputAmount;
@@ -119,15 +120,16 @@ export async function recalcTerms(tx: Tx, docType: DocType, docId: number): Prom
 
   const rows = await tx.select().from(S.purchaseDocumentTerm).where(and(eq(S.purchaseDocumentTerm.documentType, docType), eq(S.purchaseDocumentTerm.documentId, docId))).orderBy(asc(S.purchaseDocumentTerm.id));
   const masterIds = [...new Set(rows.map((r) => r.termId))];
-  const masters = masterIds.length ? await tx.select({ id: S.purchaseTerm.id, baseTermId: S.purchaseTerm.baseTermId, category: S.purchaseTerm.category }).from(S.purchaseTerm).where(inArray(S.purchaseTerm.id, masterIds)) : [];
+  const masters = masterIds.length ? await tx.select({ id: S.purchaseTerm.id, baseTermId: S.purchaseTerm.baseTermId, category: S.purchaseTerm.category, roundingMethod: S.purchaseTerm.roundingMethod }).from(S.purchaseTerm).where(inArray(S.purchaseTerm.id, masterIds)) : [];
   const baseOf = new Map(masters.map((m) => [m.id, m.baseTermId]));
+  const methodOf = new Map(masters.map((m) => [m.id, m.roundingMethod]));
   const roundedIds = new Set(masters.filter((m) => m.category === "ROUNDED").map((m) => m.id));
 
   const engineTerms: EngineTerm[] = rows.map((r) => ({
     key: r.id, termId: r.termId, sequence: r.sequence, nature: r.nature, calcBase: r.calcBase, baseTermId: baseOf.get(r.termId) ?? null,
     calcType: r.calcType, rate: isNil(r.rate) ? null : toMicro(r.rate), inputAmount: isNil(r.inputAmount) ? null : toMicro(r.inputAmount),
     isOverridden: r.isOverridden, overrideAmount: r.isOverridden ? toMicro(r.finalAmount) : null, lineKey: r.documentLineId,
-    rounded: roundedIds.has(r.termId),
+    rounded: roundedIds.has(r.termId), roundingMethod: methodOf.get(r.termId),
   }));
   const out = priceTerms(lines.map((l) => ({ key: l.id, basicAmount: toMicro(l.basic) })), engineTerms);
 

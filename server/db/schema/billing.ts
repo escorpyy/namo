@@ -20,6 +20,7 @@ import {
   billingTermCategoryEnum,
   billingTermNatureEnum,
   purchaseTermDocTypeEnum,
+  roundingMethodEnum,
   salesTermDocTypeEnum,
 } from "./enums";
 import { company } from "./core";
@@ -80,6 +81,8 @@ export const purchaseTerm = pgTable(
     isMandatory: boolean().notNull().default(false),
     // false = the value is fixed by this master: a document cannot change its type, rate/amount or use an own amount.
     isEditable: boolean().notNull().default(true),
+    // Round Off terms only: how the total is brought to a whole rupee. NEAREST for every other term (it is never read).
+    roundingMethod: roundingMethodEnum().notNull().default("NEAREST"),
     sequence: integer().notNull().default(100),
 
     // Starting values; the user may change type and value on the document.
@@ -266,6 +269,8 @@ export const salesTerm = pgTable(
     isProductwise: boolean().notNull().default(false),
     isMandatory: boolean().notNull().default(false),
     isEditable: boolean().notNull().default(true),
+    // Round Off terms only: how the total is brought to a whole rupee. NEAREST for every other term (it is never read).
+    roundingMethod: roundingMethodEnum().notNull().default("NEAREST"),
     sequence: integer().notNull().default(100),
 
     defaultCalcType: billingCalcTypeEnum().notNull().default("PERCENT"),

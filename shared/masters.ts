@@ -36,6 +36,7 @@ export interface FieldDef {
   span?: 1 | 2;
   placeholder?: string;
   showIf?: { field: string; in: string[] }; // field tabhi dikhega jab doosre field ki value in me ho
+  hideIf?: { field: string; in: string[] }; // field chhup jaata hai jab doosre field ki value in me ho (showIf ke saath dono lagte hain)
   section?: string; // is field se pehle chhota section heading
   readOnly?: boolean; // sirf VIEW me dikhta hai; form se edit nahi hota (jaise isClosed: iska alag workflow hoga)
   editOnly?: boolean; // NEW me nahi dikhta (jaise Retained Earnings GL: company ban jaane ke baad hi set ho sakta hai)
@@ -153,6 +154,11 @@ const TERM_CATEGORY: Opt[] = [
   { value: "COSTING", label: "COSTING", hotkey: "C", badge: "bg-blue-100 text-blue-800 border-blue-300" },
   { value: "ROUNDED", label: "ROUNDED", hotkey: "R", badge: "bg-purple-100 text-purple-800 border-purple-300" },
 ];
+const ROUNDING_METHOD: Opt[] = [
+  { value: "NEAREST", label: "Nearest rupee" },
+  { value: "UP", label: "Round up" },
+  { value: "DOWN", label: "Round down" },
+];
 const TERM_NATURE: Opt[] = [
   { value: "ADDITIVE", label: "ADDITIVE (+)", hotkey: "A", badge: "bg-green-100 text-green-800 border-green-300" },
   { value: "DEDUCTIVE", label: "DEDUCTIVE (−)", hotkey: "D", badge: "bg-red-100 text-red-800 border-red-300" },
@@ -178,21 +184,24 @@ function termMaster(kind: "purchase" | "sales"): MasterDef {
     { name: "code", label: "Code", type: "text", required: true, max: 20, upper: true },
     text("name", "Name", 100),
     { name: "category", label: "Category", type: "select", required: true, options: TERM_CATEGORY, default: "GENERAL" },
-    { name: "nature", label: "Nature", type: "select", required: true, options: TERM_NATURE },
-    { name: "isProductwise", label: "Productwise (line level)", type: "checkbox", default: false },
+    // Round Off only: how the document total is made a whole rupee. Nearest = half a rupee goes up; Up / Down always go that way.
+    { name: "roundingMethod", label: "Rounding", type: "select", options: ROUNDING_METHOD, default: "NEAREST", showIf: { field: "category", in: ["ROUNDED"] } },
+    { name: "nature", label: "Nature", type: "select", required: true, options: TERM_NATURE, hideIf: { field: "category", in: ["ROUNDED"] } },
+    { name: "isProductwise", label: "Productwise (line level)", type: "checkbox", default: false, hideIf: { field: "category", in: ["ROUNDED"] } },
     // "Always show": every new document starts with this term and cannot drop it (it may be zero). Only for GENERAL and ROUNDED terms.
     { name: "isMandatory", label: "Always show on documents", type: "checkbox", default: false, showIf: { field: "category", in: ["GENERAL", "ROUNDED"] } },
     // Off = the value is fixed by this master: a document cannot change the rate/amount or use its own amount.
-    { name: "isEditable", label: "Editable on documents", type: "checkbox", default: true },
-    { name: "sequence", label: "Sequence", type: "number", required: true, decimals: 0, min: 0, default: "100", placeholder: "Calculation order (lower runs first)" },
-    { name: "defaultCalcType", label: "Default Calc Type", type: "select", required: true, options: CALC_TYPE, default: "PERCENT" },
-    { name: "defaultValue", label: "Default Value", type: "number", required: true, decimals: 4, min: 0, default: "0" },
-    { name: "calcBase", label: "Calc Base", type: "select", required: true, options: CALC_BASE, default: "ITEM_VALUE" },
+    // Not for a Rounded term: its amount is automatic, so the server always stores it as not editable.
+    { name: "isEditable", label: "Editable on documents", type: "checkbox", default: true, showIf: { field: "category", in: ["GENERAL", "COSTING"] } },
+    { name: "sequence", label: "Sequence", type: "number", required: true, decimals: 0, min: 0, default: "100", placeholder: "Calculation order (lower runs first)", hideIf: { field: "category", in: ["ROUNDED"] } },
+    { name: "defaultCalcType", label: "Default Calc Type", type: "select", required: true, options: CALC_TYPE, default: "PERCENT", hideIf: { field: "category", in: ["ROUNDED"] } },
+    { name: "defaultValue", label: "Default Value", type: "number", required: true, decimals: 4, min: 0, default: "0", hideIf: { field: "category", in: ["ROUNDED"] } },
+    { name: "calcBase", label: "Calc Base", type: "select", required: true, options: CALC_BASE, default: "ITEM_VALUE", hideIf: { field: "category", in: ["ROUNDED"] } },
     { name: "baseTermId", label: "Base Term", type: "lookup", lookup: key, showIf: { field: "calcBase", in: ["SINGLE_TERM"] }, requiredIf: { field: "calcBase", in: ["SINGLE_TERM"] } },
   ];
   if (purchase) {
     fields.push(
-      { name: "distributeToLines", label: "Distribute to lines (landed cost)", type: "checkbox", default: false, showIf: { field: "isProductwise", in: ["false"] } },
+      { name: "distributeToLines", label: "Distribute to lines (landed cost)", type: "checkbox", default: false, showIf: { field: "isProductwise", in: ["false"] }, hideIf: { field: "category", in: ["ROUNDED"] } },
       { name: "allocationBasis", label: "Allocation Basis", type: "select", options: ALLOC_BASIS, showIf: { field: "distributeToLines", in: ["true"] }, requiredIf: { field: "distributeToLines", in: ["true"] } },
     );
   }

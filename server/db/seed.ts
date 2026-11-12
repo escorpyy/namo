@@ -418,7 +418,7 @@ async function main() {
       await db.insert(S.purchaseTerm).values([
         { companyId: co.id, code: "DISC", name: "Trade Discount", category: "GENERAL", nature: "DEDUCTIVE", sequence: 10, isProductwise: true, defaultCalcType: "PERCENT", defaultValue: "5", calcBase: "ITEM_VALUE", generalLedgerId: purchases?.id ?? null },
         { companyId: co.id, code: "FREIGHT", name: "Freight Inward", category: "COSTING", nature: "ADDITIVE", sequence: 50, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "VALUE", generalLedgerId: purchases?.id ?? null },
-        { companyId: co.id, code: "ROUND", name: "Round Off", category: "ROUNDED", nature: "ADDITIVE", sequence: 900, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "RUNNING_TOTAL", generalLedgerId: otherExpenses?.id ?? null },
+        { companyId: co.id, code: "ROUND", name: "Round Off", category: "ROUNDED", nature: "ADDITIVE", sequence: 900, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "RUNNING_TOTAL", isMandatory: true, isEditable: false, generalLedgerId: otherExpenses?.id ?? null },
       ]);
     }
     // Charges for trying out cost assessments and service bills: customs duty and excise (COSTING, so a cost assessment can use them; each posts
@@ -449,7 +449,7 @@ async function main() {
       await db.insert(S.salesTerm).values([
         { companyId: co.id, code: "DISC", name: "Trade Discount", category: "GENERAL", nature: "DEDUCTIVE", sequence: 10, isProductwise: true, defaultCalcType: "PERCENT", defaultValue: "5", calcBase: "ITEM_VALUE", generalLedgerId: sales?.id ?? null },
         { companyId: co.id, code: "PACK", name: "Packing Charges", category: "COSTING", nature: "ADDITIVE", sequence: 40, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "ITEM_VALUE", generalLedgerId: sales?.id ?? null },
-        { companyId: co.id, code: "ROUND", name: "Round Off", category: "ROUNDED", nature: "ADDITIVE", sequence: 900, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "RUNNING_TOTAL", generalLedgerId: otherExpenses?.id ?? null },
+        { companyId: co.id, code: "ROUND", name: "Round Off", category: "ROUNDED", nature: "ADDITIVE", sequence: 900, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "RUNNING_TOTAL", isMandatory: true, isEditable: false, generalLedgerId: otherExpenses?.id ?? null },
       ]);
     }
   }

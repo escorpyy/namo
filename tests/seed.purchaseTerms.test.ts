@@ -8,7 +8,7 @@ describe.skipIf(!DB_READY)("Seeded purchase terms (demo company)", () => {
   beforeAll(async () => {
     const { db } = await import("../server/db");
     terms = await db.execute(sql`
-      select t.code, t.category, t.nature, t."distributeToLines" as distribute, t."allocationBasis" as basis, g.code as ledger
+      select t.code, t.category, t.nature, t."distributeToLines" as distribute, t."allocationBasis" as basis, t."isMandatory", t."isEditable", g.code as ledger
         from "PurchaseTerm" t join "Company" c on c.id = t."companyId" left join "GeneralLedger" g on g.id = t."generalLedgerId"
        where c.code = 'ABC'`) as any[];
   });
@@ -23,7 +23,8 @@ describe.skipIf(!DB_READY)("Seeded purchase terms (demo company)", () => {
   it("has an input VAT term for service bills with its own VAT ledger, and keeps the original terms", () => {
     expect(term("VAT")).toMatchObject({ category: "GENERAL", nature: "ADDITIVE", ledger: "GL070" });
     expect(terms.map((t) => t.code)).toEqual(expect.arrayContaining(["DISC", "FREIGHT", "ROUND"]));
-    expect(term("ROUND")).toMatchObject({ category: "ROUNDED" });
+    // Round Off starts on every document ("always show") and its amount is automatic, so it is not editable
+    expect(term("ROUND")).toMatchObject({ category: "ROUNDED", isMandatory: true, isEditable: false });
   });
 
   it("has each term once", () => {

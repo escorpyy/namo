@@ -27,6 +27,8 @@ export interface PreviewTermMaster {
   baseTermId?: number | null;
   /** "ROUNDED" marks a Round Off term, which needs no rate or amount: the engine works it out. */
   category?: string;
+  /** Round Off only: how the total is rounded to a whole rupee (default NEAREST). */
+  roundingMethod?: "NEAREST" | "UP" | "DOWN";
 }
 export interface PreviewTermResult {
   baseAmount: string;
@@ -110,6 +112,7 @@ export function previewPurchase(
         overrideAmount: overrideAmount === undefined ? null : toMicro(overrideAmount),
         lineKey: lineNumber,
         rounded,
+        roundingMethod: rounded ? master.roundingMethod ?? "NEAREST" : undefined,
       });
       rowKeyByIndex.set(index, term.rowKey);
     } catch (error) {

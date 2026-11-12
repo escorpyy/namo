@@ -15,6 +15,8 @@ export interface ServerCfg {
   counts?: Record<string, CountSrc | CountSrc[]>;
   refs?: Record<string, RefSrc>; // doosri table ka column list me laana (jaise userName)
   orderBy?: (t: any, extras: Record<string, any>) => any;
+  // Runs on the raw request body before it is parsed: lets a master fill fields the form hides for some kinds of row (e.g. a Round Off term).
+  beforeParse?: (raw: Record<string, any>) => Record<string, any>;
   validate?: (data: Record<string, any>, ctx: { companyId: number; id?: number }) => Promise<void>;
   afterWrite?: (data: Record<string, any>, id: number) => Promise<void>; // save ke baad related rows sync karne ke liye
   beforeDelete?: (row: Record<string, any>) => Promise<void>;
@@ -102,7 +104,7 @@ export function masterRouter(def: MasterDef, cfg: ServerCfg) {
   const global = cfg.scope === "global";
 
   const parse = (raw: unknown) => {
-    const p = schema.safeParse(raw);
+    const p = schema.safeParse(cfg.beforeParse && raw && typeof raw === "object" ? cfg.beforeParse({ ...(raw as Record<string, any>) }) : raw);
     if (!p.success) {
       const issue = p.error.issues[0];
       throw new HttpError(400, issue.message, String(issue.path[0] ?? ""));

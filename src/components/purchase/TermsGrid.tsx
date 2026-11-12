@@ -89,6 +89,7 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
             const off = readOnly;
             const fixed = !!m?.isCalcTypeFixed;
             const auto = m?.calcType === "ROUNDOFF";
+            const noOwn = m?.category === "ROUNDED" || m?.isEditable === false; // Round Off is automatic; a term the master marks not editable cannot take an own amount
             const bad = (c: string) => !!errors[`T.${i}.${c}`];
             const cls = (c: string, extra = "") => `fld h-8 ${extra} ${bad(c) ? "fld-err" : ""} ${off ? "bg-slate-100 text-slate-600" : ""}`;
             const msg = Object.entries(errors).find(([k, v]) => k.startsWith(`T.${i}.`) && v)?.[1];
@@ -103,7 +104,7 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
                   </select>
                   <input data-field={`T.${i}.v`} disabled={off || !m || fixed || auto} title={auto ? "Worked out automatically" : fixed ? "Fixed by the term master" : undefined} inputMode="decimal" autoComplete="off" placeholder={auto ? "Auto" : t.calcType === "PERCENT" ? "0.00 %" : "0.00"}
                     value={t.calcType === "PERCENT" ? t.rate : t.inputAmount} onChange={decOnly(RATE, (v) => patch(i, t.calcType === "PERCENT" ? { rate: v } : { inputAmount: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("v", "text-right tabular-nums")} aria-label="Value" />
-                  <label className="flex items-center justify-center gap-1 px-2 text-[12px]"><input data-field={`T.${i}.ov`} type="checkbox" disabled={off || !m || fixed} checked={t.isOverridden} onChange={(e) => patch(i, { isOverridden: e.target.checked, overrideAmount: e.target.checked ? t.overrideAmount : "" })} /> use own</label>
+                  <label className="flex items-center justify-center gap-1 px-2 text-[12px]"><input data-field={`T.${i}.ov`} type="checkbox" disabled={off || !m || fixed || noOwn} checked={t.isOverridden && !noOwn} onChange={(e) => patch(i, { isOverridden: e.target.checked, overrideAmount: e.target.checked ? t.overrideAmount : "" })} /> use own</label>
                   <input data-field={`T.${i}.o`} disabled={off || !t.isOverridden} inputMode="decimal" autoComplete="off" placeholder="0.00" value={t.overrideAmount} onChange={decOnly(RATE, (v) => patch(i, { overrideAmount: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("o", "text-right tabular-nums")} aria-label="Amount to use instead" />
                   {(() => {
                     const live = calculationPreview !== undefined;
@@ -111,7 +112,7 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
                     const amount = live ? result?.finalAmount : t.finalAmount;
                     const nature = live ? result?.nature : t.nature ?? m?.nature;
                     const formula = result
-                      ? `${auto ? `Live: ${money(result.baseAmount)} rounded to the nearest rupee = ${money(result.calculatedAmount)}` : t.calcType === "PERCENT" ? `Live: base ${money(result.baseAmount)} × ${t.rate || "0"}% = ${money(result.calculatedAmount)}` : `Live: fixed amount ${money(t.inputAmount || "0")} = ${money(result.calculatedAmount)}`}${t.isOverridden ? `; using override ${money(t.overrideAmount)}` : ""}.`
+                      ? `${auto ? `Live: ${money(result.baseAmount)} rounded ${m?.roundingMethod === "UP" ? "up" : m?.roundingMethod === "DOWN" ? "down" : "to the nearest rupee"} = ${money(result.calculatedAmount)}` : t.calcType === "PERCENT" ? `Live: base ${money(result.baseAmount)} × ${t.rate || "0"}% = ${money(result.calculatedAmount)}` : `Live: fixed amount ${money(t.inputAmount || "0")} = ${money(result.calculatedAmount)}`}${t.isOverridden && !noOwn ? `; using override ${money(t.overrideAmount)}` : ""}.`
                       : live ? (previewError || "Complete the bill inputs to calculate this term.") : "Calculated when the bill was last saved.";
                     const shown = amount !== undefined && amount !== "" ? `${nature === "DEDUCTIVE" ? "− " : "+ "}${money(amount)}` : "—";
                     return <span className="text-right tabular-nums text-slate-700" title={formula} aria-label={`${m?.name ?? "Billing term"}: ${shown}. ${formula}`}>{shown}</span>;

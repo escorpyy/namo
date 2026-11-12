@@ -6,6 +6,7 @@ import { guardPeriod, type LockOverride } from "../periodLock";
 import { type Actor, type Opts, type Tx, addDays, assertBranch, assertVendorLedger, idList, inActorTx, inTx, optDate, parseDate, resolveFiscalYear, today } from "./common";
 import { numberForSave } from "../numberSeries";
 import { assertMandatoryTerms, recalcTerms, saveTerms, type TermInput } from "./docTerms";
+import { assertLinesMatchPurchaseType } from "./billTypes";
 import { landed } from "./landed";
 import { importCostBasis } from "./importCostBasis";
 import { resolveLines, type LineInput, type ResolvedLine } from "./lines";
@@ -99,6 +100,11 @@ async function assertImportCostTarget(tx: Tx, companyId: number, branchId: numbe
 async function checkBillQuantities(tx: Tx, billId: number, lines: { lineNumber: number; qty: Micro; challanLineId: number | null; purchaseOrderLineId: number | null }[], tol?: number) {
   const clIds = [...new Set(lines.map((l) => l.challanLineId).filter((x): x is number => !!x))];
   const olIds = [...new Set(lines.map((l) => l.purchaseOrderLineId).filter((x): x is number => !!x))];
+  // Two bills for the same challan / order line must take turns: each one's total is only right if it sees the other's committed lines.
+  // Without this, both read "nothing billed yet" at the same moment and both pass. Locked in id order (challan lines, then order lines)
+  // so two bills that share lines cannot wait on each other; the lock is held to the end of the transaction.
+  if (clIds.length) await tx.select({ id: S.purchaseChallanLine.id }).from(S.purchaseChallanLine).where(inArray(S.purchaseChallanLine.id, clIds)).orderBy(asc(S.purchaseChallanLine.id)).for("update");
+  if (olIds.length) await tx.select({ id: S.purchaseOrderLine.id }).from(S.purchaseOrderLine).where(inArray(S.purchaseOrderLine.id, olIds)).orderBy(asc(S.purchaseOrderLine.id)).for("update");
   const [cls, ols, clBilled, olBilled] = await Promise.all([
     clIds.length ? tx.select().from(S.purchaseChallanLine).where(inArray(S.purchaseChallanLine.id, clIds)) : [],
     olIds.length ? tx.select().from(S.purchaseOrderLine).where(inArray(S.purchaseOrderLine.id, olIds)) : [],
@@ -161,6 +167,8 @@ export async function recomputeLanded(tx: Tx, lineIds: number[]) {
 
 async function recalcBill(tx: Tx, billId: number, mainBillId: number | null) {
   const t = await recalcTerms(tx, "PURCHASE_BILL", billId);
+  // Deductions bigger than the items and charges would store a negative bill; refuse it while drafting, not only at posting.
+  if (t.total < ZERO) throw new HttpError(400, `The bill total would be ${fmt(t.total, 2)}: the deductions are more than the items and charges. Check the discount terms.`, "terms");
   await tx.update(S.purchaseBill).set({ basicAmount: fmt(t.itemTotal, 2), termAmount: fmt(t.termNet, 2), totalAmount: fmt(t.total, 2), updatedAt: new Date() }).where(eq(S.purchaseBill.id, billId));
   const own = await tx.select({ id: S.purchaseBillLine.id }).from(S.purchaseBillLine).where(eq(S.purchaseBillLine.purchaseBillId, billId));
   await recomputeLanded(tx, own.map((l) => l.id));
@@ -260,6 +268,7 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
     }
 
     const lines = await resolveLines(tx, input.companyId, input.lines ?? [], { allowZeroQty: false });
+    if (!isAdditional) assertLinesMatchPurchaseType(purchaseType, lines);
     await checkBillQuantities(tx, existing?.id ?? 0, lines.map((l, i) => ({ lineNumber: l.lineNumber, qty: l.qty, challanLineId: input.lines[i].challanLineId ?? null, purchaseOrderLineId: input.lines[i].purchaseOrderLineId ?? null })), opts.tolerancePercent);
 
     // A draft moved into another fiscal year starts that year's numbering; the old number belongs to the old year's sequence.
@@ -416,11 +425,14 @@ export function postPurchaseBill(id: number, actor: Actor, opts: Opts & QtyOpts 
 
     // --- build the journal voucher ---
     const rows: JvRow[] = [];
+    const kinds: { lineNumber: number; productType: string }[] = [];
     for (const l of dbLines) {
       const [p] = await tx.select({ code: S.product.code, type: S.product.type }).from(S.product).where(eq(S.product.id, l.productId));
+      kinds.push({ lineNumber: l.lineNumber, productType: p.type });
       const amount = toMicro(l.basicAmount);
       if (amount !== ZERO) rows.push({ generalLedgerId: await purchaseLedgerOf(tx, l, p), debit: amount, credit: ZERO, narration: `Purchase ${bill.invoiceNumber}` });
     }
+    assertLinesMatchPurchaseType(bill.purchaseType, kinds); // a draft saved before this rule existed is caught here, before anything is posted
     const terms = await tx.select({ t: S.purchaseDocumentTerm, name: S.purchaseTerm.name, code: S.purchaseTerm.code, masterGL: S.purchaseTerm.generalLedgerId })
       .from(S.purchaseDocumentTerm).innerJoin(S.purchaseTerm, eq(S.purchaseTerm.id, S.purchaseDocumentTerm.termId))
       .where(and(eq(S.purchaseDocumentTerm.documentType, "PURCHASE_BILL"), eq(S.purchaseDocumentTerm.documentId, id)))

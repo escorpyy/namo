@@ -117,7 +117,7 @@ export interface PLookups {
     tracksBatch: boolean; tracksExpiry: boolean; defaultLocationId: number | null; purchaseRate: string | null; alternateUnits: { unitId: number; conversionFactor: string }[];
   }[];
   terms: {
-    id: number; code: string; name: string; generalLedgerId?: number | null; affectsStockValue?: boolean; defaultAgainstLedgerId?: number | null; lastAgainstLedgerId?: number | null; allocationBasis?: string; category: "GENERAL" | "COSTING" | "ROUNDED"; nature: "ADDITIVE" | "DEDUCTIVE"; isProductwise: boolean; isMandatory: boolean; isEditable: boolean;
+    id: number; code: string; name: string; generalLedgerId?: number | null; affectsStockValue?: boolean; defaultAgainstLedgerId?: number | null; lastAgainstLedgerId?: number | null; allocationBasis?: string; category: "GENERAL" | "COSTING" | "ROUNDED"; nature: "ADDITIVE" | "DEDUCTIVE"; isProductwise: boolean; isMandatory: boolean; isEditable: boolean; roundingMethod?: "NEAREST" | "UP" | "DOWN";
     sequence: number; defaultCalcType: "PERCENT" | "AMOUNT"; defaultValue: string; calcBase: "ITEM_VALUE" | "RUNNING_TOTAL" | "SINGLE_TERM"; baseTermId: number | null; distributeToLines: boolean; isActive: boolean;
   }[];
   fiscalYears: { id: number; code: string; startDate: string; endDate: string; isActive: boolean; isClosed: boolean; isCurrent: boolean }[];
