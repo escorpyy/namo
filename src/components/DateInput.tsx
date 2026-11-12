@@ -10,11 +10,12 @@ interface Props {
   onBlurField: () => void;
   compact?: boolean; // grid cell: dusre calendar ka hint nahi
   disabled?: boolean;
+  readOnly?: boolean;
 }
 
 // User apne preferred calendar (BS/AD) me type karta hai; form me hamesha AD jaata hai.
 // Digits type karo, dashes apne aap lagte hain (20820401 -> 2082-04-01).
-export function DateInput({ fieldName, value, onChange, calendar, hasError, onBlurField, compact, disabled }: Props) {
+export function DateInput({ fieldName, value, onChange, calendar, hasError, onBlurField, compact, disabled, readOnly }: Props) {
   const show = (v: string) => (v.startsWith("?") ? v.slice(1) : v === "" ? "" : calendar === "BS" ? (adToBs(v) ?? "") : v);
   const [text, setText] = useState(show(value));
 
@@ -40,8 +41,8 @@ export function DateInput({ fieldName, value, onChange, calendar, hasError, onBl
     <div className="min-w-0">
       <input
         data-nav data-field={fieldName} autoComplete="off" inputMode="numeric" maxLength={10}
-        placeholder="YYYY-MM-DD" value={text} disabled={disabled} aria-invalid={hasError} aria-label={`${fieldName} date (${calendar})`} title={text || `Date in ${calendar} calendar`}
-        className={`fld min-w-0 tabular-nums ${compact ? "text-right" : ""} ${hasError ? "fld-err" : ""} ${disabled ? "bg-slate-100 text-slate-600" : ""}`}
+        placeholder="YYYY-MM-DD" value={text} disabled={disabled} readOnly={readOnly} aria-invalid={hasError} aria-label={`${fieldName} date (${calendar})`} title={text || `Date in ${calendar} calendar`}
+        className={`fld min-w-0 tabular-nums ${compact ? "text-right" : ""} ${hasError ? "fld-err" : ""} ${disabled ? "bg-slate-100 text-slate-600" : readOnly ? "bg-slate-50" : ""}`}
         onChange={(e) => onInput(e.target.value)} onFocus={(e) => e.currentTarget.select()} onBlur={onBlurField}
       />
       {!compact && <span className="block min-h-[14px] text-[10px] leading-[14px] text-slate-500 tabular-nums">{other || "\u00a0"}</span>}
