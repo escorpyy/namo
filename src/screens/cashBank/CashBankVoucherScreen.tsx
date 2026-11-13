@@ -60,6 +60,7 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ text: string; kind: StatusInfo["kind"] }>({ text: "Loading…", kind: "info" });
   const [accountBalances, setAccountBalances] = useState<AccountBalance[] | null>(null);
+  const [balanceStatus, setBalanceStatus] = useState<"loading" | "ready" | "error" | "unavailable">("loading");
   const [activeKey, setActiveKey] = useState<number | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -106,12 +107,14 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
   const dateValid = !!form && !dateErr("Date", form.voucherDate, true);
   const bankId = form?.cashBankLedgerId ?? "", voucherDate = form?.voucherDate ?? "", docId = doc?.id;
   useEffect(() => {
-    if (!lk || !dateValid) { setAccountBalances(null); return; }
+    if (!lk || !dateValid) { setAccountBalances(null); setBalanceStatus("unavailable"); return; }
     let live = true;
     setAccountBalances(null);
+    setBalanceStatus("loading");
     const timer = window.setTimeout(() => {
       accountBalancesApi.get({ companyId: p.companyId, branchId: p.branchId, fiscalYear: fyCodeFor(voucherDate), date: voucherDate, excludeCashBankVoucherId: docId })
-        .then((r) => live && setAccountBalances(r.rows)).catch(() => live && setAccountBalances(null));
+        .then((r) => { if (live) { setAccountBalances(r.rows); setBalanceStatus("ready"); } })
+        .catch(() => { if (live) { setAccountBalances(null); setBalanceStatus("error"); } });
     }, 120);
     return () => { live = false; window.clearTimeout(timer); };
   }, [lk, voucherDate, dateValid, docId, p.companyId, p.branchId, fyCodeFor]);
@@ -125,8 +128,8 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
   }, [accountBalances, balanceMap]);
   const balanceSubtext = useCallback((glId: string | number, subLedgerId: string | number | null = null) => {
     const b = accountBalance(glId, subLedgerId);
-    return b ? `Balance · ${balanceText(b)}` : undefined;
-  }, [accountBalance]);
+    return b ? `Balance · ${balanceText(b)}` : balanceStatus === "loading" ? "Balance loading…" : balanceStatus === "error" ? "Balance unavailable" : "Choose a valid voucher date";
+  }, [accountBalance, balanceStatus]);
   const bankOptions = useMemo<ReferenceOption[]>(() => (lk?.cashBankLedgers ?? []).map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, detail: "Cash / bank ledger", subtext: balanceSubtext(l.id), isActive: l.isActive })), [lk, balanceSubtext]);
   const accountOptions = useMemo<ReferenceOption[]>(() => ledgers.filter((l) => String(l.id) !== bankId).map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, detail: l.requiresSubLedger ? `${l.glType} · needs sub ledger` : `${l.glType} ledger`, subtext: balanceSubtext(l.id), isActive: l.isActive })), [ledgers, bankId, balanceSubtext]);
   const ledgerById = useMemo(() => new Map(ledgers.map((l) => [String(l.id), l])), [ledgers]);
@@ -270,18 +273,18 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
                   <Field label="Voucher Number"><input data-field="voucherNumber" readOnly tabIndex={-1} value={doc?.voucherNumber ?? "Auto on save"} className="fld min-w-0 bg-slate-50 font-mono text-slate-600" /></Field>
                   <DateField label="Voucher Date" name="voucherDate" value={form.voucherDate} onChange={(v) => { patch({ voucherDate: v }); clear("voucherDate"); }} calendar={p.calendar} readOnly={ro} error={err("voucherDate")} required />
                   <Field label="Cash / Bank Ledger" required error={err("cashBankLedgerId")}>
-                    <MasterReferencePicker fieldName="cashBankLedgerId" label="Cash / bank ledger" scopeKey="cash-bank-ledgers" contextKey={String(p.companyId)} placeholder="Choose cash / bank ledger…" required value={form.cashBankLedgerId} hasError={!!err("cashBankLedgerId")}
+                      <MasterReferencePicker fieldName="cashBankLedgerId" label="Cash / bank ledger" scopeKey="cash-bank-ledgers" contextKey={String(p.companyId)} placeholder="Choose cash / bank ledger…" required value={form.cashBankLedgerId} hasError={!!err("cashBankLedgerId")} selectedSubtext={bankId ? balanceSubtext(bankId) : undefined}
                       options={bankOptions} disabled={ro} onChange={(v) => { patch({ cashBankLedgerId: v, cashBankSubLedgerId: "" }); clear("cashBankLedgerId", "cashBankSubLedgerId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
                   </Field>
                   {(bankNeedsSub || bankSubs.length > 0) && (
                     <Field label={bankNeedsSub ? "Bank Sub Ledger" : "Bank Sub Ledger (optional)"} required={bankNeedsSub} error={err("cashBankSubLedgerId")} className="sm:col-span-2 xl:col-span-1 xl:col-start-3 xl:row-start-2">
-                      <MasterReferencePicker fieldName="cashBankSubLedgerId" label="Bank sub-ledger" scopeKey="cash-bank-bank-subledgers" contextKey={`${p.companyId}:${bankId || "none"}`} placeholder={bankNeedsSub ? "Choose sub-ledger…" : "None"} required={bankNeedsSub} value={form.cashBankSubLedgerId} hasError={!!err("cashBankSubLedgerId")}
+                      <MasterReferencePicker fieldName="cashBankSubLedgerId" label="Bank sub-ledger" scopeKey="cash-bank-bank-subledgers" contextKey={`${p.companyId}:${bankId || "none"}`} placeholder={bankNeedsSub ? "Choose sub-ledger…" : "None"} required={bankNeedsSub} value={form.cashBankSubLedgerId} hasError={!!err("cashBankSubLedgerId")} selectedSubtext={form.cashBankSubLedgerId ? balanceSubtext(bankId, form.cashBankSubLedgerId) : undefined}
                         options={bankSubOptions} disabled={ro} onChange={(v) => { patch({ cashBankSubLedgerId: v }); clear("cashBankSubLedgerId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
                     </Field>
                   )}
                   <div className="rounded-md border border-slate-200 bg-cobalt-50/50 px-3 py-2 xl:col-start-4 xl:row-span-2 xl:row-start-1" aria-live="polite">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Current account balance</p>
-                    <p className="mt-0.5 text-[13px] font-semibold tabular-nums text-ink">{opening === null ? "—" : splitBalanceText(opening)}</p>
+                    <p className="mt-0.5 text-[13px] font-semibold tabular-nums text-ink">{opening === null ? (balanceStatus === "loading" ? "Balance loading…" : balanceStatus === "error" ? "Balance unavailable" : "—") : splitBalanceText(opening)}</p>
                     <p className="text-[11px] text-slate-500">{opening === null ? "Choose a ledger and a valid date" : "As of voucher date · Debit and credit"}</p>
                   </div>
                 </div>
@@ -317,9 +320,9 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
                           <div key={l.key} className="border-b border-slate-100 py-1" onFocusCapture={() => setActiveKey(l.key)}>
                             <div className={`grid ${COLS} items-center gap-x-2 px-1`}>
                               <span className="grid h-6 w-6 place-items-center rounded bg-slate-100 text-[11px] font-semibold text-slate-600">{String(i + 1).padStart(2, "0")}</span>
-                              <MasterReferencePicker fieldName={`account-${i}`} label={`Line ${i + 1} account`} scopeKey="cash-bank-accounts" contextKey={String(p.companyId)} placeholder="Choose account / party…" value={l.generalLedgerId} hasError={!!err(`lines.${i}.account`)}
+                              <MasterReferencePicker fieldName={`account-${i}`} label={`Line ${i + 1} account`} scopeKey="cash-bank-accounts" contextKey={String(p.companyId)} placeholder="Choose account / party…" value={l.generalLedgerId} hasError={!!err(`lines.${i}.account`)} selectedSubtext={l.generalLedgerId ? balanceSubtext(l.generalLedgerId) : undefined}
                                 options={accountOptions} disabled={ro} onChange={(v) => { patchLine(l.key, { generalLedgerId: v, subLedgerId: "" }); clear(`lines.${i}.account`, `lines.${i}.subLedger`); }} onCommit={(el, dir) => focusStep(el, dir)} />
-                              <MasterReferencePicker fieldName={`sub-${i}`} label={`Line ${i + 1} sub-ledger`} scopeKey="cash-bank-line-subledgers" contextKey={`${p.companyId}:${l.generalLedgerId || "none"}`} placeholder={!gl ? "—" : needSub ? (subOptions.length ? "Choose sub-ledger…" : "None yet") : subOptions.length ? "None (optional)" : "— not needed —"} required={needSub} value={l.subLedgerId} hasError={!!err(`lines.${i}.subLedger`)}
+                              <MasterReferencePicker fieldName={`sub-${i}`} label={`Line ${i + 1} sub-ledger`} scopeKey="cash-bank-line-subledgers" contextKey={`${p.companyId}:${l.generalLedgerId || "none"}`} placeholder={!gl ? "—" : needSub ? (subOptions.length ? "Choose sub-ledger…" : "None yet") : subOptions.length ? "None (optional)" : "— not needed —"} required={needSub} value={l.subLedgerId} hasError={!!err(`lines.${i}.subLedger`)} selectedSubtext={l.subLedgerId && gl ? balanceSubtext(gl.id, l.subLedgerId) : undefined}
                                 options={subOptions} disabled={ro || !gl || (!needSub && subs.length === 0)} onChange={(v) => { patchLine(l.key, { subLedgerId: v }); clear(`lines.${i}.subLedger`); }} onCommit={(el, dir) => focusStep(el, dir)} />
                               <input data-field={`receipt-${i}`} aria-label={`Line ${i + 1} receipt`} inputMode="decimal" autoComplete="off" disabled={ro} placeholder="0.00" value={l.receipt} onChange={(e) => setAmount(l.key, "receipt", e.target.value)} onFocus={(e) => e.currentTarget.select()} className={`fld min-w-0 text-right tabular-nums ${err(`lines.${i}.amount`) ? "fld-err" : ""}`} />
                               <input data-field={`payment-${i}`} aria-label={`Line ${i + 1} payment`} inputMode="decimal" autoComplete="off" disabled={ro} placeholder="0.00" value={l.payment} onChange={(e) => setAmount(l.key, "payment", e.target.value)} onFocus={(e) => e.currentTarget.select()} className={`fld min-w-0 text-right tabular-nums ${err(`lines.${i}.amount`) ? "fld-err" : ""}`} />
@@ -340,7 +343,7 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
                 </div>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-cobalt-50/40 px-3.5 py-2.5" aria-live="polite">
                   <div><p className="text-[13px] font-semibold text-ink">Selected account balance</p><p className="text-[12px] text-slate-500">{activeLedger ? `${selectedBalanceName} as of voucher date` : "Current ledger / sub-ledger balance updates when a line is selected."}</p></div>
-                  <div className="text-right"><p className="text-[11px] uppercase tracking-wide text-slate-500">Current balance · Dr / Cr</p><p className="text-[13px] font-semibold tabular-nums text-ink">{balanceText(selectedBalance)}</p></div>
+                  <div className="text-right"><p className="text-[11px] uppercase tracking-wide text-slate-500">Current balance · Dr / Cr</p><p className="text-[13px] font-semibold tabular-nums text-ink">{selectedBalance ? balanceText(selectedBalance) : balanceStatus === "loading" ? "Balance loading…" : balanceStatus === "error" ? "Balance unavailable" : "—"}</p></div>
                 </div>
               </FormSection>
 

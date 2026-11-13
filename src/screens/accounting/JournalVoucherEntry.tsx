@@ -51,6 +51,7 @@ export default function JournalVoucherEntry(p: JournalEntryProps) {
   const reasonRef = useRef("");
   const lkRef = useRef<JLookups | null>(null);
   const [accountBalances, setAccountBalances] = useState<AccountBalance[] | null>(null);
+  const [balanceStatus, setBalanceStatus] = useState<"loading" | "ready" | "error" | "unavailable">("loading");
   const cfg = useMemo<DocConfig<JForm>>(() => ({
     kind: "journal", api: journalDocApi, title: "Journal Voucher", singular: "Voucher", statusOptions: J_OPTIONS,
     emptyForm: (lk) => ({ numberSeriesId: "", docNumber: "", voucherDate: defaultDate((lk as unknown as JLookups).fiscalYears.find((y) => y.code === p.fyCode)), remarks: "", lines: emptyJLines() }),
@@ -73,14 +74,15 @@ export default function JournalVoucherEntry(p: JournalEntryProps) {
 
   useEffect(() => {
     const date = f?.voucherDate;
-    if (!date) { setAccountBalances(null); return; }
+    if (!date) { setAccountBalances(null); setBalanceStatus("unavailable"); return; }
     let live = true;
     setAccountBalances(null);
+    setBalanceStatus("loading");
     const fiscalYear = lk.fiscalYears.find((y) => y.startDate <= date && date <= y.endDate)?.code ?? p.fyCode;
     const timer = window.setTimeout(() => {
       accountBalancesApi.get({ companyId: p.companyId, branchId: p.branchId, fiscalYear, date, excludeJournalVoucherId: doc?.id })
-        .then((r) => { if (live) setAccountBalances(r.rows); })
-        .catch(() => { if (live) setAccountBalances(null); });
+        .then((r) => { if (live) { setAccountBalances(r.rows); setBalanceStatus("ready"); } })
+        .catch(() => { if (live) { setAccountBalances(null); setBalanceStatus("error"); } });
     }, 150);
     return () => { live = false; window.clearTimeout(timer); };
   }, [f?.voucherDate, lk.fiscalYears, p.companyId, p.branchId, p.fyCode, doc?.id]);
@@ -190,7 +192,7 @@ export default function JournalVoucherEntry(p: JournalEntryProps) {
             <DateField label="Date" name="voucherDate" value={f.voucherDate} onChange={(v) => { s.patch({ voucherDate: v }); s.clearError("voucherDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("voucherDate")} required />
           </div>
           <div className="flex min-h-0 flex-1 flex-col">
-            <JournalLinesGrid lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} accountBalances={accountBalances} readOnly={ro} errors={s.errors} clearError={s.clearError} contextKey={String(p.companyId)} />
+            <JournalLinesGrid lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} accountBalances={accountBalances} balanceStatus={balanceStatus} readOnly={ro} errors={s.errors} clearError={s.clearError} contextKey={String(p.companyId)} />
           </div>
           <div className="shrink-0">
             <Field label="Remarks (for the whole voucher)" error={s.err("remarks")}>

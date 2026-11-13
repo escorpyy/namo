@@ -21,6 +21,7 @@ interface Props {
   fieldName: string;
   label: string;
   value: string;
+  selectedSubtext?: string;
   options: ReferenceOption[];
   onChange: (value: string) => void;
   onCommit?: (el: HTMLInputElement, direction: 1 | -1) => void;
@@ -65,7 +66,7 @@ const readHistory = (key: string): PickerHistory => {
   }
 };
 
-export function MasterReferencePicker({ fieldName, label, value, options, onChange, onCommit, onBlurField, placeholder, hasError, disabled, scopeKey, contextKey = "global", required = false, allowClear, createMaster }: Props) {
+export function MasterReferencePicker({ fieldName, label, value, selectedSubtext, options, onChange, onCommit, onBlurField, placeholder, hasError, disabled, scopeKey, contextKey = "global", required = false, allowClear, createMaster }: Props) {
   const clearable = allowClear ?? !required;
   const uid = useId().replace(/:/g, "");
   const dialogId = `master-picker-${uid}`;
@@ -283,6 +284,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
 
   const activeOption = rows[activeIndex];
   const currentLabel = current?.label ?? "";
+  const currentSubtext = selectedSubtext ?? current?.subtext;
   const invalid = hasError || (required && touched && value === "");
   const clearFilters = () => { setQuery(""); setFindCode(""); setFindName(""); setIncludeInactive(false); setView("all"); searchRef.current?.focus(); };
 
@@ -358,7 +360,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
         />
         <ChevronDown size={14} aria-hidden="true" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
       </div>
-      {current?.subtext && <p className="mt-0.5 truncate text-[10.5px] leading-tight text-slate-500" title={current.subtext}>{current.subtext}</p>}
+      {currentSubtext && <p className="mt-0.5 break-words text-[10.5px] leading-tight text-slate-500" title={currentSubtext}>{currentSubtext}</p>}
 
       {open && (
         <div className="fixed inset-0 z-[100] grid place-items-center bg-black/40 p-0 sm:p-5" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDialog(); }}>

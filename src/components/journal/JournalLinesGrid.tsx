@@ -22,18 +22,21 @@ interface Props {
   onChange: (l: JLine[]) => void;
   lookups: JLookups;
   accountBalances: AccountBalance[] | null;
+  balanceStatus: "loading" | "ready" | "error" | "unavailable";
   readOnly: boolean;
   errors: JErrors;
   clearError: (...k: string[]) => void;
   contextKey: string;
 }
 
-export function JournalLinesGrid({ lines, onChange, lookups, accountBalances, readOnly, errors, clearError, contextKey }: Props) {
+export function JournalLinesGrid({ lines, onChange, lookups, accountBalances, balanceStatus, readOnly, errors, clearError, contextKey }: Props) {
   const balanceMap = useMemo(() => new Map((accountBalances ?? []).map((b) => [`${b.generalLedgerId}:${b.subLedgerId ?? ""}`, b])), [accountBalances]);
   const balanceText = useCallback((glId: number, subLedgerId: number | null = null) => {
     const b = balanceMap.get(`${glId}:${subLedgerId ?? ""}`);
-    return b ? `Balance · Dr NPR ${groupIN(b.debit)} · Cr NPR ${groupIN(b.credit)}` : accountBalances ? "Balance · Dr NPR 0.00 · Cr NPR 0.00" : undefined;
-  }, [balanceMap, accountBalances]);
+    if (b) return `Balance · Dr NPR ${groupIN(b.debit)} · Cr NPR ${groupIN(b.credit)}`;
+    if (!accountBalances) return balanceStatus === "loading" ? "Balance loading…" : balanceStatus === "error" ? "Balance unavailable" : "Select a valid voucher date";
+    return "Balance · Dr NPR 0.00 · Cr NPR 0.00";
+  }, [balanceMap, accountBalances, balanceStatus]);
   const ledgerOpts = useMemo<ReferenceOption[]>(() => lookups.ledgers.map((g) => ({ value: String(g.id), label: `${g.code} — ${g.name}`, code: g.code, name: g.name, detail: g.requiresSubLedger ? "Needs a party" : undefined, subtext: balanceText(g.id), isActive: g.isActive })), [lookups.ledgers, balanceText]);
   const agentOpts = useMemo<ReferenceOption[]>(() => lookups.agents.map((a) => ({ value: String(a.id), label: `${a.code} — ${a.name}`, code: a.code, name: a.name, isActive: a.isActive })), [lookups.agents]);
   const ledgers = useMemo(() => new Map(lookups.ledgers.map((g) => [String(g.id), g])), [lookups.ledgers]);
@@ -131,10 +134,10 @@ export function JournalLinesGrid({ lines, onChange, lookups, accountBalances, re
                 <div style={{ gridTemplateColumns: TEMPLATE }} data-selected={rowSel === i} className="xl-row">
                   <button type="button" className="xl-rowhead" {...gridRows.rowHeadProps(i)}>{i + 1}</button>
                   <MasterReferencePicker fieldName={`L.${i}.g`} label="General ledger" scopeKey="journal-ledgers" createMaster={{ key: "general-ledger" }} contextKey={contextKey} placeholder="Choose ledger…" value={l.glId} hasError={bad("g")}
-                    options={ledgerOpts} disabled={readOnly} onChange={(v) => pickLedger(i, v)} onCommit={gridRows.afterCombo} />
+                    selectedSubtext={l.glId ? balanceText(Number(l.glId)) : undefined} options={ledgerOpts} disabled={readOnly} onChange={(v) => pickLedger(i, v)} onCommit={gridRows.afterCombo} />
                   <MasterReferencePicker fieldName={`L.${i}.s`} label="Party subledger" scopeKey="journal-parties" createMaster={needsSub ? { key: "sub-ledger", defaults: { generalLedgerId: l.glId } } : undefined}
                     contextKey={`${contextKey}:${l.glId || "none"}`} placeholder={!g ? "—" : needsSub ? (subOpts.length ? "Choose party…" : "None yet — Ctrl+M") : subOpts.length ? "Party (optional)" : "— not needed —"} value={l.subId} hasError={bad("s")}
-                    required={needsSub} options={subOpts} disabled={readOnly || !g || (!needsSub && subOpts.length === 0)} onChange={(v) => patch(i, { subId: v })} onCommit={gridRows.afterCombo} />
+                    selectedSubtext={l.subId && g ? balanceText(g.id, Number(l.subId)) : undefined} required={needsSub} options={subOpts} disabled={readOnly || !g || (!needsSub && subOpts.length === 0)} onChange={(v) => patch(i, { subId: v })} onCommit={gridRows.afterCombo} />
                   <MasterReferencePicker fieldName={`L.${i}.a`} label="Agent" scopeKey="agents" createMaster={{ key: "agents" }} contextKey={contextKey} placeholder="—" value={l.agentId} hasError={bad("a")}
                     options={agentOpts} disabled={readOnly} onChange={(v) => patch(i, { agentId: v })} onCommit={gridRows.afterCombo} />
                   {sideInput(i, "debit", "d", "credit")}
