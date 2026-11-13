@@ -5,8 +5,9 @@ import type { EntryTabProps } from "../../components/purchase/DocWorkspace";
 import { drCrText } from "../../lib/balanceText";
 import { useDialog } from "../../components/Dialog";
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
-import { DocHeader, Field, FormSection, Pill, focusStep, formEnterKey, groupIN } from "../../components/purchase/Bits";
+import { DocHeader, Field, Pill, focusStep, formEnterKey, groupIN } from "../../components/purchase/Bits";
 import { DateField, TextField } from "../../components/purchase/HeadFields";
+import { useGridRows } from "../../components/table/useGridRows";
 import { dateErr, defaultDate } from "../../lib/purchaseForm";
 import {
   INSTRUMENTS, MAX_CHEQUE_NO, MAX_NARRATION, MAX_PAYEE, MAX_REMARKS, closingBalance, entryTotals, formatPaise, isBlankEntry, parseAmount, voucherProblems, type EntryInput,
@@ -31,8 +32,13 @@ type Errors = Record<string, string | undefined>;
 
 export const TONE: Record<CbStatus, "slate" | "green" | "red"> = { DRAFT: "slate", POSTED: "green", REVERSED: "red" };
 export const STATUS_OPTIONS = [{ value: "DRAFT", label: "Draft" }, { value: "POSTED", label: "Posted" }, { value: "REVERSED", label: "Reversed" }];
-const HINTS = ["Enter: Next", "Shift+Enter: Previous", "Ctrl+S: Save draft", "F3: New", "F2: Edit"];
-const COLS = "grid-cols-[34px_minmax(150px,1.4fr)_minmax(110px,1fr)_104px_104px_minmax(110px,1.2fr)_28px]";
+const HINTS = ["Enter: Next field (new line at the end)", "Shift+Enter: Previous", "Ctrl+S: Save draft", "Ctrl+D: Copy cell above", "Shift+Del: Remove line", "F3: New", "F2: Edit"];
+// Line columns: No, Account / Party, Sub-ledger, Receipt, Payment, Narration, remove. Fluid, so the grid fits a 1366px screen without its own scroll bar.
+const TEMPLATE = "40px minmax(220px,1.6fr) minmax(150px,1fr) 124px 124px minmax(160px,1.2fr) 34px";
+const FILL_FIELDS = ["generalLedgerId", "subLedgerId", "receipt", "payment", "narration"] as const;
+// data-field of a line cell is L.<row>.<col>; the error key of a line is lines.<row>.<account | subLedger | amount>.
+const COL_OF: Record<string, "a" | "s" | "r" | "p" | "n"> = { account: "a", subLedger: "s", amount: "r" };
+const FIELD_OF: Record<string, (typeof FILL_FIELDS)[number]> = { a: "generalLedgerId", s: "subLedgerId", r: "receipt", p: "payment", n: "narration" };
 
 let keySeq = 0;
 const blankLine = (): Line => ({ key: ++keySeq, generalLedgerId: "", subLedgerId: "", receipt: "", payment: "", narration: "" });
@@ -60,7 +66,6 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
   const [msg, setMsg] = useState<{ text: string; kind: StatusInfo["kind"] }>({ text: "Loading…", kind: "info" });
   const [accountBalances, setAccountBalances] = useState<AccountBalance[] | null>(null);
   const [balanceStatus, setBalanceStatus] = useState<"loading" | "ready" | "error" | "unavailable">("loading");
-  const [activeKey, setActiveKey] = useState<number | null>(null);
 
   const ro = mode === "view";
   const dirty = mode !== "view" && !!form && sigOf(form) !== baseSig;
@@ -81,7 +86,7 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
     payeeReference: d.payeeReference, remarks: d.remarks,
     lines: d.entries.length ? d.entries.map((e) => ({ key: ++keySeq, generalLedgerId: String(e.generalLedgerId), subLedgerId: e.subLedgerId ? String(e.subLedgerId) : "", receipt: e.receipt, payment: e.payment, narration: e.narration })) : [blankLine()],
   });
-  const show = (f: CbForm, m: Mode, d: CbDoc | null) => { setForm(f); setBaseSig(sigOf(f)); setMode(m); setDoc(d); setErrors({}); setActiveKey(null); };
+  const show = (f: CbForm, m: Mode, d: CbDoc | null) => { setForm(f); setBaseSig(sigOf(f)); setMode(m); setDoc(d); setErrors({}); };
 
   // A tab starts one of three ways: put back as it was left, a saved voucher opened in view mode, or a new blank voucher.
   const restored = useRef(p.hookSnapRef.current);
@@ -141,12 +146,6 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
   const bankSubs = (lk?.subLedgers ?? []).filter((s) => String(s.generalLedgerId) === bankId);
   const bankNeedsSub = !!bankLedger?.requiresSubLedger;
   const bankSubOptions = useMemo<ReferenceOption[]>(() => bankSubs.map((s) => ({ value: String(s.id), label: `${s.code} — ${s.name}`, code: s.code, name: s.name, detail: bankLedger ? `For ${bankLedger.name}` : undefined, subtext: balanceSubtext(s.generalLedgerId, s.id), isActive: s.isActive })), [bankSubs, bankLedger, balanceSubtext]);
-  const activeLine = form?.lines.find((l) => l.key === activeKey);
-  const activeLedger = activeLine?.generalLedgerId ?? "";
-  const activeSubLedger = activeLine?.subLedgerId ?? "";
-  const selectedBalance = activeLedger ? accountBalance(activeLedger, activeSubLedger || null) : null;
-  const selectedSub = lk?.subLedgers.find((s) => String(s.id) === activeSubLedger);
-  const selectedBalanceName = selectedSub?.name ?? ledgerById.get(activeLedger)?.name ?? "";
 
   // ---------- editing ----------
   const patch = (c: Partial<CbForm>) => setForm((f) => (f ? { ...f, ...c } : f));
@@ -158,7 +157,39 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
     patchLine(key, { [side]: v, ...((parseAmount(v) ?? 0n) > 0n ? { [other]: "" } : {}) } as Partial<Line>);
     clear(`lines.${form!.lines.findIndex((l) => l.key === key)}.amount`);
   };
-  const removeLine = (key: number) => setForm((f) => (f ? { ...f, lines: f.lines.length > 1 ? f.lines.filter((l) => l.key !== key) : [blankLine()] } : f));
+  const focusField = (name: string, delay = 40) => window.setTimeout(() => document.querySelector<HTMLElement>(`[data-field="${name}"]:not(:disabled)`)?.focus(), delay);
+  const addLine = () => { setForm((f) => (f ? { ...f, lines: [...f.lines, blankLine()] } : f)); if (form) focusField(`L.${form.lines.length}.a`); };
+  const removeLineAt = (i: number, fromRowMode = false) => {
+    if (!form) return;
+    const left = form.lines.filter((_, k) => k !== i);
+    setForm({ ...form, lines: left.length ? left : [blankLine()] });
+    clear("lines", ...Object.keys(errors).filter((k) => k.startsWith("lines.")));
+    if (!fromRowMode) focusField(`L.${Math.min(i, Math.max(0, left.length - 1))}.a`, 30);
+  };
+  // Ctrl+D: the cell above (or the whole line above in row mode), so a run of similar lines is a few key presses.
+  const copyCellDown = (i: number, col: string) => {
+    const f = FIELD_OF[col], above = form?.lines[i - 1], cur = form?.lines[i];
+    if (ro || !f || !above || !cur) return;
+    const c: Partial<Line> = f === "generalLedgerId" ? { generalLedgerId: above.generalLedgerId, subLedgerId: "" } : { [f]: above[f] };
+    if (f === "receipt" && above.receipt) c.payment = ""; else if (f === "payment" && above.payment) c.receipt = "";
+    patchLine(cur.key, c);
+  };
+  const copyRowDown = (i: number) => {
+    const above = form?.lines[i - 1], cur = form?.lines[i];
+    if (ro || !above || !cur) return;
+    patchLine(cur.key, Object.fromEntries(FILL_FIELDS.map((k) => [k, above[k]])) as Partial<Line>);
+  };
+  const cellsOf = (root: Element | null) => Array.from(root?.querySelectorAll<HTMLElement>('[data-field^="L."]') ?? []).filter((el) => !(el as HTMLInputElement).disabled && el.getClientRects().length > 0);
+  const rowOfCell = (el: Element) => { const m = /^L\.(\d+)\./.exec(el.getAttribute("data-field") ?? ""); return m ? Number(m[1]) : -1; };
+  // The same keyboard flow as the journal grid: Enter walks the cells, past the last cell of the last filled line a new line opens by itself.
+  const gridRows = useGridRows({
+    count: form?.lines.length ?? 0, readOnly: ro,
+    firstCell: (grid, r) => cellsOf(grid).find((c) => rowOfCell(c) === r) ?? null,
+    cellOf: (el) => { const m = /^L\.(\d+)\.(\w+)$/.exec(el.getAttribute("data-field") ?? ""); return m ? { row: Number(m[1]), col: m[2] } : null; },
+    onRemove: removeLineAt, onFillRow: copyRowDown, onFillCell: copyCellDown,
+    cellSelector: '[data-field^="L."]', fieldOf: (r, c) => `L.${r}.${c}`, endOfRow: "continue",
+    onAddRow: addLine, lastRowBlank: () => !!form && isBlankEntry(toEntry(form.lines[form.lines.length - 1])), leave: (el, dir) => focusStep(el, dir),
+  });
 
   // ---------- validate + save ----------
   // Rows the person has not started are dropped (index mapping is kept so a message points at the row as shown).
@@ -183,6 +214,20 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
     instrumentType: f.instrumentType || null, chequeNumber: f.chequeNumber.trim() || null, chequeDate: f.chequeDate || null, payeeReference: f.payeeReference.trim() || null, remarks: f.remarks.trim() || null,
     lines: f.lines.filter((l) => !isBlankEntry(toEntry(l))).map((l) => ({ generalLedgerId: Number(l.generalLedgerId) || null, subLedgerId: l.subLedgerId ? Number(l.subLedgerId) : null, receipt: l.receipt || null, payment: l.payment || null, narration: l.narration.trim() || null })),
   });
+  // The cell an error belongs to: header errors are named like their field; a line error is lines.<row>.<account|subLedger|amount>.
+  const fieldOfError = (key: string) => {
+    const m = /^lines\.(\d+)\.(\w+)$/.exec(key);
+    if (m) return `L.${m[1]}.${COL_OF[m[2]] ?? "a"}`;
+    return key === "lines" ? "L.0.a" : key;
+  };
+  // A failed save does not open a dialog: the first wrong field takes the cursor and the status bar says what is wrong with it.
+  const showFirstError = (e: Errors) => {
+    const keys = Object.keys(e).filter((k) => e[k]);
+    const rank = (k: string) => (k === "lines" ? 1e6 : /^lines\./.test(k) ? 1000 + Number(k.split(".")[1]) : 0);
+    const first = keys.sort((a, b) => rank(a) - rank(b))[0];
+    flash(first ? e[first]! : "Fix the highlighted fields.", "warn");
+    if (first) focusField(fieldOfError(first), 20);
+  };
   const fail = (e: unknown, title: string) => {
     const err = e as ApiError;
     if (err.field) setErrors((x) => ({ ...x, [err.field!]: err.message }));
@@ -194,7 +239,7 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
     if (!form || saving) return;
     const e = validate(form);
     setErrors(e);
-    if (Object.keys(e).length) { flash("Fix the highlighted fields.", "warn"); void dlg.warning("Fix the highlighted fields first.", { title: "Cannot save" }); return; }
+    if (Object.keys(e).length) { showFirstError(e); return; }
     if (post && !(await dlg.confirm(<>Post this voucher? Receipts <b>{npr(totals.receipts)}</b>, payments <b>{npr(totals.payments)}</b>. A posted voucher can no longer be edited; it can only be reversed.</>, { title: "Post voucher?", confirmLabel: "Post voucher" }))) return;
     setSaving(true);
     try {
@@ -249,134 +294,150 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
 
   const status = doc?.status;
   const err = (k: string) => errors[k];
-  const closingTone = closing === null ? "" : closing >= 0n ? "text-emerald-700" : "text-amber-700";
+  const plain = (v: bigint) => groupIN(formatPaise(v));
+  const overdrawn = closing !== null && closing < 0n;
+
+  // A new voucher starts on the first thing still empty: the cash / bank ledger, else the first line.
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current || !form || mode !== "new") return;
+    started.current = true;
+    focusField(form.cashBankLedgerId ? "L.0.a" : "cashBankLedgerId", 80);
+  });
+
+  const summary: { label: string; value: string }[] = [
+    { label: "Opening", value: opening === null ? "—" : splitBalanceText(opening) },
+    { label: "Receipts", value: plain(totals.receipts) },
+    { label: "Payments", value: plain(totals.payments) },
+  ];
+  const closingNote = closing === null ? "Choose a ledger and a valid date" : overdrawn ? "Overdrawn" : "";
 
   return (
     <div className="ledger flex min-h-0 min-w-0 flex-1">
       <section data-purchase-document className="flex min-h-0 min-w-0 flex-1 flex-col">
         <DocHeader title="Cash / Bank Voucher" number={doc?.voucherNumber} pill={status ? <Pill text={status} tone={TONE[status]} /> : <Pill text="Draft" tone="slate" />} branchName={p.branchName} fyCode={p.fyCode} dirty={dirty} />
         {doc && status !== "DRAFT" && (
-          <div className="shrink-0 px-5 pt-3"><p className="border border-amber-300 bg-amber-50 px-2 py-1 text-[12px] text-amber-800">
+          <div className="shrink-0 px-5 pt-2"><p className="border border-amber-300 bg-amber-50 px-2 py-1 text-[12px] text-amber-800">
             {status === "REVERSED" ? <>This voucher was reversed by <b className="font-mono">{doc.reversedByNumber}</b>.</> : doc.isReversal ? "This is a reversal voucher; it cannot be edited or reversed." : "Posted vouchers cannot be edited. Reverse it and enter a correct one."}
           </p></div>
         )}
-        <div data-zone="form" onKeyDown={formEnterKey} className="lg-scroll min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {/* The page is the only thing that scrolls. Totals and the buttons are in the footer below and stay in view. */}
+        <div data-zone="form" onKeyDown={formEnterKey} className="lg-scroll min-h-0 flex-1 overflow-y-auto px-5 py-3">
           {!lk || !form ? <p className="p-2 text-slate-500">Loading…</p> : (
-            <div className="space-y-3">
-              <FormSection title="Voucher details" hint="Number and account">
-                <div className="grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 xl:grid-cols-[170px_190px_minmax(240px,1fr)_minmax(220px,0.8fr)]">
-                  <Field label="Voucher Number"><input data-field="voucherNumber" readOnly tabIndex={-1} value={doc?.voucherNumber ?? "Auto on save"} className="fld min-w-0 bg-slate-50 font-mono text-slate-600" /></Field>
-                  <DateField label="Voucher Date" name="voucherDate" value={form.voucherDate} onChange={(v) => { patch({ voucherDate: v }); clear("voucherDate"); }} calendar={p.calendar} readOnly={ro} error={err("voucherDate")} required />
-                  <Field label="Cash / Bank Ledger" required error={err("cashBankLedgerId")}>
-                      <MasterReferencePicker fieldName="cashBankLedgerId" label="Cash / bank ledger" scopeKey="cash-bank-ledgers" contextKey={String(p.companyId)} placeholder="Choose cash / bank ledger…" required value={form.cashBankLedgerId} hasError={!!err("cashBankLedgerId")} selectedSubtext={bankId ? balanceSubtext(bankId) : undefined}
+            <div className="space-y-2.5">
+              <section className="lg-card space-y-2 px-4 py-3" aria-label="Voucher details">
+                <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+                  <Field label="Voucher No" className="w-[110px] shrink-0"><input readOnly tabIndex={-1} value={doc?.voucherNumber ?? "Auto"} aria-label="Voucher number" className="fld min-w-0 bg-slate-50 font-mono text-slate-600" /></Field>
+                  <div className="w-[150px] shrink-0"><DateField label="Date" name="voucherDate" value={form.voucherDate} onChange={(v) => { patch({ voucherDate: v }); clear("voucherDate"); }} calendar={p.calendar} readOnly={ro} error={err("voucherDate")} required /></div>
+                  <Field label="Cash / Bank Ledger" required error={err("cashBankLedgerId")} className="min-w-[230px] flex-[1.4]">
+                    <MasterReferencePicker fieldName="cashBankLedgerId" label="Cash / bank ledger" scopeKey="cash-bank-ledgers" contextKey={String(p.companyId)} placeholder="Choose cash / bank ledger…" required value={form.cashBankLedgerId} hasError={!!err("cashBankLedgerId")} selectedSubtext={bankId ? balanceSubtext(bankId) : undefined}
                       options={bankOptions} disabled={ro} onChange={(v) => { patch({ cashBankLedgerId: v, cashBankSubLedgerId: "" }); clear("cashBankLedgerId", "cashBankSubLedgerId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
                   </Field>
                   {(bankNeedsSub || bankSubs.length > 0) && (
-                    <Field label={bankNeedsSub ? "Bank Sub Ledger" : "Bank Sub Ledger (optional)"} required={bankNeedsSub} error={err("cashBankSubLedgerId")} className="sm:col-span-2 xl:col-span-1 xl:col-start-3 xl:row-start-2">
+                    <Field label={bankNeedsSub ? "Bank Sub Ledger" : "Bank Sub Ledger (optional)"} required={bankNeedsSub} error={err("cashBankSubLedgerId")} className="min-w-[170px] flex-1">
                       <MasterReferencePicker fieldName="cashBankSubLedgerId" label="Bank sub-ledger" scopeKey="cash-bank-bank-subledgers" contextKey={`${p.companyId}:${bankId || "none"}`} placeholder={bankNeedsSub ? "Choose sub-ledger…" : "None"} required={bankNeedsSub} value={form.cashBankSubLedgerId} hasError={!!err("cashBankSubLedgerId")} selectedSubtext={form.cashBankSubLedgerId ? balanceSubtext(bankId, form.cashBankSubLedgerId) : undefined}
                         options={bankSubOptions} disabled={ro} onChange={(v) => { patch({ cashBankSubLedgerId: v }); clear("cashBankSubLedgerId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
                     </Field>
                   )}
-                  <div className="rounded-md border border-slate-200 bg-cobalt-50/50 px-3 py-2 xl:col-start-4 xl:row-span-2 xl:row-start-1" aria-live="polite">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Current account balance</p>
-                    <p className="mt-0.5 text-[13px] font-semibold tabular-nums text-ink">{opening === null ? (balanceStatus === "loading" ? "Balance loading…" : balanceStatus === "error" ? "Balance unavailable" : "—") : splitBalanceText(opening)}</p>
-                    <p className="text-[11px] text-slate-500">{opening === null ? "Choose a ledger and a valid date" : "As of voucher date"}</p>
-                  </div>
                 </div>
-              </FormSection>
-
-              <FormSection title="Bank instrument" hint="Details depend on the instrument used">
-                <div className="grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 xl:grid-cols-[190px_minmax(180px,1fr)_170px_minmax(220px,1fr)]">
-                  <Field label="Instrument Type" error={err("instrumentType")}>
+                <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+                  <Field label="Instrument" error={err("instrumentType")} className="w-[150px] shrink-0">
                     <select data-field="instrumentType" disabled={ro} value={form.instrumentType} onChange={(e) => { patch({ instrumentType: e.target.value }); clear("instrumentType", "chequeNumber", "chequeDate"); }} className="fld min-w-0">
                       <option value="">None / cash</option>
                       {INSTRUMENTS.map((i) => <option key={i.value} value={i.value}>{i.label}</option>)}
                     </select>
                   </Field>
-                  <TextField label={form.instrumentType === "CHEQUE" ? "Cheque Number" : "Reference Number"} name="chequeNumber" value={form.chequeNumber} onChange={(v) => { patch({ chequeNumber: v }); clear("chequeNumber"); }} readOnly={ro || !instrumentOn} max={MAX_CHEQUE_NO} placeholder="e.g. 008421" required={form.instrumentType === "CHEQUE"} error={err("chequeNumber")} />
-                  <DateField label={form.instrumentType === "CHEQUE" ? "Cheque Date" : "Instrument Date"} name="chequeDate" value={form.chequeDate} onChange={(v) => { patch({ chequeDate: v }); clear("chequeDate"); }} calendar={p.calendar} readOnly={ro || !instrumentOn} error={err("chequeDate")} required={form.instrumentType === "CHEQUE"} />
-                  <TextField label="Payee / Reference" name="payeeReference" value={form.payeeReference} onChange={(v) => { patch({ payeeReference: v }); clear("payeeReference"); }} readOnly={ro} max={MAX_PAYEE} placeholder="Optional reference" error={err("payeeReference")} />
+                  <TextField className="w-[140px] shrink-0" label={form.instrumentType === "CHEQUE" ? "Cheque No" : "Reference No"} name="chequeNumber" value={form.chequeNumber} onChange={(v) => { patch({ chequeNumber: v }); clear("chequeNumber"); }} readOnly={ro || !instrumentOn} max={MAX_CHEQUE_NO} placeholder="e.g. 008421" required={form.instrumentType === "CHEQUE"} error={err("chequeNumber")} />
+                  <div className="w-[150px] shrink-0"><DateField label={form.instrumentType === "CHEQUE" ? "Cheque Date" : "Instrument Date"} name="chequeDate" value={form.chequeDate} onChange={(v) => { patch({ chequeDate: v }); clear("chequeDate"); }} calendar={p.calendar} readOnly={ro || !instrumentOn} error={err("chequeDate")} required={form.instrumentType === "CHEQUE"} /></div>
+                  <TextField className="min-w-[170px] flex-1" label="Payee / Reference" name="payeeReference" value={form.payeeReference} onChange={(v) => { patch({ payeeReference: v }); clear("payeeReference"); }} readOnly={ro} max={MAX_PAYEE} placeholder="Optional" error={err("payeeReference")} />
+                  <TextField className="min-w-[200px] flex-[1.3]" label="Remarks" name="remarks" value={form.remarks} onChange={(v) => { patch({ remarks: v }); clear("remarks"); }} readOnly={ro} max={MAX_REMARKS} placeholder="Optional note for this voucher" error={err("remarks")} />
                 </div>
-              </FormSection>
+              </section>
 
-              <FormSection title="Voucher entries" hint="Select a ledger or party for each line">
-                <div className="overflow-x-auto" tabIndex={0} aria-label="Voucher entries; scroll horizontally if needed">
-                  <div className="min-w-[700px]">
-                    <div className={`grid ${COLS} gap-x-2 border-b border-slate-200 bg-slate-50 px-1 py-1.5 text-[12px] font-semibold text-slate-500`}>
-                      <span>No.</span><span>Account / Party</span><span>Sub-ledger</span><span className="text-right">Receipt (NPR)</span><span className="text-right">Payment (NPR)</span><span>Narration</span><span />
-                    </div>
-                    <div className="lg-grid">
-                      {form.lines.map((l, i) => {
-                        const gl = ledgerById.get(l.generalLedgerId);
-                        const subs = (lk.subLedgers ?? []).filter((s) => String(s.generalLedgerId) === l.generalLedgerId);
-                        const subOptions: ReferenceOption[] = subs.map((s) => ({ value: String(s.id), label: `${s.code} — ${s.name}`, code: s.code, name: s.name, detail: gl ? `For ${gl.name}` : undefined, subtext: balanceSubtext(s.generalLedgerId, s.id), isActive: s.isActive }));
-                        const needSub = !!gl?.requiresSubLedger;
-                        return (
-                          <div key={l.key} className="border-b border-slate-100 py-1" onFocusCapture={() => setActiveKey(l.key)}>
-                            <div className={`grid ${COLS} items-center gap-x-2 px-1`}>
-                              <span className="grid h-6 w-6 place-items-center rounded bg-slate-100 text-[11px] font-semibold text-slate-600">{String(i + 1).padStart(2, "0")}</span>
-                              <MasterReferencePicker fieldName={`account-${i}`} label={`Line ${i + 1} account`} scopeKey="cash-bank-accounts" contextKey={String(p.companyId)} placeholder="Choose account / party…" value={l.generalLedgerId} hasError={!!err(`lines.${i}.account`)} selectedSubtext={l.generalLedgerId ? balanceSubtext(l.generalLedgerId) : undefined}
-                                options={accountOptions} disabled={ro} onChange={(v) => { patchLine(l.key, { generalLedgerId: v, subLedgerId: "" }); clear(`lines.${i}.account`, `lines.${i}.subLedger`); }} onCommit={(el, dir) => focusStep(el, dir)} />
-                              <MasterReferencePicker fieldName={`sub-${i}`} label={`Line ${i + 1} sub-ledger`} scopeKey="cash-bank-line-subledgers" contextKey={`${p.companyId}:${l.generalLedgerId || "none"}`} placeholder={!gl ? "—" : needSub ? (subOptions.length ? "Choose sub-ledger…" : "None yet") : subOptions.length ? "None (optional)" : "— not needed —"} required={needSub} value={l.subLedgerId} hasError={!!err(`lines.${i}.subLedger`)} selectedSubtext={l.subLedgerId && gl ? balanceSubtext(gl.id, l.subLedgerId) : undefined}
-                                options={subOptions} disabled={ro || !gl || (!needSub && subs.length === 0)} onChange={(v) => { patchLine(l.key, { subLedgerId: v }); clear(`lines.${i}.subLedger`); }} onCommit={(el, dir) => focusStep(el, dir)} />
-                              <input data-field={`receipt-${i}`} aria-label={`Line ${i + 1} receipt`} inputMode="decimal" autoComplete="off" disabled={ro} placeholder="0.00" value={l.receipt} onChange={(e) => setAmount(l.key, "receipt", e.target.value)} onFocus={(e) => e.currentTarget.select()} className={`fld min-w-0 text-right tabular-nums ${err(`lines.${i}.amount`) ? "fld-err" : ""}`} />
-                              <input data-field={`payment-${i}`} aria-label={`Line ${i + 1} payment`} inputMode="decimal" autoComplete="off" disabled={ro} placeholder="0.00" value={l.payment} onChange={(e) => setAmount(l.key, "payment", e.target.value)} onFocus={(e) => e.currentTarget.select()} className={`fld min-w-0 text-right tabular-nums ${err(`lines.${i}.amount`) ? "fld-err" : ""}`} />
-                              <input data-field={`narration-${i}`} aria-label={`Line ${i + 1} narration`} autoComplete="off" disabled={ro} maxLength={MAX_NARRATION} value={l.narration} onChange={(e) => patchLine(l.key, { narration: e.target.value })} onFocus={(e) => e.currentTarget.select()} className="fld min-w-0" />
-                              <button type="button" tabIndex={-1} disabled={ro} onClick={() => removeLine(l.key)} aria-label={`Remove line ${i + 1}`} title="Remove line" className="grid h-7 w-7 place-items-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-30"><X size={14} /></button>
-                            </div>
-                            {(["account", "subLedger", "amount"] as const).map((k) => err(`lines.${i}.${k}`) && <p key={k} className="px-1 pl-10 pt-0.5 text-[12px] text-rose-700">{err(`lines.${i}.${k}`)}</p>)}
-                          </div>
-                        );
-                      })}
-                    </div>
+              <section className="lg-card lg-grid" aria-label="Voucher entries">
+                {/* No scroll box of its own: the grid is as tall as its lines and the page scrolls. */}
+                <div data-grid="lines" data-nav="lines-grid" {...gridRows.gridProps} onKeyDown={(e) => { gridRows.handleKey(e); }} aria-label="Voucher entries" className="min-w-[860px] outline-none">
+                  <div style={{ gridTemplateColumns: TEMPLATE }} className="xl-head">
+                    <span className="xl-rowhead">No</span><span>Account / Party</span><span>Sub-ledger</span><span className="text-right">Receipt</span><span className="text-right">Payment</span><span>Narration</span><span />
                   </div>
+                  {form.lines.map((l, i) => {
+                    const gl = ledgerById.get(l.generalLedgerId);
+                    const subs = (lk.subLedgers ?? []).filter((s) => String(s.generalLedgerId) === l.generalLedgerId);
+                    const subOptions: ReferenceOption[] = subs.map((s) => ({ value: String(s.id), label: `${s.code} — ${s.name}`, code: s.code, name: s.name, detail: gl ? `For ${gl.name}` : undefined, subtext: balanceSubtext(s.generalLedgerId, s.id), isActive: s.isActive }));
+                    const needSub = !!gl?.requiresSubLedger;
+                    const msg = (["account", "subLedger", "amount"] as const).map((k) => err(`lines.${i}.${k}`)).find(Boolean);
+                    const sel = gridRows.rowSel === i;
+                    return (
+                      <div key={l.key} data-row={i} className={`transition-colors ${sel ? "bg-cobalt-50 ring-2 ring-inset ring-cobalt-700" : msg ? "bg-rose-50" : "hover:bg-slate-50/80"}`}
+                        onMouseDown={(e) => {
+                          if ((e.target as HTMLElement).closest("input, button, [role=\"combobox\"], textarea, select, a")) return;
+                          const first = e.currentTarget.querySelector<HTMLElement>('[data-field^="L."]:not(:disabled)');
+                          if (first) { e.preventDefault(); first.focus(); }
+                        }}>
+                        <div style={{ gridTemplateColumns: TEMPLATE }} data-selected={sel} className="xl-row items-start">
+                          <button type="button" className="xl-rowhead" {...gridRows.rowHeadProps(i)}>{i + 1}</button>
+                          <MasterReferencePicker fieldName={`L.${i}.a`} label={`Line ${i + 1} account`} scopeKey="cash-bank-accounts" contextKey={String(p.companyId)} placeholder="Choose account / party…" value={l.generalLedgerId} hasError={!!err(`lines.${i}.account`)} selectedSubtext={l.generalLedgerId ? balanceSubtext(l.generalLedgerId) : undefined}
+                            options={accountOptions} disabled={ro} onChange={(v) => { patchLine(l.key, { generalLedgerId: v, subLedgerId: "" }); clear(`lines.${i}.account`, `lines.${i}.subLedger`); }} onCommit={gridRows.afterCombo} />
+                          <MasterReferencePicker fieldName={`L.${i}.s`} label={`Line ${i + 1} sub-ledger`} scopeKey="cash-bank-line-subledgers" contextKey={`${p.companyId}:${l.generalLedgerId || "none"}`} placeholder={!gl ? "—" : needSub ? (subOptions.length ? "Choose sub-ledger…" : "None yet") : subOptions.length ? "None (optional)" : "— not needed —"} required={needSub} value={l.subLedgerId} hasError={!!err(`lines.${i}.subLedger`)} selectedSubtext={l.subLedgerId && gl ? balanceSubtext(gl.id, l.subLedgerId) : undefined}
+                            options={subOptions} disabled={ro || !gl || (!needSub && subs.length === 0)} onChange={(v) => { patchLine(l.key, { subLedgerId: v }); clear(`lines.${i}.subLedger`); }} onCommit={gridRows.afterCombo} />
+                          <input data-field={`L.${i}.r`} aria-label={`Line ${i + 1} receipt`} inputMode="decimal" autoComplete="off" disabled={ro} placeholder="0.00" value={l.receipt} onChange={(e) => setAmount(l.key, "receipt", e.target.value)} onFocus={(e) => e.currentTarget.select()} className={`fld min-w-0 text-right font-mono tabular-nums ${err(`lines.${i}.amount`) ? "fld-err" : ""}`} />
+                          <input data-field={`L.${i}.p`} aria-label={`Line ${i + 1} payment`} inputMode="decimal" autoComplete="off" disabled={ro} placeholder="0.00" value={l.payment} onChange={(e) => setAmount(l.key, "payment", e.target.value)} onFocus={(e) => e.currentTarget.select()} className={`fld min-w-0 text-right font-mono tabular-nums ${err(`lines.${i}.amount`) ? "fld-err" : ""}`} />
+                          <input data-field={`L.${i}.n`} aria-label={`Line ${i + 1} narration`} autoComplete="off" disabled={ro} maxLength={MAX_NARRATION} value={l.narration} onChange={(e) => patchLine(l.key, { narration: e.target.value })} onFocus={(e) => e.currentTarget.select()} className="fld min-w-0" />
+                          <button type="button" data-nav="remove-line" tabIndex={-1} disabled={ro} onClick={() => removeLineAt(i)} aria-label={`Remove line ${i + 1}`} title="Remove line (Shift+Delete)" className="grid h-8 w-full place-items-center text-slate-400 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-30"><X size={14} /></button>
+                        </div>
+                        {msg && <p className="px-3 pb-1 pt-0.5 text-[12px] text-rose-700" role="alert">{msg}</p>}
+                      </div>
+                    );
+                  })}
                 </div>
-                {err("lines") && <p className="mt-1 text-[12px] text-rose-700">{err("lines")}</p>}
-                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                  <button type="button" data-nav className="btn" disabled={ro} onClick={() => setForm((f) => (f ? { ...f, lines: [...f.lines, blankLine()] } : f))}><Plus size={14} /> Add line</button>
-                  <p className="text-[12px] text-slate-500">Enter selects · Esc closes selector · Amounts can be entered in either Receipt or Payment <span className="lg-count ml-1">{entryCount} {entryCount === 1 ? "entry" : "entries"}</span></p>
+                {err("lines") && <p className="px-3 py-1.5 text-[12px] text-rose-700" role="alert">{err("lines")}</p>}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200 bg-slate-50 px-3 py-2">
+                  {!ro && <button type="button" data-nav="add-line" className="btn" onClick={addLine}><Plus size={13} /> Add line</button>}
+                  {!ro && <span className="text-[12px] text-slate-500">Enter moves on and opens a new line at the end · enter an amount in Receipt or Payment</span>}
+                  <span className="flex-1" />
+                  <span className="text-[12.5px] text-slate-600">Entries <b className="font-semibold tabular-nums text-ink">{entryCount}</b></span>
                 </div>
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-cobalt-50/40 px-3.5 py-2.5" aria-live="polite">
-                  <div><p className="text-[13px] font-semibold text-ink">Selected account balance</p><p className="text-[12px] text-slate-500">{activeLedger ? `${selectedBalanceName} as of voucher date` : "Current ledger / sub-ledger balance updates when a line is selected."}</p></div>
-                  <div className="text-right"><p className="text-[11px] uppercase tracking-wide text-slate-500">Current balance</p><p className="text-[13px] font-semibold tabular-nums text-ink">{selectedBalance ? balanceText(selectedBalance) : balanceStatus === "loading" ? "Balance loading…" : balanceStatus === "error" ? "Balance unavailable" : "—"}</p></div>
-                </div>
-              </FormSection>
-
-              <FormSection title="Balance summary" hint="Opening balance + receipts − payments">
-                <div className="grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 xl:grid-cols-4">
-                  {([["Opening balance", opening === null ? "—" : splitBalanceText(opening), ""], ["Total receipts", npr(totals.receipts), ""], ["Total payments", npr(totals.payments), ""], ["Closing balance", closing === null ? "—" : splitBalanceText(closing), `bg-cobalt-50/60 ${closing !== null && closing < 0n ? "text-amber-700" : "text-cobalt-800"}`]] as const).map(([label, value, cls]) => (
-                    <div key={label} className={`border-slate-200 px-3.5 py-2.5 xl:border-r last:border-r-0 ${cls}`}><p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p><p className="mt-0.5 text-[17px] font-semibold tabular-nums">{value}</p></div>
-                  ))}
-                </div>
-                <p className="mt-2 text-[12px] text-slate-500"><span className={`font-semibold ${closingTone}`}>● {closing === null ? "Balance pending" : closing >= 0n ? "In balance" : "Overdrawn"}</span>{" "}
-                  {closing === null ? "Choose a cash / bank ledger and a valid date to see the closing balance." : closing < 0n ? "Closing balance is negative. You can still save." : "Closing balance is positive. Receipt and payment lines are kept separate."}</p>
-              </FormSection>
-
-              <FormSection title="Remarks">
-                <TextField label="Remarks" name="remarks" value={form.remarks} onChange={(v) => { patch({ remarks: v }); clear("remarks"); }} readOnly={ro} max={MAX_REMARKS} placeholder="Optional note for this voucher…" error={err("remarks")} />
-              </FormSection>
+              </section>
             </div>
           )}
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-slate-200 bg-white px-5 py-2.5">
-          {!ro ? (
-            <>
-              <button data-nav className="btn" onClick={cancel}><X size={14} /> Cancel <span className="kbd">Esc</span></button>
-              <span className="flex-1" />
-              <button data-nav className="btn" disabled={saving} onClick={() => void save(false)}><Save size={14} /> Save draft <span className="kbd">Ctrl+S</span></button>
-              <button data-nav className="btn btn-primary" disabled={saving} onClick={() => void save(true)}><Check size={14} /> Save voucher</button>
-            </>
-          ) : (
-            <>
-              <button data-nav className="btn" onClick={newDoc}><Plus size={14} /> New <span className="kbd">F3</span></button>
-              <button data-nav className="btn" disabled={status !== "DRAFT"} onClick={edit}><Pencil size={14} /> Edit <span className="kbd">F2</span></button>
-              <button data-nav className="btn" disabled={status !== "DRAFT"} onClick={() => void askDelete()}><Trash2 size={14} /> Delete</button>
-              {status === "DRAFT" && <button data-nav className="btn btn-primary" onClick={() => void postDraft()}><Check size={14} /> Post voucher</button>}
-              {status === "POSTED" && !doc?.isReversal && <button data-nav className="btn" onClick={() => void reverse()}><Undo2 size={14} /> Reverse</button>}
-              {status === "REVERSED" && <span className="inline-flex items-center gap-1.5 text-[12px] text-rose-700"><Ban size={13} /> Reversed</span>}
-            </>
-          )}
-        </div>
+
+        {/* Always in view: opening balance, receipts, payments and the closing balance, beside the buttons. */}
+        <footer className="tape flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 px-5 py-2.5">
+          <div className="flex min-w-0 flex-1 flex-wrap items-end gap-x-6 gap-y-1" aria-live="polite" aria-label="Balance summary">
+            {summary.map((s) => (
+              <div key={s.label} className="min-w-0">
+                <div className="text-[12px] font-medium text-white/65">{s.label}</div>
+                <div className="truncate text-[15px] font-semibold leading-tight tabular-nums text-white">{s.value}</div>
+              </div>
+            ))}
+            <div className="flex min-w-0 items-end gap-3 border-l border-white/15 pl-6">
+              <div className="min-w-0">
+                <div className="text-[12px] font-medium text-white/65">Closing balance</div>
+                <div key={closing === null ? "none" : closing.toString()} className={`lg-settle truncate text-[22px] font-semibold leading-tight tabular-nums ${overdrawn ? "text-amber-300" : "text-brass"}`}>{closing === null ? "—" : splitBalanceText(closing)}</div>
+              </div>
+              {closingNote && <span role={overdrawn ? "alert" : "status"} className={`pb-0.5 text-[12px] ${overdrawn ? "text-amber-300" : "text-white/60"}`}>{closingNote}</span>}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {!ro ? (
+              <>
+                <button data-nav className="btn" onClick={cancel}><X size={14} /> Cancel</button>
+                <button data-nav className="btn" disabled={saving} onClick={() => void save(false)}><Save size={14} /> Save draft <span className="kbd">Ctrl+S</span></button>
+                <button data-nav className="btn btn-primary" disabled={saving} onClick={() => void save(true)}><Check size={14} /> Save voucher</button>
+              </>
+            ) : (
+              <>
+                <button data-nav className="btn" onClick={newDoc}><Plus size={14} /> New <span className="kbd">F3</span></button>
+                <button data-nav className="btn" disabled={status !== "DRAFT"} onClick={edit}><Pencil size={14} /> Edit <span className="kbd">F2</span></button>
+                <button data-nav className="btn" disabled={status !== "DRAFT"} onClick={() => void askDelete()}><Trash2 size={14} /> Delete</button>
+                {status === "DRAFT" && <button data-nav className="btn btn-primary" onClick={() => void postDraft()}><Check size={14} /> Post voucher</button>}
+                {status === "POSTED" && !doc?.isReversal && <button data-nav className="btn" onClick={() => void reverse()}><Undo2 size={14} /> Reverse</button>}
+                {status === "REVERSED" && <span className="inline-flex items-center gap-1.5 text-[12px] text-amber-300"><Ban size={13} /> Reversed</span>}
+              </>
+            )}
+          </div>
+        </footer>
       </section>
     </div>
   );
