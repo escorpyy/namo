@@ -41,8 +41,9 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
   const patch = (i: number, p: Partial<TermRow>) => { onChange(terms.map((t, k) => (k === i ? { ...t, ...p } : t))); clearError(...Object.keys(errors).filter((k) => k.startsWith(`T.${i}.`))); };
   const pick = (i: number, id: string) => {
     const m = masters.get(id);
-    const fixed = m?.isCalcTypeFixed, auto = m?.calcType === "ROUNDOFF";
-    patch(i, m ? { termId: id, nature: m.nature, calcType: m.calcType, rate: m.calcType === "PERCENT" ? (m.defaultValue ?? "") : "", inputAmount: m.calcType === "AMOUNT" ? (m.defaultValue ?? "") : "", isOverridden: false, overrideAmount: "", lineNumber: m.isProductwise ? String(fixedLineNumber ?? 1) : "", finalAmount: "" } : { termId: id, nature: undefined });
+    // A rounding term is worked out from the document total: it has no rate or amount to enter (the server treats it as AMOUNT).
+    const rounded = m?.category === "ROUNDED", calcType = rounded ? "AMOUNT" : m?.defaultCalcType;
+    patch(i, m ? { termId: id, nature: m.nature, calcType: calcType!, rate: !rounded && calcType === "PERCENT" ? (m.defaultValue ?? "") : "", inputAmount: !rounded && calcType === "AMOUNT" ? (m.defaultValue ?? "") : "", isOverridden: false, overrideAmount: "", lineNumber: m.isProductwise ? String(fixedLineNumber ?? 1) : "", finalAmount: "" } : { termId: id, nature: undefined });
   };
   const remove = (i: number, fromRowMode = false) => {
     const nextTerms = terms.filter((_, k) => k !== i);
@@ -87,8 +88,7 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
           {terms.map((t, i) => {
             const m = masters.get(t.termId);
             const off = readOnly;
-            const fixed = !!m?.isCalcTypeFixed;
-            const auto = m?.calcType === "ROUNDOFF";
+            const auto = m?.category === "ROUNDED"; // Round Off: amount and sign are worked out from the document total
             const noOwn = m?.category === "ROUNDED" || m?.isEditable === false; // Round Off is automatic; a term the master marks not editable cannot take an own amount
             const bad = (c: string) => !!errors[`T.${i}.${c}`];
             const cls = (c: string, extra = "") => `fld h-8 ${extra} ${bad(c) ? "fld-err" : ""} ${off ? "bg-slate-100 text-slate-600" : ""}`;
@@ -99,12 +99,12 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
                   <button type="button" className="xl-rowhead" {...gridRows.rowHeadProps(i)}>{i + 1}</button>
                   <MasterReferencePicker fieldName={`T.${i}.t`} label="Term" required scopeKey="terms" createMaster={{ key: "terms" }} contextKey={contextKey} placeholder="Choose term…" value={t.termId} hasError={bad("t")} options={opts} disabled={off} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
                   <input data-field={`T.${i}.l`} disabled={off || fixedLineNumber !== undefined} inputMode="numeric" value={fixedLineNumber === undefined ? t.lineNumber : String(fixedLineNumber)} placeholder={m?.isProductwise ? "Line" : "—"} onChange={decOnly(INT, (v) => patch(i, { lineNumber: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("l", "text-right tabular-nums")} aria-label={fixedLineNumber === undefined ? `Line number (1-${lineCount})` : `Line ${fixedLineNumber}`} />
-                  <select data-field={`T.${i}.c`} disabled={off || !m || fixed || auto} title={fixed ? "Fixed by the term master" : undefined} value={t.calcType} onChange={(e) => patch(i, { calcType: e.target.value as TermRow["calcType"] })} className={cls("c")} aria-label="Calculated as">
-                    <option value="PERCENT">Percent</option><option value="AMOUNT">Amount</option><option value="ROUNDOFF">Round off</option>
+                  <select data-field={`T.${i}.c`} disabled={off || !m || auto} value={t.calcType} onChange={(e) => patch(i, { calcType: e.target.value as TermRow["calcType"] })} className={cls("c")} aria-label="Calculated as">
+                    <option value="PERCENT">Percent</option><option value="AMOUNT">Amount</option>
                   </select>
-                  <input data-field={`T.${i}.v`} disabled={off || !m || fixed || auto} title={auto ? "Worked out automatically" : fixed ? "Fixed by the term master" : undefined} inputMode="decimal" autoComplete="off" placeholder={auto ? "Auto" : t.calcType === "PERCENT" ? "0.00 %" : "0.00"}
+                  <input data-field={`T.${i}.v`} disabled={off || !m || auto} title={auto ? "Worked out automatically" : undefined} inputMode="decimal" autoComplete="off" placeholder={auto ? "Auto" : t.calcType === "PERCENT" ? "0.00 %" : "0.00"}
                     value={t.calcType === "PERCENT" ? t.rate : t.inputAmount} onChange={decOnly(RATE, (v) => patch(i, t.calcType === "PERCENT" ? { rate: v } : { inputAmount: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("v", "text-right tabular-nums")} aria-label="Value" />
-                  <label className="flex items-center justify-center gap-1 px-2 text-[12px]"><input data-field={`T.${i}.ov`} type="checkbox" disabled={off || !m || fixed || noOwn} checked={t.isOverridden && !noOwn} onChange={(e) => patch(i, { isOverridden: e.target.checked, overrideAmount: e.target.checked ? t.overrideAmount : "" })} /> use own</label>
+                  <label className="flex items-center justify-center gap-1 px-2 text-[12px]"><input data-field={`T.${i}.ov`} type="checkbox" disabled={off || !m || noOwn} checked={t.isOverridden && !noOwn} onChange={(e) => patch(i, { isOverridden: e.target.checked, overrideAmount: e.target.checked ? t.overrideAmount : "" })} /> use own</label>
                   <input data-field={`T.${i}.o`} disabled={off || !t.isOverridden} inputMode="decimal" autoComplete="off" placeholder="0.00" value={t.overrideAmount} onChange={decOnly(RATE, (v) => patch(i, { overrideAmount: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("o", "text-right tabular-nums")} aria-label="Amount to use instead" />
                   {(() => {
                     const live = calculationPreview !== undefined;

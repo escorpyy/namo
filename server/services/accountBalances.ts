@@ -20,9 +20,13 @@ export interface AccountBalanceRow {
 }
 
 function signedPaise(value: string): bigint {
-  const m = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(value);
+  // The database sums numeric columns that carry more than two decimals (e.g. "500.000000"), so accept any number of
+  // decimals and round the magnitude half-up to whole paise.
+  const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(value);
   if (!m) throw new Error(`Unreadable account balance from the database: ${value}`);
-  const cents = BigInt(m[2]) * 100n + BigInt(((m[3] ?? "") + "00").slice(0, 2));
+  const frac = (m[3] ?? "") + "000";
+  let cents = BigInt(m[2]) * 100n + BigInt(frac.slice(0, 2));
+  if (frac.charCodeAt(2) >= 53) cents += 1n; // third decimal digit 5-9 rounds up
   return m[1] ? -cents : cents;
 }
 

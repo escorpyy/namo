@@ -135,6 +135,7 @@ interface ShellProps<F extends object> {
   s: DocScreen<F>;
   title: string;
   singular: string;
+  number?: string; // shown beside the title (a saved document in a workspace tab)
   branchName: string;
   fyCode: string;
   statusOptions: { value: string; label: string }[];
@@ -143,20 +144,21 @@ interface ShellProps<F extends object> {
   canEdit: boolean;
   canDelete: boolean;
   actions?: ReactNode; // workflow buttons shown for a saved document (Approve, Confirm, Post ...)
-  listRow: (r: PListRow) => ReactNode;
+  listRow?: (r: PListRow) => ReactNode; // not needed in a workspace tab: the workspace owns the list
   help: [string, string][];
   children: ReactNode;
 }
 
 // The frame every purchase document screen sits in: heading, the form (children), the buttons, and the document list on the right.
-export function DocShell<F extends object>({ s, title, singular, branchName, fyCode, statusOptions, pill, notice, canEdit, canDelete, actions, listRow, help, children }: ShellProps<F>) {
+export function DocShell<F extends object>({ s, title, singular, number, branchName, fyCode, statusOptions, pill, notice, canEdit, canDelete, actions, listRow, help, children }: ShellProps<F>) {
   const view = s.mode === "view";
   const onFormKey = formEnterKey;
+  const Root = s.tabbed ? "div" : "main"; // inside a workspace tab the workspace already is the <main>
   return (
     <>
-      <main className="ledger flex min-h-0 min-w-0 flex-1">
+      <Root className="ledger flex min-h-0 min-w-0 flex-1">
         <section data-purchase-document className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <DocHeader title={title} pill={pill} branchName={branchName} fyCode={fyCode} dirty={s.dirty} />
+          <DocHeader title={title} number={number} pill={pill} branchName={branchName} fyCode={fyCode} dirty={s.dirty} />
           {notice && <div className="shrink-0 px-5 pt-3">{notice}</div>}
           <div data-zone="form" onKeyDown={onFormKey} className="lg-scroll min-h-0 flex-1 overflow-y-auto px-5 py-4">
             {!s.lookups || !s.form ? <p className="p-2 text-slate-500">Loading…</p> : children}
@@ -178,7 +180,7 @@ export function DocShell<F extends object>({ s, title, singular, branchName, fyC
           </div>
         </section>
 
-        <aside id="purchase-document-list" data-zone="list" aria-label={`${title} document list`} className={`${s.listCollapsed ? "w-11" : "w-[min(340px,32vw)] min-w-[250px]"} flex min-h-0 shrink-0 flex-col overflow-hidden border-l border-slate-200 bg-white transition-[width] duration-150`}>
+        {!s.tabbed && <aside id="purchase-document-list" data-zone="list" aria-label={`${title} document list`} className={`${s.listCollapsed ? "w-11" : "w-[min(340px,32vw)] min-w-[250px]"} flex min-h-0 shrink-0 flex-col overflow-hidden border-l border-slate-200 bg-white transition-[width] duration-150`}>
           {s.listCollapsed ? (
             <div className="flex flex-col items-center gap-2 pt-2.5">
               <button data-list-toggle type="button" onClick={s.toggleList} aria-expanded={false} aria-controls="purchase-document-list" aria-label={`Expand ${singular.toLowerCase()} list (Alt+4)`} title={`Expand ${singular.toLowerCase()} list (Alt+4)`}
@@ -222,15 +224,15 @@ export function DocShell<F extends object>({ s, title, singular, branchName, fyC
                 {s.rows.length === 0 && <p className="p-4 text-[12px] text-slate-500">No {singular.toLowerCase()}s found.</p>}
                 {s.rows.map((r) => (
                   <button key={r.id} data-row aria-selected={r.id === s.selectedId} onClick={() => s.select(r.id)} className="lg-row min-w-0 break-words px-3.5 py-2.5">
-                    {listRow(r)}
+                    {listRow?.(r)}
                   </button>
                 ))}
               </div>
               <div className="shrink-0 break-words border-t border-slate-100 px-3.5 py-1.5 text-[12px] text-slate-500">{s.rows.length === s.total ? `${s.total} ${singular.toLowerCase()}(s)` : `Showing ${s.rows.length} of ${s.total}`}</div>
             </>
           )}
-        </aside>
-      </main>
+        </aside>}
+      </Root>
       {s.dialog && <Dialog spec={s.dialog} onClose={() => s.setDialog(null)} />}
       {s.help && <ShortcutsOverlay onClose={() => s.setHelp(false)} shortcuts={help} />}
     </>
