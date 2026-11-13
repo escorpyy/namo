@@ -1,10 +1,11 @@
+import { drCrText } from "../../lib/balanceText";
 import { useCallback, useMemo } from "react";
 import { Plus, X } from "lucide-react";
 import type { AccountBalance, JLookups } from "../../api";
 import { blankJLine, fmtAmt, isBlankJLine, jTotals, type JErrors, type JLine } from "../../lib/journalForm";
 import { fillDownRows } from "../../lib/tableKinds";
 import { MasterReferencePicker, type ReferenceOption } from "../MasterReferencePicker";
-import { focusStep, groupIN } from "../purchase/Bits";
+import { focusStep } from "../purchase/Bits";
 import { useGridRows } from "../table/useGridRows";
 
 // The lines of a journal voucher: S.No, General Ledger, Party Subledger (only for a ledger that has parties), Agent, Dr, Cr, Narration.
@@ -33,9 +34,9 @@ export function JournalLinesGrid({ lines, onChange, lookups, accountBalances, ba
   const balanceMap = useMemo(() => new Map((accountBalances ?? []).map((b) => [`${b.generalLedgerId}:${b.subLedgerId ?? ""}`, b])), [accountBalances]);
   const balanceText = useCallback((glId: number, subLedgerId: number | null = null) => {
     const b = balanceMap.get(`${glId}:${subLedgerId ?? ""}`);
-    if (b) return `Balance · Dr NPR ${groupIN(b.debit)} · Cr NPR ${groupIN(b.credit)}`;
+    if (b) return `Balance · ${drCrText(b.debit, b.credit)}`;
     if (!accountBalances) return balanceStatus === "loading" ? "Balance loading…" : balanceStatus === "error" ? "Balance unavailable" : "Select a valid voucher date";
-    return "Balance · Dr NPR 0.00 · Cr NPR 0.00";
+    return "Balance · NPR 0.00";
   }, [balanceMap, accountBalances, balanceStatus]);
   const ledgerOpts = useMemo<ReferenceOption[]>(() => lookups.ledgers.map((g) => ({ value: String(g.id), label: `${g.code} — ${g.name}`, code: g.code, name: g.name, detail: g.requiresSubLedger ? "Needs a party" : undefined, subtext: balanceText(g.id), isActive: g.isActive })), [lookups.ledgers, balanceText]);
   const agentOpts = useMemo<ReferenceOption[]>(() => lookups.agents.map((a) => ({ value: String(a.id), label: `${a.code} — ${a.name}`, code: a.code, name: a.name, isActive: a.isActive })), [lookups.agents]);

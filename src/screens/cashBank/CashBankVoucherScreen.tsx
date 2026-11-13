@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import { Ban, Check, Pencil, Plus, Save, Trash2, Undo2, X } from "lucide-react";
 import { accountBalancesApi, ApiError, cashBankApi, type AccountBalance, type CbDoc, type CbLookups, type CbStatus, type PDoc } from "../../api";
 import type { EntryTabProps } from "../../components/purchase/DocWorkspace";
+import { drCrText } from "../../lib/balanceText";
 import { useDialog } from "../../components/Dialog";
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
 import { DocHeader, Field, FormSection, Pill, focusStep, formEnterKey, groupIN } from "../../components/purchase/Bits";
@@ -41,8 +42,8 @@ const amountOk = (v: string) => /^\d{0,12}(\.\d{0,2})?$/.test(v);
 // "NPR 12,84,500.00" for an amount in paise.
 const npr = (p: bigint) => `NPR ${groupIN(formatPaise(p))}`;
 const netPaise = (b: AccountBalance | null) => (b ? (parseAmount(b.debit) ?? 0n) - (parseAmount(b.credit) ?? 0n) : null);
-const balanceText = (b: AccountBalance | null) => b ? `Dr NPR ${groupIN(b.debit)} · Cr NPR ${groupIN(b.credit)}` : "—";
-const splitBalanceText = (net: bigint) => `Dr NPR ${groupIN(formatPaise(net > 0n ? net : 0n))} · Cr NPR ${groupIN(formatPaise(net < 0n ? -net : 0n))}`;
+const balanceText = (b: AccountBalance | null) => b ? drCrText(b.debit, b.credit) : "—";
+const splitBalanceText = (net: bigint) => drCrText(formatPaise(net > 0n ? net : 0n), formatPaise(net < 0n ? -net : 0n));
 
 const toEntry = (l: Line): EntryInput => ({ generalLedgerId: l.generalLedgerId ? Number(l.generalLedgerId) : null, subLedgerId: l.subLedgerId ? Number(l.subLedgerId) : null, receipt: l.receipt, payment: l.payment, narration: l.narration });
 
@@ -279,7 +280,7 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
                   <div className="rounded-md border border-slate-200 bg-cobalt-50/50 px-3 py-2 xl:col-start-4 xl:row-span-2 xl:row-start-1" aria-live="polite">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Current account balance</p>
                     <p className="mt-0.5 text-[13px] font-semibold tabular-nums text-ink">{opening === null ? (balanceStatus === "loading" ? "Balance loading…" : balanceStatus === "error" ? "Balance unavailable" : "—") : splitBalanceText(opening)}</p>
-                    <p className="text-[11px] text-slate-500">{opening === null ? "Choose a ledger and a valid date" : "As of voucher date · Debit and credit"}</p>
+                    <p className="text-[11px] text-slate-500">{opening === null ? "Choose a ledger and a valid date" : "As of voucher date"}</p>
                   </div>
                 </div>
               </FormSection>
@@ -337,7 +338,7 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
                 </div>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-cobalt-50/40 px-3.5 py-2.5" aria-live="polite">
                   <div><p className="text-[13px] font-semibold text-ink">Selected account balance</p><p className="text-[12px] text-slate-500">{activeLedger ? `${selectedBalanceName} as of voucher date` : "Current ledger / sub-ledger balance updates when a line is selected."}</p></div>
-                  <div className="text-right"><p className="text-[11px] uppercase tracking-wide text-slate-500">Current balance · Dr / Cr</p><p className="text-[13px] font-semibold tabular-nums text-ink">{selectedBalance ? balanceText(selectedBalance) : balanceStatus === "loading" ? "Balance loading…" : balanceStatus === "error" ? "Balance unavailable" : "—"}</p></div>
+                  <div className="text-right"><p className="text-[11px] uppercase tracking-wide text-slate-500">Current balance</p><p className="text-[13px] font-semibold tabular-nums text-ink">{selectedBalance ? balanceText(selectedBalance) : balanceStatus === "loading" ? "Balance loading…" : balanceStatus === "error" ? "Balance unavailable" : "—"}</p></div>
                 </div>
               </FormSection>
 
