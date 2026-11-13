@@ -35,7 +35,8 @@ export async function accountBalances(
   o: AccountBalanceInput,
   tx: Pick<Tx, "execute"> = db,
 ): Promise<AccountBalanceRow[]> {
-  const asOf = parseDate(o.date, "date");
+  // postgres-js expects string/Buffer parameters for raw SQL; do not interpolate a JS Date object.
+  const asOf = parseDate(o.date, "date").toISOString().slice(0, 10);
   const raw = (await tx.execute(sql`
     WITH movements AS (
       SELECT ob."generalLedgerId" AS gl_id, ob."subLedgerId" AS sub_id, (ob."debit" - ob."credit") AS amount
