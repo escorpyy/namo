@@ -33,10 +33,12 @@ interface TProps {
   excludeCategory?: "COSTING";
   productwiseOnly?: boolean;
   fixedLineNumber?: number;
+  /** The rows are a fixed list (every active term, in sequence): no term can be removed, replaced or added; only the values change. */
+  fixedRows?: boolean;
 }
 
 // Billing terms: discount, VAT, freight ... The active preview is calculated by the same shared exact engine as the server.
-export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOnly, errors, clearError, contextKey, calculationPreview, previewError, category, excludeCategory, productwiseOnly, fixedLineNumber }: TProps) {
+export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOnly, errors, clearError, contextKey, calculationPreview, previewError, category, excludeCategory, productwiseOnly, fixedLineNumber, fixedRows }: TProps) {
   const opts = useMemo<ReferenceOption[]>(() => pickableTerms(lookups.terms, { category, excludeCategory, productwiseOnly }).map((t) => ({ value: String(t.id), label: `${t.code} — ${t.name}`, code: t.code, name: t.name, detail: `${t.category} · ${t.nature} · ${t.calcBase.replaceAll("_", " ")} · seq ${t.sequence}`, searchText: `${t.sequence} ${t.isProductwise ? "productwise" : "document"}`, isActive: t.isActive, badge: t.nature === "DEDUCTIVE" ? "less" : undefined })), [lookups.terms, category, excludeCategory, productwiseOnly]);
   const patch = (i: number, p: Partial<TermRow>) => { onChange(terms.map((t, k) => (k === i ? { ...t, ...p } : t))); clearError(...Object.keys(errors).filter((k) => k.startsWith(`T.${i}.`))); };
   const pick = (i: number, id: string) => {
@@ -61,13 +63,13 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
     count: terms.length, readOnly,
     firstCell: (grid, r) => grid.querySelector<HTMLElement>(`[data-field="T.${r}.t"]:not(:disabled)`),
     cellOf: (el) => { const m = /^T\.(\d+)\.(\w+)$/.exec(el.getAttribute("data-field") ?? ""); return m ? { row: Number(m[1]), col: m[2] } : null; },
-    onRemove: remove,
+    onRemove: remove, noRemove: fixedRows,
     cellSelector: '[data-field^="T."]', fieldOf: (r, c) => `T.${r}.${c}`, endOfRow: "continue",
-    onAddRow: add, lastRowBlank: () => isBlankTerm(terms[terms.length - 1]), leave: (el, dir) => focusStep(el, dir),
-    onFillRow: (r) => fillTerms(fillDownRows(terms, [r], TERM_FILL), r),
+    onAddRow: fixedRows ? undefined : add, lastRowBlank: () => isBlankTerm(terms[terms.length - 1]), leave: (el, dir) => focusStep(el, dir),
+    onFillRow: (r) => fillTerms(fillDownRows(terms, [r], fixedRows ? TERM_FILL.filter((k) => k !== "termId" && k !== "nature" && k !== "lineNumber") : TERM_FILL), r),
     onFillCell: (r, col) => {
       const above = terms[r - 1];
-      if (!above) return;
+      if (!above || (fixedRows && col === "t")) return;
       if (col === "t") { if (above.termId) pick(r, above.termId); return; }
       const one: Partial<TermRow> | undefined = col === "l" ? { lineNumber: above.lineNumber } : col === "c" ? { calcType: above.calcType }
         : col === "v" ? (terms[r].calcType === "PERCENT" ? { rate: above.calcType === "PERCENT" ? above.rate : above.inputAmount } : { inputAmount: above.calcType === "PERCENT" ? above.rate : above.inputAmount })
@@ -97,7 +99,7 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
               <div key={t.key} data-row={i} className={`border-b border-slate-100 transition-colors ${rowSel === i ? "bg-cobalt-50 ring-2 ring-inset ring-cobalt-700" : msg ? "bg-rose-50" : "hover:bg-slate-50/80"}`}>
                 <div style={{ gridTemplateColumns: TCOLS }} data-selected={rowSel === i} className="xl-row">
                   <button type="button" className="xl-rowhead" {...gridRows.rowHeadProps(i)}>{i + 1}</button>
-                  <MasterReferencePicker fieldName={`T.${i}.t`} label="Term" required scopeKey="terms" createMaster={{ key: "terms" }} contextKey={contextKey} placeholder="Choose term…" value={t.termId} hasError={bad("t")} options={opts} disabled={off} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
+                  <MasterReferencePicker fieldName={`T.${i}.t`} label="Term" required scopeKey="terms" createMaster={{ key: "terms" }} contextKey={contextKey} placeholder="Choose term…" value={t.termId} hasError={bad("t")} options={opts} disabled={off || fixedRows} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
                   <input data-field={`T.${i}.l`} disabled={off || fixedLineNumber !== undefined} inputMode="numeric" value={fixedLineNumber === undefined ? t.lineNumber : String(fixedLineNumber)} placeholder={m?.isProductwise ? "Line" : "—"} onChange={decOnly(INT, (v) => patch(i, { lineNumber: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("l", "text-right tabular-nums")} aria-label={fixedLineNumber === undefined ? `Line number (1-${lineCount})` : `Line ${fixedLineNumber}`} />
                   <select data-field={`T.${i}.c`} disabled={off || !m || auto} value={t.calcType} onChange={(e) => patch(i, { calcType: e.target.value as TermRow["calcType"] })} className={cls("c")} aria-label="Calculated as">
                     <option value="PERCENT">Percent</option><option value="AMOUNT">Amount</option>
@@ -117,7 +119,7 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
                     const shown = amount !== undefined && amount !== "" ? `${nature === "DEDUCTIVE" ? "− " : "+ "}${money(amount)}` : "—";
                     return <span className="text-right tabular-nums text-slate-700" title={formula} aria-label={`${m?.name ?? "Billing term"}: ${shown}. ${formula}`}>{shown}</span>;
                   })()}
-                  <button type="button" data-nav="remove-term" disabled={off} onClick={() => remove(i)} title="Remove term (Delete when the row is selected)" aria-label="Remove term" className="h-8 w-8 grid place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-2 focus-visible:outline-cobalt-700 disabled:opacity-30"><X size={14} /></button>
+                  {fixedRows ? <span /> : <button type="button" data-nav="remove-term" disabled={off} onClick={() => remove(i)} title="Remove term (Delete when the row is selected)" aria-label="Remove term" className="h-8 w-8 grid place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-2 focus-visible:outline-cobalt-700 disabled:opacity-30"><X size={14} /></button>}
                 </div>
                 {msg && <p className="border-b border-slate-200 px-3 py-1 text-[12px] text-rose-700">{msg}</p>}
               </div>
@@ -125,7 +127,7 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
           })}
         </div>
       </div>
-      {!readOnly && <div className="border-t border-slate-200 bg-slate-50 px-3 py-2.5"><button type="button" data-nav="add-term" className="btn" onClick={add}><Plus size={13} /> Add term</button></div>}
+      {!readOnly && !fixedRows && <div className="border-t border-slate-200 bg-slate-50 px-3 py-2.5"><button type="button" data-nav="add-term" className="btn" onClick={add}><Plus size={13} /> Add term</button></div>}
     </div>
   );
 }

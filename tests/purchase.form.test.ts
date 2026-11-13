@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDaysIso, alwaysShowTerms, blankLine, blankTerm, copyBillForm, dialogTermRows, dialogTermsToApply, isZeroTerm, pickableTerms, type Term } from "../src/lib/purchaseForm";
+import { addDaysIso, alwaysShowTerms, blankLine, blankTerm, copyBillForm, dialogTermRows, dialogTermsToApply, isHiddenTerm, isZeroTerm, pickableTerms, type Term } from "../src/lib/purchaseForm";
 
 // Copying a bill keeps what is worth re-using and drops everything that identifies the original or links it to other documents.
 describe("copyBillForm", () => {
@@ -105,13 +105,15 @@ describe("terms dialog rows", () => {
     expect(rows.map((r) => r.termId)).toEqual(["2", "6", "3"]);
     expect(rows[2]).toBe(saved);
   });
-  it("keeps a saved inactive term in its sequence slot, and a saved COSTING term (never offered) at the end", () => {
+  it("never shows an inactive term, even a saved one; a saved COSTING term (never offered) stays at the end", () => {
     const inactive = blankTerm({ termId: "4", lineNumber: "1", rate: "5" });
     const additional = blankTerm({ termId: "5", lineNumber: "1", rate: "2" });
     const rows = dialogTermRows(masters, [inactive, additional], { productwise: true, lineNumber: 1 });
-    expect(rows.map((r) => r.termId)).toEqual(["4", "2", "6", "3", "5"]);
-    expect(rows[0]).toBe(inactive);
-    expect(rows[4]).toBe(additional);
+    expect(rows.map((r) => r.termId)).toEqual(["2", "6", "3", "5"]);
+    expect(rows[3]).toBe(additional);
+    expect(isHiddenTerm(inactive, byId)).toBe(true);
+    expect(isHiddenTerm(additional, byId)).toBe(false);
+    expect(isHiddenTerm(blankTerm(), byId)).toBe(false);
   });
   it("treats an empty, zero or 0.00 value as zero, using the override when one is set", () => {
     expect(isZeroTerm(blankTerm({ termId: "2", rate: "" }))).toBe(true);

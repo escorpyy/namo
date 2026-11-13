@@ -11,7 +11,7 @@ import { DateField, TextField, VendorFields } from "../../components/purchase/He
 import { LinesGrid, TermsGrid } from "../../components/purchase/LinesGrid";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
 import {
-  addDaysIso, alwaysShowTerms, blankLine, copyBillForm, dateErr, defaultDate, dialogTermRows, dialogTermsToApply, effectiveQty, isBlankLine, isBlankTerm, isZeroTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
+  addDaysIso, alwaysShowTerms, blankLine, copyBillForm, dateErr, defaultDate, dialogTermRows, dialogTermsToApply, effectiveQty, isBlankLine, isBlankTerm, isHiddenTerm, isZeroTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
   type LineRow, type TermRow,
 } from "../../lib/purchaseForm";
 import { parseDec } from "../../../shared/decimal";
@@ -210,7 +210,8 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   };
   const applyTermDialog = () => {
     if (!f || !termDialog) return;
-    const preserved = f.terms.filter((term) => !isBlankTerm(term) && !isScopedTerm(term, termDialog));
+    // Outside this dialog's scope, or an inactive term the dialog never showed: both stay on the bill unchanged.
+    const preserved = f.terms.filter((term) => !isBlankTerm(term) && (!isScopedTerm(term, termDialog) || isHiddenTerm(term, masters)));
     const changed = dialogTermsToApply(termDraft, masters);
     s.patch({ terms: [...preserved, ...changed] });
     s.clearError(...Object.keys(s.errors).filter((key) => key === "terms" || key.startsWith("T.")));
@@ -761,7 +762,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
             </div>
             <div className="min-h-0 flex-1 overflow-auto p-3">
               <TermsGrid terms={termDraft} onChange={setTermDraft} lookups={lk} masters={masters} lineCount={liveLines} readOnly={ro} errors={dialogErrors} clearError={clearDialogError} contextKey={String(p.companyId)} calculationPreview={ro ? undefined : dialogPreview?.terms} previewError={dialogPreview?.message}
-                excludeCategory="COSTING" productwiseOnly={termDialog.scope === "line"} fixedLineNumber={termDialog.scope === "line" ? termDialog.lineNumber : undefined} />
+                excludeCategory="COSTING" productwiseOnly={termDialog.scope === "line"} fixedLineNumber={termDialog.scope === "line" ? termDialog.lineNumber : undefined} fixedRows={!ro} />
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-300 bg-slate-50 px-3 py-2">
               <span className="text-[12px] text-slate-600">{dialogFilled} term(s) with a value</span>

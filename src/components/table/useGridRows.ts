@@ -22,6 +22,8 @@ export interface GridRowsOptions {
   cellOf: (el: HTMLElement) => { row: number; col: string } | null;
   /** fromRowMode: Delete in row mode (the grid keeps focus) as opposed to Shift+Delete in a cell */
   onRemove: (row: number, fromRowMode: boolean) => void;
+  /** the rows are a fixed list: Delete / Shift+Delete do nothing */
+  noRemove?: boolean;
   onFillRow: (row: number) => void;
   onFillCell: (row: number, col: string) => void;
 
@@ -86,6 +88,7 @@ export function useGridRows(o: GridRowsOptions) {
         const c = o.firstCell(grid, r); if (c) reveal(c); return use();
       }
       if (o.readOnly) return false;
+      if (e.key === "Delete" && !ctrl && !e.altKey && o.noRemove) return use();
       if (e.key === "Delete" && !ctrl && !e.altKey) { o.onRemove(r, true); last.current = clamp(Math.min(r, o.count - 2)); setRowSel(last.current); return use(); }
       if (isD) { o.onFillRow(r); return use(); }
       return false;
@@ -112,7 +115,7 @@ export function useGridRows(o: GridRowsOptions) {
       return use();
     }
     if (o.readOnly) return false;
-    if (e.key === "Delete" && e.shiftKey) { o.onRemove(cell.row, false); return use(); }
+    if (e.key === "Delete" && e.shiftKey) { if (!o.noRemove) o.onRemove(cell.row, false); return use(); }
     if (isD) { o.onFillCell(cell.row, cell.col); return use(); }
     return false;
   };

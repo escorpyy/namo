@@ -208,10 +208,11 @@ const zeroTermRow = (m: Term, lineNumber?: number): TermRow => blankTerm({
 
 // The rows the terms dialog opens with: every active term of its kind (line-wise for a line, document-wise for the header) in the master's
 // sequence order. A term already on the document keeps its values; every other term starts at zero, so the user only types the ones that apply.
-// Terms already on the document that the picker would no longer offer (inactive, COSTING) stay visible at the end instead of vanishing.
+// An inactive term is never shown, even when the document already carries it (see isHiddenTerm: the document keeps it untouched). A saved COSTING
+// term, which the picker never offers, stays visible at the end instead of vanishing.
 export function dialogTermRows(masters: Term[], existing: TermRow[], scope: { productwise: boolean; lineNumber?: number }): TermRow[] {
   const offered = pickableTerms(masters, { excludeCategory: "COSTING", productwiseOnly: scope.productwise })
-    .filter((m) => m.isActive || existing.some((t) => t.termId === String(m.id)))
+    .filter((m) => m.isActive)
     .sort((a, b) => a.sequence - b.sequence || a.code.localeCompare(b.code));
   const used = new Set<string>();
   const rows = offered.map((m) => {
@@ -220,8 +221,12 @@ export function dialogTermRows(masters: Term[], existing: TermRow[], scope: { pr
     used.add(found.key);
     return found;
   });
-  return [...rows, ...existing.filter((t) => !used.has(t.key))];
+  const hidden = new Set(masters.filter((m) => !m.isActive).map((m) => String(m.id)));
+  return [...rows, ...existing.filter((t) => !used.has(t.key) && !hidden.has(t.termId))];
 }
+
+// A term row on a document whose master is now inactive: the terms dialog does not show it, and Apply must leave it on the document as it is.
+export const isHiddenTerm = (t: TermRow, masters: Map<string, Term>): boolean => !isBlankTerm(t) && masters.get(t.termId)?.isActive === false;
 
 // A term row that adds or takes nothing: the value it would use (override, rate or amount) is empty or zero.
 export function isZeroTerm(t: TermRow): boolean {

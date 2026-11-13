@@ -19,7 +19,6 @@ export function BatchDialog({ title, product, tracksBatch, tracksExpiry, value, 
   const [draft, setDraft] = useState<BatchValues>(value);
   const [error, setError] = useState("");
   const [errorField, setErrorField] = useState<BatchField | null>(null);
-  const [editingField, setEditingField] = useState<BatchField | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const fields: BatchField[] = [
     ...(tracksBatch ? ["batchNo" as const] : []),
@@ -81,15 +80,15 @@ export function BatchDialog({ title, product, tracksBatch, tracksExpiry, value, 
               const message = fieldError(field);
               if (message) { showFieldError(field, message); return; }
               if (index > 0) {
-                setError(""); setErrorField(null); setEditingField(null);
+                setError(""); setErrorField(null);
                 focusField(fields[index - 1]);
               }
               return;
             }
-            if (editingField !== field) { setError(""); setErrorField(null); setEditingField(field); return; }
+            // One Enter checks the field and moves on: no separate "start editing" press.
             const message = fieldError(field);
             if (message) { showFieldError(field, message); return; }
-            setError(""); setErrorField(null); setEditingField(null);
+            setError(""); setErrorField(null);
             const next = fields[index + 1];
             if (next) focusField(next);
             else root.current?.querySelector<HTMLElement>("[data-batch-apply]")?.focus();
@@ -110,16 +109,16 @@ export function BatchDialog({ title, product, tracksBatch, tracksExpiry, value, 
         <div className="grid grid-cols-2 gap-x-3 gap-y-3 p-3">
           {tracksBatch && (
             <label className="col-span-2 block text-[12px] font-medium text-slate-700">Batch no <span className="text-rose-600">*</span>
-              <input data-batch-field="batchNo" disabled={readOnly} readOnly={editingField !== "batchNo"} aria-invalid={errorField === "batchNo" || undefined} maxLength={50} autoComplete="off" value={draft.batchNo} onChange={(e) => set({ batchNo: e.target.value })} onFocus={(e) => e.currentTarget.select()} className={`fld mt-1 h-8 ${errorField === "batchNo" ? "fld-err" : ""} ${readOnly ? "bg-slate-100 text-slate-600" : editingField !== "batchNo" ? "bg-slate-50" : ""}`} />
+              <input data-batch-field="batchNo" disabled={readOnly} aria-invalid={errorField === "batchNo" || undefined} maxLength={50} autoComplete="off" value={draft.batchNo} onChange={(e) => set({ batchNo: e.target.value })} onFocus={(e) => e.currentTarget.select()} className={`fld mt-1 h-8 ${errorField === "batchNo" ? "fld-err" : ""} ${readOnly ? "bg-slate-100 text-slate-600" : ""}`} />
             </label>
           )}
           {tracksExpiry && (
             <>
               <div className="text-[12px] font-medium text-slate-700">Mfg date
-                <div className="mt-1"><DateInput fieldName="BD.mf" value={draft.manufactureDate} onChange={(v) => set({ manufactureDate: v })} calendar={calendar} hasError={errorField === "manufactureDate"} onBlurField={() => {}} disabled={readOnly} readOnly={editingField !== "manufactureDate"} /></div>
+                <div className="mt-1"><DateInput fieldName="BD.mf" value={draft.manufactureDate} onChange={(v) => set({ manufactureDate: v })} calendar={calendar} hasError={errorField === "manufactureDate"} onBlurField={() => {}} disabled={readOnly} /></div>
               </div>
               <div className="text-[12px] font-medium text-slate-700">Expiry date
-                <div className="mt-1"><DateInput fieldName="BD.ex" value={draft.expiryDate} onChange={(v) => set({ expiryDate: v })} calendar={calendar} hasError={errorField === "expiryDate"} onBlurField={() => {}} disabled={readOnly} readOnly={editingField !== "expiryDate"} /></div>
+                <div className="mt-1"><DateInput fieldName="BD.ex" value={draft.expiryDate} onChange={(v) => set({ expiryDate: v })} calendar={calendar} hasError={errorField === "expiryDate"} onBlurField={() => {}} disabled={readOnly} /></div>
               </div>
             </>
           )}
