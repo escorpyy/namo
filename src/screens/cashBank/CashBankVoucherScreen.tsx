@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Ban, Check, Pencil, Plus, Save, Search, Trash2, Undo2, X } from "lucide-react";
-import { ApiError, cashBankApi, type CbBalance, type CbDoc, type CbListRow, type CbLookups, type CbStatus } from "../../api";
+import { accountBalancesApi, ApiError, cashBankApi, type AccountBalance, type CbDoc, type CbListRow, type CbLookups, type CbStatus } from "../../api";
 import { useDialog } from "../../components/Dialog";
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
 import { DocHeader, Field, FormSection, Pill, focusStep, formEnterKey, groupIN } from "../../components/purchase/Bits";
@@ -37,9 +37,11 @@ const blankLine = (): Line => ({ key: ++keySeq, generalLedgerId: "", subLedgerId
 const sigOf = (f: Form) => JSON.stringify(f, (k, v) => (k === "key" ? undefined : v));
 const amountOk = (v: string) => /^\d{0,12}(\.\d{0,2})?$/.test(v);
 
-// "NPR 12,84,500.00" for a net balance in paise (a minus sign for a credit / overdrawn amount)
+// "NPR 12,84,500.00" for an amount in paise.
 const npr = (p: bigint) => `NPR ${groupIN(formatPaise(p))}`;
-const netPaise = (b: CbBalance | null) => (b ? (b.side === "CR" ? -1n : 1n) * (parseAmount(b.amount) ?? 0n) : null);
+const netPaise = (b: AccountBalance | null) => (b ? (parseAmount(b.debit) ?? 0n) - (parseAmount(b.credit) ?? 0n) : null);
+const balanceText = (b: AccountBalance | null) => b ? `Dr NPR ${groupIN(b.debit)} · Cr NPR ${groupIN(b.credit)}` : "—";
+const splitBalanceText = (net: bigint) => `Dr NPR ${groupIN(formatPaise(net > 0n ? net : 0n))} · Cr NPR ${groupIN(formatPaise(net < 0n ? -net : 0n))}`;
 
 const toEntry = (l: Line): EntryInput => ({ generalLedgerId: l.generalLedgerId ? Number(l.generalLedgerId) : null, subLedgerId: l.subLedgerId ? Number(l.subLedgerId) : null, receipt: l.receipt, payment: l.payment, narration: l.narration });
 
@@ -57,9 +59,8 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
   const [errors, setErrors] = useState<Errors>({});
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ text: string; kind: StatusInfo["kind"] }>({ text: "Loading…", kind: "info" });
-  const [headBal, setHeadBal] = useState<CbBalance | null>(null);
+  const [accountBalances, setAccountBalances] = useState<AccountBalance[] | null>(null);
   const [activeKey, setActiveKey] = useState<number | null>(null);
-  const [lineBal, setLineBal] = useState<CbBalance | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const ro = mode === "view";
@@ -88,7 +89,7 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
     payeeReference: d.payeeReference, remarks: d.remarks,
     lines: d.entries.length ? d.entries.map((e) => ({ key: ++keySeq, generalLedgerId: String(e.generalLedgerId), subLedgerId: e.subLedgerId ? String(e.subLedgerId) : "", receipt: e.receipt, payment: e.payment, narration: e.narration })) : [blankLine()],
   });
-  const show = (f: Form, m: Mode, d: CbDoc | null) => { setForm(f); setBaseSig(sigOf(f)); setMode(m); setDoc(d); setErrors({}); setActiveKey(null); setLineBal(null); };
+  const show = (f: Form, m: Mode, d: CbDoc | null) => { setForm(f); setBaseSig(sigOf(f)); setMode(m); setDoc(d); setErrors({}); setActiveKey(null); };
 
   useEffect(() => {
     let live = true;
@@ -105,28 +106,32 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
   const dateValid = !!form && !dateErr("Date", form.voucherDate, true);
   const bankId = form?.cashBankLedgerId ?? "", voucherDate = form?.voucherDate ?? "", docId = doc?.id;
   useEffect(() => {
-    if (!lk || !bankId || !dateValid) { setHeadBal(null); return; }
+    if (!lk || !dateValid) { setAccountBalances(null); return; }
     let live = true;
-    cashBankApi.balance({ companyId: p.companyId, branchId: p.branchId, fiscalYear: fyCodeFor(voucherDate), generalLedgerId: Number(bankId), date: voucherDate, excludeId: docId })
-      .then((b) => live && setHeadBal(b)).catch(() => live && setHeadBal(null));
-    return () => { live = false; };
-  }, [lk, bankId, voucherDate, dateValid, docId, p.companyId, p.branchId, fyCodeFor, doc?.status]);
-
-  const activeLedger = form?.lines.find((l) => l.key === activeKey)?.generalLedgerId ?? "";
-  useEffect(() => {
-    if (!lk || !activeLedger || !dateValid) { setLineBal(null); return; }
-    let live = true;
-    cashBankApi.balance({ companyId: p.companyId, branchId: p.branchId, fiscalYear: fyCodeFor(voucherDate), generalLedgerId: Number(activeLedger), date: voucherDate, excludeId: docId })
-      .then((b) => live && setLineBal(b)).catch(() => live && setLineBal(null));
-    return () => { live = false; };
-  }, [lk, activeLedger, voucherDate, dateValid, docId, p.companyId, p.branchId, fyCodeFor]);
+    setAccountBalances(null);
+    const timer = window.setTimeout(() => {
+      accountBalancesApi.get({ companyId: p.companyId, branchId: p.branchId, fiscalYear: fyCodeFor(voucherDate), date: voucherDate, excludeCashBankVoucherId: docId })
+        .then((r) => live && setAccountBalances(r.rows)).catch(() => live && setAccountBalances(null));
+    }, 120);
+    return () => { live = false; window.clearTimeout(timer); };
+  }, [lk, voucherDate, dateValid, docId, p.companyId, p.branchId, fyCodeFor]);
 
   // ---------- derived ----------
   const ledgers = lk?.ledgers ?? [];
-  const bankOptions = useMemo<ReferenceOption[]>(() => (lk?.cashBankLedgers ?? []).map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, detail: "Cash / bank ledger", isActive: l.isActive })), [lk]);
-  const accountOptions = useMemo<ReferenceOption[]>(() => ledgers.filter((l) => String(l.id) !== bankId).map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, detail: l.requiresSubLedger ? `${l.glType} · needs sub ledger` : `${l.glType} ledger`, isActive: l.isActive })), [ledgers, bankId]);
+  const balanceMap = useMemo(() => new Map((accountBalances ?? []).map((b) => [`${b.generalLedgerId}:${b.subLedgerId ?? ""}`, b])), [accountBalances]);
+  const accountBalance = useCallback((glId: string | number, subLedgerId: string | number | null = null): AccountBalance | null => {
+    if (!accountBalances) return null;
+    return balanceMap.get(`${glId}:${subLedgerId ?? ""}`) ?? { generalLedgerId: Number(glId), subLedgerId: subLedgerId === null ? null : Number(subLedgerId), debit: "0.00", credit: "0.00" };
+  }, [accountBalances, balanceMap]);
+  const balanceSubtext = useCallback((glId: string | number, subLedgerId: string | number | null = null) => {
+    const b = accountBalance(glId, subLedgerId);
+    return b ? `Balance · ${balanceText(b)}` : undefined;
+  }, [accountBalance]);
+  const bankOptions = useMemo<ReferenceOption[]>(() => (lk?.cashBankLedgers ?? []).map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, detail: "Cash / bank ledger", subtext: balanceSubtext(l.id), isActive: l.isActive })), [lk, balanceSubtext]);
+  const accountOptions = useMemo<ReferenceOption[]>(() => ledgers.filter((l) => String(l.id) !== bankId).map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, detail: l.requiresSubLedger ? `${l.glType} · needs sub ledger` : `${l.glType} ledger`, subtext: balanceSubtext(l.id), isActive: l.isActive })), [ledgers, bankId, balanceSubtext]);
   const ledgerById = useMemo(() => new Map(ledgers.map((l) => [String(l.id), l])), [ledgers]);
   const totals = useMemo(() => entryTotals((form?.lines ?? []).map(toEntry)), [form]);
+  const headBal = bankId ? accountBalance(bankId) : null;
   const opening = netPaise(headBal);
   const closing = opening === null ? null : closingBalance(opening, totals.receipts, totals.payments);
   const entryCount = (form?.lines ?? []).filter((l) => !isBlankEntry(toEntry(l))).length;
@@ -134,6 +139,13 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
   const bankLedger = lk?.cashBankLedgers.find((l) => String(l.id) === bankId);
   const bankSubs = (lk?.subLedgers ?? []).filter((s) => String(s.generalLedgerId) === bankId);
   const bankNeedsSub = !!bankLedger?.requiresSubLedger;
+  const bankSubOptions = useMemo<ReferenceOption[]>(() => bankSubs.map((s) => ({ value: String(s.id), label: `${s.code} — ${s.name}`, code: s.code, name: s.name, detail: bankLedger ? `For ${bankLedger.name}` : undefined, subtext: balanceSubtext(s.generalLedgerId, s.id), isActive: s.isActive })), [bankSubs, bankLedger, balanceSubtext]);
+  const activeLine = form?.lines.find((l) => l.key === activeKey);
+  const activeLedger = activeLine?.generalLedgerId ?? "";
+  const activeSubLedger = activeLine?.subLedgerId ?? "";
+  const selectedBalance = activeLedger ? accountBalance(activeLedger, activeSubLedger || null) : null;
+  const selectedSub = lk?.subLedgers.find((s) => String(s.id) === activeSubLedger);
+  const selectedBalanceName = selectedSub?.name ?? ledgerById.get(activeLedger)?.name ?? "";
 
   // ---------- editing ----------
   const patch = (c: Partial<Form>) => setForm((f) => (f ? { ...f, ...c } : f));
@@ -263,16 +275,14 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
                   </Field>
                   {(bankNeedsSub || bankSubs.length > 0) && (
                     <Field label={bankNeedsSub ? "Bank Sub Ledger" : "Bank Sub Ledger (optional)"} required={bankNeedsSub} error={err("cashBankSubLedgerId")} className="sm:col-span-2 xl:col-span-1 xl:col-start-3 xl:row-start-2">
-                      <select data-field="cashBankSubLedgerId" disabled={ro} value={form.cashBankSubLedgerId} onChange={(e) => { patch({ cashBankSubLedgerId: e.target.value }); clear("cashBankSubLedgerId"); }} className={`fld min-w-0 ${err("cashBankSubLedgerId") ? "fld-err" : ""}`}>
-                        <option value="">{bankNeedsSub ? "— Choose —" : "— None —"}</option>
-                        {bankSubs.map((sl) => <option key={sl.id} value={sl.id}>{sl.code} — {sl.name}</option>)}
-                      </select>
+                      <MasterReferencePicker fieldName="cashBankSubLedgerId" label="Bank sub-ledger" scopeKey="cash-bank-bank-subledgers" contextKey={`${p.companyId}:${bankId || "none"}`} placeholder={bankNeedsSub ? "Choose sub-ledger…" : "None"} required={bankNeedsSub} value={form.cashBankSubLedgerId} hasError={!!err("cashBankSubLedgerId")}
+                        options={bankSubOptions} disabled={ro} onChange={(v) => { patch({ cashBankSubLedgerId: v }); clear("cashBankSubLedgerId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
                     </Field>
                   )}
                   <div className="rounded-md border border-slate-200 bg-cobalt-50/50 px-3 py-2 xl:col-start-4 xl:row-span-2 xl:row-start-1" aria-live="polite">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Current account balance</p>
-                    <p className="mt-0.5 text-[17px] font-semibold tabular-nums text-ink">{opening === null ? "—" : npr(opening)}</p>
-                    <p className="text-[11px] text-slate-500">{opening === null ? "Choose a ledger and a valid date" : opening < 0n ? "Credit (overdrawn) as of voucher date" : "As of voucher date"}</p>
+                    <p className="mt-0.5 text-[13px] font-semibold tabular-nums text-ink">{opening === null ? "—" : splitBalanceText(opening)}</p>
+                    <p className="text-[11px] text-slate-500">{opening === null ? "Choose a ledger and a valid date" : "As of voucher date · Debit and credit"}</p>
                   </div>
                 </div>
               </FormSection>
@@ -301,6 +311,7 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
                       {form.lines.map((l, i) => {
                         const gl = ledgerById.get(l.generalLedgerId);
                         const subs = (lk.subLedgers ?? []).filter((s) => String(s.generalLedgerId) === l.generalLedgerId);
+                        const subOptions: ReferenceOption[] = subs.map((s) => ({ value: String(s.id), label: `${s.code} — ${s.name}`, code: s.code, name: s.name, detail: gl ? `For ${gl.name}` : undefined, subtext: balanceSubtext(s.generalLedgerId, s.id), isActive: s.isActive }));
                         const needSub = !!gl?.requiresSubLedger;
                         return (
                           <div key={l.key} className="border-b border-slate-100 py-1" onFocusCapture={() => setActiveKey(l.key)}>
@@ -308,10 +319,8 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
                               <span className="grid h-6 w-6 place-items-center rounded bg-slate-100 text-[11px] font-semibold text-slate-600">{String(i + 1).padStart(2, "0")}</span>
                               <MasterReferencePicker fieldName={`account-${i}`} label={`Line ${i + 1} account`} scopeKey="cash-bank-accounts" contextKey={String(p.companyId)} placeholder="Choose account / party…" value={l.generalLedgerId} hasError={!!err(`lines.${i}.account`)}
                                 options={accountOptions} disabled={ro} onChange={(v) => { patchLine(l.key, { generalLedgerId: v, subLedgerId: "" }); clear(`lines.${i}.account`, `lines.${i}.subLedger`); }} onCommit={(el, dir) => focusStep(el, dir)} />
-                              <select data-field={`sub-${i}`} aria-label={`Line ${i + 1} sub-ledger`} disabled={ro || (!needSub && subs.length === 0)} value={l.subLedgerId} onChange={(e) => { patchLine(l.key, { subLedgerId: e.target.value }); clear(`lines.${i}.subLedger`); }} className={`fld min-w-0 ${err(`lines.${i}.subLedger`) ? "fld-err" : ""}`}>
-                                <option value="">{needSub ? "— Choose —" : subs.length ? "— None —" : "— Not required —"}</option>
-                                {subs.map((s) => <option key={s.id} value={s.id}>{s.code} — {s.name}</option>)}
-                              </select>
+                              <MasterReferencePicker fieldName={`sub-${i}`} label={`Line ${i + 1} sub-ledger`} scopeKey="cash-bank-line-subledgers" contextKey={`${p.companyId}:${l.generalLedgerId || "none"}`} placeholder={!gl ? "—" : needSub ? (subOptions.length ? "Choose sub-ledger…" : "None yet") : subOptions.length ? "None (optional)" : "— not needed —"} required={needSub} value={l.subLedgerId} hasError={!!err(`lines.${i}.subLedger`)}
+                                options={subOptions} disabled={ro || !gl || (!needSub && subs.length === 0)} onChange={(v) => { patchLine(l.key, { subLedgerId: v }); clear(`lines.${i}.subLedger`); }} onCommit={(el, dir) => focusStep(el, dir)} />
                               <input data-field={`receipt-${i}`} aria-label={`Line ${i + 1} receipt`} inputMode="decimal" autoComplete="off" disabled={ro} placeholder="0.00" value={l.receipt} onChange={(e) => setAmount(l.key, "receipt", e.target.value)} onFocus={(e) => e.currentTarget.select()} className={`fld min-w-0 text-right tabular-nums ${err(`lines.${i}.amount`) ? "fld-err" : ""}`} />
                               <input data-field={`payment-${i}`} aria-label={`Line ${i + 1} payment`} inputMode="decimal" autoComplete="off" disabled={ro} placeholder="0.00" value={l.payment} onChange={(e) => setAmount(l.key, "payment", e.target.value)} onFocus={(e) => e.currentTarget.select()} className={`fld min-w-0 text-right tabular-nums ${err(`lines.${i}.amount`) ? "fld-err" : ""}`} />
                               <input data-field={`narration-${i}`} aria-label={`Line ${i + 1} narration`} autoComplete="off" disabled={ro} maxLength={MAX_NARRATION} value={l.narration} onChange={(e) => patchLine(l.key, { narration: e.target.value })} onFocus={(e) => e.currentTarget.select()} className="fld min-w-0" />
@@ -330,14 +339,14 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
                   <p className="text-[12px] text-slate-500">Enter selects · Esc closes selector · Amounts can be entered in either Receipt or Payment <span className="lg-count ml-1">{entryCount} {entryCount === 1 ? "entry" : "entries"}</span></p>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-cobalt-50/40 px-3.5 py-2.5" aria-live="polite">
-                  <div><p className="text-[13px] font-semibold text-ink">Selected account balance</p><p className="text-[12px] text-slate-500">{activeLedger ? `${ledgerById.get(activeLedger)?.name ?? ""} as of voucher date` : "Current ledger / party balance updates when a line is selected."}</p></div>
-                  <div className="text-right"><p className="text-[11px] uppercase tracking-wide text-slate-500">Current balance</p><p className="text-[14px] font-semibold tabular-nums text-ink">{lineBal ? npr(netPaise(lineBal)!) : "NPR 0.00"}</p></div>
+                  <div><p className="text-[13px] font-semibold text-ink">Selected account balance</p><p className="text-[12px] text-slate-500">{activeLedger ? `${selectedBalanceName} as of voucher date` : "Current ledger / sub-ledger balance updates when a line is selected."}</p></div>
+                  <div className="text-right"><p className="text-[11px] uppercase tracking-wide text-slate-500">Current balance · Dr / Cr</p><p className="text-[13px] font-semibold tabular-nums text-ink">{balanceText(selectedBalance)}</p></div>
                 </div>
               </FormSection>
 
               <FormSection title="Balance summary" hint="Opening balance + receipts − payments">
                 <div className="grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 xl:grid-cols-4">
-                  {([["Opening balance", opening === null ? "—" : groupIN(formatPaise(opening)), ""], ["Total receipts", groupIN(formatPaise(totals.receipts)), ""], ["Total payments", groupIN(formatPaise(totals.payments)), ""], ["Closing balance", closing === null ? "—" : groupIN(formatPaise(closing)), `bg-cobalt-50/60 ${closing !== null && closing < 0n ? "text-amber-700" : "text-cobalt-800"}`]] as const).map(([label, value, cls]) => (
+                  {([["Opening balance", opening === null ? "—" : splitBalanceText(opening), ""], ["Total receipts", npr(totals.receipts), ""], ["Total payments", npr(totals.payments), ""], ["Closing balance", closing === null ? "—" : splitBalanceText(closing), `bg-cobalt-50/60 ${closing !== null && closing < 0n ? "text-amber-700" : "text-cobalt-800"}`]] as const).map(([label, value, cls]) => (
                     <div key={label} className={`border-slate-200 px-3.5 py-2.5 xl:border-r last:border-r-0 ${cls}`}><p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p><p className="mt-0.5 text-[17px] font-semibold tabular-nums">{value}</p></div>
                   ))}
                 </div>

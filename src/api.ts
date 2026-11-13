@@ -131,6 +131,12 @@ export interface PWrite<D = PDoc> { result: Record<string, any>; document: D }
 const qstr = (o: Record<string, string | number | undefined | null>) =>
   Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&");
 
+export interface AccountBalance { generalLedgerId: number; subLedgerId: number | null; debit: string; credit: string }
+export const accountBalancesApi = {
+  get: (p: { companyId: number; branchId: number; fiscalYear: string; date: string; excludeJournalVoucherId?: number; excludeCashBankVoucherId?: number }) =>
+    req<{ rows: AccountBalance[] }>(`/api/account-balances?${qstr(p)}`),
+};
+
 // ---- Journal voucher ------------------------------------------------------------------------------------------------------------
 export interface JLookups {
   ledgers: { id: number; code: string; name: string; requiresSubLedger: boolean; isActive: boolean }[];

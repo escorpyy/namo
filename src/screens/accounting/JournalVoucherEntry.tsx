@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { createPortal } from "react-dom";
 import { Copy, Pencil, Plus, Printer, RotateCcw, Save, Send, Trash2, X } from "lucide-react";
-import { journalApi, type JDoc, type JLookups, type PDoc, type PLookups } from "../../api";
+import { accountBalancesApi, journalApi, type AccountBalance, type JDoc, type JLookups, type PDoc, type PLookups } from "../../api";
 import { Dialog } from "../../components/Dialog";
 import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
 import { JournalLinesGrid } from "../../components/journal/JournalLinesGrid";
@@ -50,6 +50,7 @@ export interface JournalEntryProps extends PurchaseScreenProps {
 export default function JournalVoucherEntry(p: JournalEntryProps) {
   const reasonRef = useRef("");
   const lkRef = useRef<JLookups | null>(null);
+  const [accountBalances, setAccountBalances] = useState<AccountBalance[] | null>(null);
   const cfg = useMemo<DocConfig<JForm>>(() => ({
     kind: "journal", api: journalDocApi, title: "Journal Voucher", singular: "Voucher", statusOptions: J_OPTIONS,
     emptyForm: (lk) => ({ numberSeriesId: "", docNumber: "", voucherDate: defaultDate((lk as unknown as JLookups).fiscalYears.find((y) => y.code === p.fyCode)), remarks: "", lines: emptyJLines() }),
@@ -69,6 +70,20 @@ export default function JournalVoucherEntry(p: JournalEntryProps) {
   });
   const f = s.form, lk = p.lookups, doc = s.doc as unknown as JDoc | null, ro = s.readOnly;
   lkRef.current = lk;
+
+  useEffect(() => {
+    const date = f?.voucherDate;
+    if (!date) { setAccountBalances(null); return; }
+    let live = true;
+    setAccountBalances(null);
+    const fiscalYear = lk.fiscalYears.find((y) => y.startDate <= date && date <= y.endDate)?.code ?? p.fyCode;
+    const timer = window.setTimeout(() => {
+      accountBalancesApi.get({ companyId: p.companyId, branchId: p.branchId, fiscalYear, date, excludeJournalVoucherId: doc?.id })
+        .then((r) => { if (live) setAccountBalances(r.rows); })
+        .catch(() => { if (live) setAccountBalances(null); });
+    }, 150);
+    return () => { live = false; window.clearTimeout(timer); };
+  }, [f?.voucherDate, lk.fiscalYears, p.companyId, p.branchId, p.fyCode, doc?.id]);
 
   useEffect(() => { p.onMeta(p.tabId, { title: doc ? doc.voucherNumber : "New voucher", dirty: s.dirty, docId: doc?.id ?? null }); }, [doc?.voucherNumber, doc?.id, s.dirty, p.tabId]);
 
@@ -175,7 +190,7 @@ export default function JournalVoucherEntry(p: JournalEntryProps) {
             <DateField label="Date" name="voucherDate" value={f.voucherDate} onChange={(v) => { s.patch({ voucherDate: v }); s.clearError("voucherDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("voucherDate")} required />
           </div>
           <div className="flex min-h-0 flex-1 flex-col">
-            <JournalLinesGrid lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} readOnly={ro} errors={s.errors} clearError={s.clearError} contextKey={String(p.companyId)} />
+            <JournalLinesGrid lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} accountBalances={accountBalances} readOnly={ro} errors={s.errors} clearError={s.clearError} contextKey={String(p.companyId)} />
           </div>
           <div className="shrink-0">
             <Field label="Remarks (for the whole voucher)" error={s.err("remarks")}>

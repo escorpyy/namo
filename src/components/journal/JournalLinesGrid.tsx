@@ -1,10 +1,10 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { Plus, X } from "lucide-react";
-import type { JLookups } from "../../api";
+import type { AccountBalance, JLookups } from "../../api";
 import { blankJLine, fmtAmt, isBlankJLine, jTotals, type JErrors, type JLine } from "../../lib/journalForm";
 import { fillDownRows } from "../../lib/tableKinds";
 import { MasterReferencePicker, type ReferenceOption } from "../MasterReferencePicker";
-import { focusStep } from "../purchase/Bits";
+import { focusStep, groupIN } from "../purchase/Bits";
 import { useGridRows } from "../table/useGridRows";
 
 // The lines of a journal voucher: S.No, General Ledger, Party Subledger (only for a ledger that has parties), Agent, Dr, Cr, Narration.
@@ -21,14 +21,20 @@ interface Props {
   lines: JLine[];
   onChange: (l: JLine[]) => void;
   lookups: JLookups;
+  accountBalances: AccountBalance[] | null;
   readOnly: boolean;
   errors: JErrors;
   clearError: (...k: string[]) => void;
   contextKey: string;
 }
 
-export function JournalLinesGrid({ lines, onChange, lookups, readOnly, errors, clearError, contextKey }: Props) {
-  const ledgerOpts = useMemo<ReferenceOption[]>(() => lookups.ledgers.map((g) => ({ value: String(g.id), label: `${g.code} — ${g.name}`, code: g.code, name: g.name, detail: g.requiresSubLedger ? "Needs a party" : undefined, isActive: g.isActive })), [lookups.ledgers]);
+export function JournalLinesGrid({ lines, onChange, lookups, accountBalances, readOnly, errors, clearError, contextKey }: Props) {
+  const balanceMap = useMemo(() => new Map((accountBalances ?? []).map((b) => [`${b.generalLedgerId}:${b.subLedgerId ?? ""}`, b])), [accountBalances]);
+  const balanceText = useCallback((glId: number, subLedgerId: number | null = null) => {
+    const b = balanceMap.get(`${glId}:${subLedgerId ?? ""}`);
+    return b ? `Balance · Dr NPR ${groupIN(b.debit)} · Cr NPR ${groupIN(b.credit)}` : accountBalances ? "Balance · Dr NPR 0.00 · Cr NPR 0.00" : undefined;
+  }, [balanceMap, accountBalances]);
+  const ledgerOpts = useMemo<ReferenceOption[]>(() => lookups.ledgers.map((g) => ({ value: String(g.id), label: `${g.code} — ${g.name}`, code: g.code, name: g.name, detail: g.requiresSubLedger ? "Needs a party" : undefined, subtext: balanceText(g.id), isActive: g.isActive })), [lookups.ledgers, balanceText]);
   const agentOpts = useMemo<ReferenceOption[]>(() => lookups.agents.map((a) => ({ value: String(a.id), label: `${a.code} — ${a.name}`, code: a.code, name: a.name, isActive: a.isActive })), [lookups.agents]);
   const ledgers = useMemo(() => new Map(lookups.ledgers.map((g) => [String(g.id), g])), [lookups.ledgers]);
 
@@ -112,7 +118,7 @@ export function JournalLinesGrid({ lines, onChange, lookups, readOnly, errors, c
           {lines.map((l, i) => {
             const g = ledgers.get(l.glId);
             const needsSub = !!g?.requiresSubLedger, subs = g ? lookups.subLedgers.filter((s) => s.generalLedgerId === g.id) : [];
-            const subOpts: ReferenceOption[] = subs.map((s) => ({ value: String(s.id), label: `${s.code} — ${s.name}`, code: s.code, name: s.name, detail: g ? `For ${g.name}` : undefined, isActive: s.isActive }));
+            const subOpts: ReferenceOption[] = subs.map((s) => ({ value: String(s.id), label: `${s.code} — ${s.name}`, code: s.code, name: s.name, detail: g ? `For ${g.name}` : undefined, subtext: balanceText(g!.id, s.id), isActive: s.isActive }));
             const bad = (c: string) => !!errors[`L.${i}.${c}`];
             const msgs = Object.entries(errors).filter(([k, v]) => k.startsWith(`L.${i}.`) && v).map(([, v]) => v!);
             return (

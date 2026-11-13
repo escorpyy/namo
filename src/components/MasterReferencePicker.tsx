@@ -12,6 +12,7 @@ export interface ReferenceOption {
   code?: string;
   name?: string;
   detail?: string;
+  subtext?: string;
   searchText?: string;
   isActive?: boolean;
 }
@@ -108,7 +109,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
       if (view === "frequent" && (usageCounts[option.value] ?? 0) < 2) return false;
       const code = textOf(option.code ?? option.short);
       const name = textOf(option.name ?? option.label);
-      const haystack = textOf([option.label, option.short, option.code, option.name, option.detail, option.searchText, option.badge].filter(Boolean).join(" "));
+      const haystack = textOf([option.label, option.short, option.code, option.name, option.detail, option.subtext, option.searchText, option.badge].filter(Boolean).join(" "));
       return (!q || haystack.includes(q)) && (!c || code.includes(c)) && (!n || name.includes(n));
     }).sort((a, b) => {
       if (!q && !c && !n) {
@@ -357,6 +358,7 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
         />
         <ChevronDown size={14} aria-hidden="true" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
       </div>
+      {current?.subtext && <p className="mt-0.5 truncate text-[10.5px] leading-tight text-slate-500" title={current.subtext}>{current.subtext}</p>}
 
       {open && (
         <div className="fixed inset-0 z-[100] grid place-items-center bg-black/40 p-0 sm:p-5" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDialog(); }}>
@@ -486,7 +488,10 @@ export function MasterReferencePicker({ fieldName, label, value, options, onChan
                         className={`grid cursor-pointer grid-cols-[minmax(70px,0.7fr)_minmax(120px,1.5fr)_64px] gap-2 border-b border-slate-100 px-3 py-3 text-sm last:border-b-0 hover:bg-blue-50 sm:grid-cols-[minmax(90px,0.8fr)_minmax(150px,1.5fr)_minmax(100px,1fr)_76px] ${index === activeIndex ? "bg-blue-100 outline outline-2 -outline-offset-2 outline-blue-600" : ""} ${isCurrent ? "font-semibold" : ""}`}
                       >
                         <span className="min-w-0 break-words font-mono text-[12px]">{code}{isRecent && <span className="ml-1 font-sans text-[10px] font-normal text-blue-700">Recent</span>}{isFrequent && <span className="ml-1 font-sans text-[10px] font-normal text-slate-600">Often used</span>}</span>
-                        <span className="min-w-0 break-words">{name}{option.badge && <span className="ml-2 inline-block rounded border border-slate-300 px-1 text-[10px] font-normal text-slate-600">{option.badge}</span>}</span>
+                        <span className="min-w-0 break-words">
+                          <span className="block">{name}{option.badge && <span className="ml-2 inline-block rounded border border-slate-300 px-1 text-[10px] font-normal text-slate-600">{option.badge}</span>}</span>
+                          {option.subtext && <span className="mt-0.5 block text-[11px] font-normal leading-snug text-slate-500">{option.subtext}</span>}
+                        </span>
                         <span className="hidden min-w-0 break-words text-xs text-slate-600 sm:block">{option.detail || "—"}</span>
                         <span className={`text-xs ${option.isActive === false ? "font-medium text-amber-800" : "text-slate-500"}`}>{option.isActive === false ? "Inactive" : "Active"}{isCurrent ? " · Current" : ""}</span>
                       </div>
