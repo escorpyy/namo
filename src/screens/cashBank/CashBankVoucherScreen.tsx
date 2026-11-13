@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { Ban, Check, Pencil, Plus, Save, Search, Trash2, Undo2, X } from "lucide-react";
-import { accountBalancesApi, ApiError, cashBankApi, type AccountBalance, type CbDoc, type CbListRow, type CbLookups, type CbStatus } from "../../api";
+import { Ban, Check, Pencil, Plus, Save, Trash2, Undo2, X } from "lucide-react";
+import { accountBalancesApi, ApiError, cashBankApi, type AccountBalance, type CbDoc, type CbLookups, type CbStatus, type PDoc } from "../../api";
+import type { EntryTabProps } from "../../components/purchase/DocWorkspace";
 import { useDialog } from "../../components/Dialog";
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
 import { DocHeader, Field, FormSection, Pill, focusStep, formEnterKey, groupIN } from "../../components/purchase/Bits";
@@ -22,19 +23,19 @@ export interface CashBankScreenProps {
 }
 
 interface Line { key: number; generalLedgerId: string; subLedgerId: string; receipt: string; payment: string; narration: string }
-interface Form {
+export interface CbForm {
   voucherDate: string; cashBankLedgerId: string; cashBankSubLedgerId: string; instrumentType: string; chequeNumber: string; chequeDate: string; payeeReference: string; remarks: string; lines: Line[];
 }
 type Errors = Record<string, string | undefined>;
 
-const TONE: Record<CbStatus, "slate" | "green" | "red"> = { DRAFT: "slate", POSTED: "green", REVERSED: "red" };
-const STATUS_OPTIONS = [{ value: "DRAFT", label: "Draft" }, { value: "POSTED", label: "Posted" }, { value: "REVERSED", label: "Reversed" }];
+export const TONE: Record<CbStatus, "slate" | "green" | "red"> = { DRAFT: "slate", POSTED: "green", REVERSED: "red" };
+export const STATUS_OPTIONS = [{ value: "DRAFT", label: "Draft" }, { value: "POSTED", label: "Posted" }, { value: "REVERSED", label: "Reversed" }];
 const HINTS = ["Enter: Next", "Shift+Enter: Previous", "Ctrl+S: Save draft", "F3: New", "F2: Edit"];
 const COLS = "grid-cols-[34px_minmax(150px,1.4fr)_minmax(110px,1fr)_104px_104px_minmax(110px,1.2fr)_28px]";
 
 let keySeq = 0;
 const blankLine = (): Line => ({ key: ++keySeq, generalLedgerId: "", subLedgerId: "", receipt: "", payment: "", narration: "" });
-const sigOf = (f: Form) => JSON.stringify(f, (k, v) => (k === "key" ? undefined : v));
+const sigOf = (f: CbForm) => JSON.stringify(f, (k, v) => (k === "key" ? undefined : v));
 const amountOk = (v: string) => /^\d{0,12}(\.\d{0,2})?$/.test(v);
 
 // "NPR 12,84,500.00" for an amount in paise.
@@ -45,16 +46,13 @@ const splitBalanceText = (net: bigint) => `Dr NPR ${groupIN(formatPaise(net > 0n
 
 const toEntry = (l: Line): EntryInput => ({ generalLedgerId: l.generalLedgerId ? Number(l.generalLedgerId) : null, subLedgerId: l.subLedgerId ? Number(l.subLedgerId) : null, receipt: l.receipt, payment: l.payment, narration: l.narration });
 
-export default function CashBankVoucherScreen(p: CashBankScreenProps) {
+// One Cash / Bank Voucher tab of the voucher workspace: the workspace owns the list, the lookups and the tab strip.
+export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabProps<CbForm, CbLookups>) {
   const dlg = useDialog();
-  const [lk, setLk] = useState<CbLookups | null>(null);
-  const [rows, setRows] = useState<CbListRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const lk = p.lookups;
   const [doc, setDoc] = useState<CbDoc | null>(null);
   const [mode, setMode] = useState<Mode>("new");
-  const [form, setForm] = useState<Form | null>(null);
+  const [form, setForm] = useState<CbForm | null>(null);
   const [baseSig, setBaseSig] = useState("");
   const [errors, setErrors] = useState<Errors>({});
   const [saving, setSaving] = useState(false);
@@ -62,7 +60,6 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
   const [accountBalances, setAccountBalances] = useState<AccountBalance[] | null>(null);
   const [balanceStatus, setBalanceStatus] = useState<"loading" | "ready" | "error" | "unavailable">("loading");
   const [activeKey, setActiveKey] = useState<number | null>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
 
   const ro = mode === "view";
   const dirty = mode !== "view" && !!form && sigOf(form) !== baseSig;
@@ -70,37 +67,37 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
   const fyOf = useCallback((l: CbLookups | null, date: string) => l?.fiscalYears.find((y) => y.startDate <= date && date <= y.endDate), []);
 
   // ---------- load ----------
-  const reloadList = useCallback(async () => {
-    try {
-      const r = await cashBankApi.list({ companyId: p.companyId, branchId: p.branchId, fiscalYear: p.fyCode, status: statusFilter || undefined, search: search.trim() || undefined });
-      setRows(r.rows); setTotal(r.total);
-    } catch (e) { flash((e as Error).message, "err"); }
-  }, [p.companyId, p.branchId, p.fyCode, statusFilter, search, flash]);
-  useEffect(() => { const t = setTimeout(() => void reloadList(), 200); return () => clearTimeout(t); }, [reloadList]);
 
-  const emptyForm = useCallback((l: CbLookups): Form => {
+  const emptyForm = useCallback((l: CbLookups): CbForm => {
     const banks = l.cashBankLedgers.filter((b) => b.isActive);
     return {
       voucherDate: defaultDate(l.fiscalYears.find((y) => y.code === p.fyCode)), cashBankLedgerId: banks.length === 1 ? String(banks[0].id) : "", cashBankSubLedgerId: "", instrumentType: "", chequeNumber: "", chequeDate: "", payeeReference: "", remarks: "",
       lines: [blankLine(), blankLine()],
     };
   }, [p.fyCode]);
-  const toForm = (d: CbDoc): Form => ({
+  const toForm = (d: CbDoc): CbForm => ({
     voucherDate: d.voucherDate, cashBankLedgerId: d.cashBankLedgerId ? String(d.cashBankLedgerId) : "", cashBankSubLedgerId: d.cashBankSubLedgerId ? String(d.cashBankSubLedgerId) : "", instrumentType: d.instrumentType ?? "", chequeNumber: d.chequeNumber ?? "", chequeDate: d.chequeDate ?? "",
     payeeReference: d.payeeReference, remarks: d.remarks,
     lines: d.entries.length ? d.entries.map((e) => ({ key: ++keySeq, generalLedgerId: String(e.generalLedgerId), subLedgerId: e.subLedgerId ? String(e.subLedgerId) : "", receipt: e.receipt, payment: e.payment, narration: e.narration })) : [blankLine()],
   });
-  const show = (f: Form, m: Mode, d: CbDoc | null) => { setForm(f); setBaseSig(sigOf(f)); setMode(m); setDoc(d); setErrors({}); setActiveKey(null); };
+  const show = (f: CbForm, m: Mode, d: CbDoc | null) => { setForm(f); setBaseSig(sigOf(f)); setMode(m); setDoc(d); setErrors({}); setActiveKey(null); };
 
+  // A tab starts one of three ways: put back as it was left, a saved voucher opened in view mode, or a new blank voucher.
+  const restored = useRef(p.hookSnapRef.current);
   useEffect(() => {
+    const snap = restored.current;
+    if (snap) { setForm(snap.form as CbForm); setBaseSig(snap.baseSig); setMode(snap.mode); setDoc(snap.doc as unknown as CbDoc | null); flash("Ready", "info"); return; }
+    if (!p.docId) { show(p.initialForm ?? emptyForm(lk), "new", null); flash("New voucher", "info"); return; }
     let live = true;
-    cashBankApi.lookups(p.companyId).then((l) => { if (!live) return; setLk(l); show(emptyForm(l), "new", null); flash("New voucher", "info"); }).catch((e: Error) => live && flash(e.message, "err"));
+    cashBankApi.get(p.docId, p.companyId).then((d) => { if (live) { show(toForm(d), "view", d); flash(`Opened ${d.voucherNumber}`, "info"); } }).catch((e: Error) => { if (live) fail(e, "Could not open the voucher"); });
     return () => { live = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.companyId]);
+  }, []);
+  useEffect(() => { if (form) p.hookSnapRef.current = { doc: doc as unknown as PDoc | null, mode, form, baseSig, selectedId: doc?.id ?? null }; });
+  useEffect(() => { p.onMeta(p.tabId, { title: doc ? doc.voucherNumber : "New voucher", dirty, docId: doc?.id ?? null }); }, [doc?.voucherNumber, doc?.id, dirty, p.tabId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (p.externalMessage) flash(p.externalMessage.text, "info"); }, [p.externalMessage, flash]);
 
-  useEffect(() => { p.dirtyRef.current = dirty; return () => { p.dirtyRef.current = false; }; }, [dirty, p.dirtyRef]);
-  useEffect(() => p.setStatus({ mode, count: total, shown: rows.length, message: msg.text, kind: msg.kind, hints: HINTS }), [mode, total, rows.length, msg, p.setStatus]);
+  useEffect(() => p.setStatus({ mode, count: 0, shown: 0, message: msg.text, kind: msg.kind, hints: HINTS }), [mode, msg, p.setStatus]);
 
   // ---------- balances ----------
   const fyCodeFor = useCallback((date: string) => fyOf(lk, date)?.code ?? p.fyCode, [fyOf, lk, p.fyCode]);
@@ -151,7 +148,7 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
   const selectedBalanceName = selectedSub?.name ?? ledgerById.get(activeLedger)?.name ?? "";
 
   // ---------- editing ----------
-  const patch = (c: Partial<Form>) => setForm((f) => (f ? { ...f, ...c } : f));
+  const patch = (c: Partial<CbForm>) => setForm((f) => (f ? { ...f, ...c } : f));
   const clear = (...ks: string[]) => setErrors((e) => { const n = { ...e }; ks.forEach((k) => delete n[k]); return n; });
   const patchLine = (key: number, c: Partial<Line>) => { clear("lines"); setForm((f) => (f ? { ...f, lines: f.lines.map((l) => (l.key === key ? { ...l, ...c } : l)) } : f)); };
   const setAmount = (key: number, side: "receipt" | "payment", v: string) => {
@@ -164,7 +161,7 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
 
   // ---------- validate + save ----------
   // Rows the person has not started are dropped (index mapping is kept so a message points at the row as shown).
-  const validate = (f: Form): Errors => {
+  const validate = (f: CbForm): Errors => {
     const e: Errors = {};
     const kept = f.lines.map((l, i) => ({ l, i })).filter(({ l }) => !isBlankEntry(toEntry(l)));
     const entries = kept.map(({ l }) => toEntry(l));
@@ -180,7 +177,7 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
     });
     return e;
   };
-  const payload = (f: Form) => ({
+  const payload = (f: CbForm) => ({
     companyId: p.companyId, branchId: p.branchId, userId: p.userId, fiscalYear: fyCodeFor(f.voucherDate), voucherDate: f.voucherDate, cashBankLedgerId: Number(f.cashBankLedgerId), cashBankSubLedgerId: f.cashBankSubLedgerId ? Number(f.cashBankSubLedgerId) : null,
     instrumentType: f.instrumentType || null, chequeNumber: f.chequeNumber.trim() || null, chequeDate: f.chequeDate || null, payeeReference: f.payeeReference.trim() || null, remarks: f.remarks.trim() || null,
     lines: f.lines.filter((l) => !isBlankEntry(toEntry(l))).map((l) => ({ generalLedgerId: Number(l.generalLedgerId) || null, subLedgerId: l.subLedgerId ? Number(l.subLedgerId) : null, receipt: l.receipt || null, payment: l.payment || null, narration: l.narration.trim() || null })),
@@ -204,7 +201,7 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
       const r = doc ? await cashBankApi.update(doc.id, p.companyId, body) : await cashBankApi.create(body);
       show(toForm(r.document), "view", r.document);
       flash(`${post ? "Posted" : "Saved draft"} ${r.document.voucherNumber}`, "ok");
-      void reloadList();
+      p.onListChanged();
     } catch (x) { fail(x, "Could not save the voucher"); } finally { setSaving(false); }
   };
 
@@ -212,22 +209,19 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
     if (dirty && !(await dlg.confirm("Unsaved changes will be lost. Continue?", { title: "Discard unsaved changes?", variant: "warning", confirmLabel: "Discard", cancelLabel: "Stay here" }))) return;
     action();
   };
-  const newDoc = () => void guard(() => { if (lk) { show(emptyForm(lk), "new", null); flash("New voucher", "info"); } });
-  const open = (id: number) => void guard(async () => {
-    try { const d = await cashBankApi.get(id, p.companyId); show(toForm(d), "view", d); flash(`Opened ${d.voucherNumber}`, "info"); } catch (x) { fail(x, "Could not open the voucher"); }
-  });
+  const newDoc = () => p.onNew();
   const edit = () => { if (doc && form && doc.status === "DRAFT") { setMode("edit"); setBaseSig(sigOf(form)); flash(`Editing ${doc.voucherNumber}`, "info"); } };
-  const cancel = () => void guard(() => { if (doc) show(toForm(doc), "view", doc); else if (lk) show(emptyForm(lk), "new", null); flash("Cancelled", "info"); });
+  const cancel = () => void guard(() => { if (doc) show(toForm(doc), "view", doc); else show(emptyForm(lk), "new", null); flash("Cancelled", "info"); });
 
   const askDelete = async () => {
     if (!doc || doc.status !== "DRAFT") return;
     if (!(await dlg.confirm(<>Delete draft <b className="font-mono">{doc.voucherNumber}</b>? This cannot be undone.</>, { title: "Delete voucher?", variant: "danger", confirmLabel: "Delete" }))) return;
-    try { await cashBankApi.remove(doc.id, p.companyId, p.userId); flash(`Deleted ${doc.voucherNumber}`, "ok"); if (lk) show(emptyForm(lk), "new", null); void reloadList(); } catch (x) { fail(x, "Could not delete the voucher"); }
+    try { await cashBankApi.remove(doc.id, p.companyId, p.userId); p.onListChanged(); p.onClose(p.tabId); } catch (x) { fail(x, "Could not delete the voucher"); }
   };
   const postDraft = async () => {
     if (!doc || doc.status !== "DRAFT") return;
     if (!(await dlg.confirm(<>Post <b className="font-mono">{doc.voucherNumber}</b>? It can no longer be edited; it can only be reversed.</>, { title: "Post voucher?", confirmLabel: "Post voucher" }))) return;
-    try { const r = await cashBankApi.post(doc.id, p.companyId, p.userId); show(toForm(r.document), "view", r.document); flash(`Posted ${r.document.voucherNumber}`, "ok"); void reloadList(); } catch (x) { fail(x, "Could not post the voucher"); }
+    try { const r = await cashBankApi.post(doc.id, p.companyId, p.userId); show(toForm(r.document), "view", r.document); flash(`Posted ${r.document.voucherNumber}`, "ok"); p.onListChanged(); } catch (x) { fail(x, "Could not post the voucher"); }
   };
   const reverse = async () => {
     if (!doc || doc.status !== "POSTED" || doc.isReversal) return;
@@ -235,7 +229,7 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
     if (reason === null) return;
     try {
       const r = await cashBankApi.reverse(doc.id, p.companyId, p.userId, reason, defaultDate(fyOf(lk, doc.voucherDate)));
-      show(toForm(r.document), "view", r.document); flash(`Reversed ${r.document.voucherNumber}`, "ok"); void reloadList();
+      show(toForm(r.document), "view", r.document); flash(`Reversed ${r.document.voucherNumber}`, "ok"); p.onListChanged();
     } catch (x) { fail(x, "Could not reverse the voucher"); }
   };
 
@@ -257,7 +251,7 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
   const closingTone = closing === null ? "" : closing >= 0n ? "text-emerald-700" : "text-amber-700";
 
   return (
-    <main className="ledger flex min-h-0 min-w-0 flex-1">
+    <div className="ledger flex min-h-0 min-w-0 flex-1">
       <section data-purchase-document className="flex min-h-0 min-w-0 flex-1 flex-col">
         <DocHeader title="Cash / Bank Voucher" number={doc?.voucherNumber} pill={status ? <Pill text={status} tone={TONE[status]} /> : <Pill text="Draft" tone="slate" />} branchName={p.branchName} fyCode={p.fyCode} dirty={dirty} />
         {doc && status !== "DRAFT" && (
@@ -383,31 +377,6 @@ export default function CashBankVoucherScreen(p: CashBankScreenProps) {
           )}
         </div>
       </section>
-
-      <aside data-zone="list" aria-label="Cash / bank voucher list" className="flex min-h-0 w-[min(340px,32vw)] min-w-[250px] shrink-0 flex-col overflow-hidden border-l border-slate-200 bg-white">
-        <div className="shrink-0 space-y-2 border-b border-slate-100 p-3">
-          <h2 className="flex items-center gap-2 text-[13px] font-semibold text-ink">Voucher list <span className="lg-count">{total}</span></h2>
-          <div className="relative">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input ref={searchRef} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search vouchers…" aria-label="Search vouchers" className="fld min-w-0 pl-8" />
-          </div>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Status filter" className="fld min-w-0">
-            <option value="">All statuses</option>
-            {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </div>
-        <div className="lg-scroll min-h-0 flex-1 overflow-y-auto">
-          {rows.length === 0 && <p className="p-4 text-[12px] text-slate-500">No vouchers found.</p>}
-          {rows.map((r) => (
-            <button key={r.id} data-row aria-selected={r.id === doc?.id} onClick={() => open(r.id)} className="lg-row min-w-0 break-words px-3.5 py-2.5">
-              <div className="flex items-start justify-between gap-2"><span className="min-w-0 break-words font-mono font-semibold">{r.voucherNumber}</span><Pill text={r.status} tone={TONE[r.status]} /></div>
-              <div className="break-words text-[12px] text-slate-600">{r.cashBankLedgerName}{r.payeeReference ? ` · ${r.payeeReference}` : ""}</div>
-              <div className="flex flex-wrap justify-between gap-x-2 text-[12px] text-slate-500"><span>{r.voucherDate}</span><span className="whitespace-nowrap tabular-nums">+{groupIN(r.totalReceipts)} / −{groupIN(r.totalPayments)}</span></div>
-            </button>
-          ))}
-        </div>
-        <div className="shrink-0 border-t border-slate-100 px-3.5 py-1.5 text-[12px] text-slate-500">{rows.length === total ? `${total} voucher(s)` : `Showing ${rows.length} of ${total}`}</div>
-      </aside>
-    </main>
+    </div>
   );
 }

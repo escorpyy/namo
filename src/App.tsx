@@ -11,11 +11,11 @@ import CodeNumberingScreen from "./screens/CodeNumberingScreen";
 import NumberSeriesScreen from "./screens/NumberSeriesScreen";
 import OpeningBalanceScreen from "./screens/OpeningBalanceScreen";
 import StockOpeningScreen from "./screens/StockOpeningScreen";
-import PurchaseOrderScreen from "./screens/purchase/PurchaseOrderScreen";
-import PurchaseChallanScreen from "./screens/purchase/PurchaseChallanScreen";
-import CashBankVoucherScreen from "./screens/cashBank/CashBankVoucherScreen";
+import CashBankVoucherWorkspace from "./screens/cashBank/CashBankVoucherWorkspace";
 import JournalVoucherWorkspace from "./screens/accounting/JournalVoucherWorkspace";
 import PurchaseBillWorkspace from "./screens/purchase/PurchaseBillWorkspace";
+import PurchaseOrderWorkspace from "./screens/purchase/PurchaseOrderWorkspace";
+import PurchaseChallanWorkspace from "./screens/purchase/PurchaseChallanWorkspace";
 import ImportCostAssessmentWorkspace from "./screens/purchase/ImportCostAssessmentWorkspace";
 import { MASTERS } from "../shared/masters";
 
@@ -136,8 +136,8 @@ export default function App() {
             companyId, branchId, userId: ctx.user.id, branchName: co.branches.find((b) => b.id === branchId)?.name ?? "-",
             fyCode: co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-", calendar, setStatus, dirtyRef, externalMessage: note,
           };
-          return screen === "purchase-orders" ? <PurchaseOrderScreen key={k} {...pp} />
-            : screen === "purchase-challans" ? <PurchaseChallanScreen key={k} {...pp} onCreateBill={(id) => { setFromChallan({ id, n: Date.now() }); dirtyRef.current = false; setScreen("purchase-bills"); }} />
+          return screen === "purchase-orders" ? <PurchaseOrderWorkspace key={k} {...pp} />
+            : screen === "purchase-challans" ? <PurchaseChallanWorkspace key={k} {...pp} onCreateBill={(id) => { setFromChallan({ id, n: Date.now() }); dirtyRef.current = false; setScreen("purchase-bills"); }} />
             : screen === "purchase-import-assessments" ? <ImportCostAssessmentWorkspace key={k} {...pp} />
             : <PurchaseBillWorkspace key={k} {...pp} fromChallan={fromChallan} />;
         })() : screen === "journal" ? (
@@ -147,7 +147,7 @@ export default function App() {
             calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note}
           />
         ) : screen === "cash-bank" ? (
-          <CashBankVoucherScreen
+          <CashBankVoucherWorkspace
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} userId={ctx.user.id}
             branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
             calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note}

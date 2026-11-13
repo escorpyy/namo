@@ -1,7 +1,8 @@
 import { NumberField } from "../../components/purchase/NumberField";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCheck, FileText } from "lucide-react";
-import { purchaseApi, type PDoc, type PListRow } from "../../api";
+import { purchaseApi, type PDoc, type PListRow, type PLookups } from "../../api";
+import type { EntryTabProps } from "../../components/purchase/DocWorkspace";
 import { Combobox, type ComboOption } from "../../components/Combobox";
 import { COMMON_HELP, DocShell, Field, HINTS, Pill, focusStep, money } from "../../components/purchase/Bits";
 import { DateField, TextField, VendorFields } from "../../components/purchase/HeadFields";
@@ -10,14 +11,15 @@ import { blankLine, dateErr, defaultDate, isBlankLine, lineFromDoc, lineToPayloa
 import type { PurchaseScreenProps } from "./PurchaseOrderScreen";
 import { useDocScreen, type DocConfig, type Errors } from "./useDocScreen";
 
-interface CForm {
+export interface CForm {
   numberSeriesId: string; docNumber: string; challanDate: string; vendorGLId: string; subLedgerId: string; agentId: string; purchaseOrderId: string; vendorChallanNo: string; vendorChallanDate: string;
   transporterName: string; vehicleNo: string; lrNo: string; lrDate: string; remarks: string; lines: LineRow[];
 }
-const OPTIONS = [{ value: "DRAFT", label: "Draft" }, { value: "CONFIRMED", label: "Confirmed" }];
+export const OPTIONS = [{ value: "DRAFT", label: "Draft" }, { value: "CONFIRMED", label: "Confirmed" }];
 const HELP: [string, string][] = [...COMMON_HELP];
 
-export default function PurchaseChallanScreen(p: PurchaseScreenProps & { onCreateBill: (challanId: number) => void }) {
+// One Purchase Challan tab of the challan workspace: the workspace owns the list, the lookups and the tab strip.
+export default function PurchaseChallanEntry(p: PurchaseScreenProps & EntryTabProps<CForm, PLookups> & { onCreateBill: (challanId: number) => void }) {
   const cfg = useMemo<DocConfig<CForm>>(() => ({
     kind: "challans", title: "Purchase Challan", singular: "Challan", statusOptions: OPTIONS,
     emptyForm: (lk) => ({
@@ -57,8 +59,15 @@ export default function PurchaseChallanScreen(p: PurchaseScreenProps & { onCreat
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [p.fyCode]);
   const lkRef = useMemo(() => ({ current: null as ReturnType<typeof useDocScreen>["lookups"] }), []);
-  const s = useDocScreen<CForm>(cfg, { companyId: p.companyId, branchId: p.branchId, fyCode: p.fyCode, userId: p.userId, calendar: p.calendar }, { setStatus: p.setStatus, dirtyRef: p.dirtyRef, externalMessage: p.externalMessage, hints: HINTS });
+  const restored = useRef(p.hookSnapRef.current);
+  const localDirty = useRef(false);
+  const s = useDocScreen<CForm>(cfg, { companyId: p.companyId, branchId: p.branchId, fyCode: p.fyCode, userId: p.userId, calendar: p.calendar }, {
+    setStatus: p.setStatus, dirtyRef: localDirty, externalMessage: p.externalMessage, hints: HINTS,
+    sharedLookups: p.lookups, skipList: true, initialDocId: p.docId, initialForm: p.initialForm, restore: restored.current, snapshotRef: p.hookSnapRef,
+    onNew: () => p.onNew(), onDeleted: () => p.onClose(p.tabId), onListChanged: p.onListChanged,
+  });
   lkRef.current = s.lookups;
+  useEffect(() => { p.onMeta(p.tabId, { title: s.doc ? String(s.doc.challanNumber) : "New challan", dirty: s.dirty, docId: s.doc?.id ?? null }); }, [s.doc?.challanNumber, s.doc?.id, s.dirty, p.tabId]); // eslint-disable-line react-hooks/exhaustive-deps
   const f = s.form, lk = s.lookups, doc = s.doc, ro = s.readOnly;
   const products = useMemo(() => new Map((lk?.products ?? []).map((x) => [String(x.id), x])), [lk]);
 
@@ -100,16 +109,9 @@ export default function PurchaseChallanScreen(p: PurchaseScreenProps & { onCreat
   );
 
   return (
-    <DocShell s={s} title="Purchase Challan" singular="Challan" branchName={p.branchName} fyCode={p.fyCode} statusOptions={OPTIONS}
+    <DocShell s={s} title="Purchase Challan" singular="Challan" number={doc ? String(doc.challanNumber) : undefined} branchName={p.branchName} fyCode={p.fyCode} statusOptions={OPTIONS}
       pill={doc && <Pill text={confirmed ? "CONFIRMED" : "DRAFT"} tone={confirmed ? "green" : "slate"} />} canEdit={!!doc && cfg.editable(doc)} canDelete={!!doc && cfg.deletable(doc)} actions={actions} help={HELP}
-      notice={confirmed && <p className="mt-2 text-[12px] text-amber-800 bg-amber-50 border border-amber-300 px-2 py-1">A confirmed challan is final. To correct it, raise a corrected bill instead.</p>}
-      listRow={(r) => (
-        <>
-          <div className="flex items-start justify-between gap-2"><span className="min-w-0 font-mono font-semibold break-words">{r.challanNumber}</span><Pill text={r.isConfirmed ? "CONFIRMED" : "DRAFT"} tone={r.isConfirmed ? "green" : "slate"} /></div>
-          <div className="text-[12px] text-slate-600 break-words">{r.vendorName}{r.orderNumber ? ` · ${r.orderNumber}` : ""}</div>
-          <div className="flex flex-wrap justify-between gap-x-2 text-[12px] text-slate-500"><span>{r.challanDate}</span><span className="tabular-nums whitespace-nowrap">{money(r.totalAmount)}</span></div>
-        </>
-      )}>
+      notice={confirmed && <p className="mt-2 text-[12px] text-amber-800 bg-amber-50 border border-amber-300 px-2 py-1">A confirmed challan is final. To correct it, raise a corrected bill instead.</p>}>
       {f && lk && (
         <div className="space-y-3 pt-2">
           <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-x-3 gap-y-2">

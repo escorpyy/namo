@@ -348,7 +348,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
 
   return {
     lookups, rows, total, search, setSearch, statusFilter, setStatusFilter, selectedId, doc, mode, form, setForm, patch, errors, setErrors, err, clearError, saving, dirty,
-    listCollapsed, toggleList,
+    listCollapsed, toggleList, tabbed: skipList,
     dialog, setDialog, help, setHelp, searchRef, flash, newDoc, select, edit, cancel, save, askDelete, run, open, guard, reload: loadList,
     readOnly: mode === "view",
   };
