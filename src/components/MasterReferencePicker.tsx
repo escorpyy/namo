@@ -290,6 +290,8 @@ export function MasterReferencePicker({ fieldName, label, value, selectedSubtext
 
   return (
     <>
+      {/* One element for the field and its subtext: inside a grid row (the voucher line grids) they must be a single cell. */}
+      <div className="min-w-0">
       <div className="relative">
         <input
           ref={triggerRef}
@@ -361,6 +363,7 @@ export function MasterReferencePicker({ fieldName, label, value, selectedSubtext
         <ChevronDown size={14} aria-hidden="true" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
       </div>
       {currentSubtext && <p className="mt-0.5 break-words text-[10.5px] leading-tight text-slate-500" title={currentSubtext}>{currentSubtext}</p>}
+      </div>
 
       {open && (
         <div className="fixed inset-0 z-[100] grid place-items-center bg-black/40 p-0 sm:p-5" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDialog(); }}>

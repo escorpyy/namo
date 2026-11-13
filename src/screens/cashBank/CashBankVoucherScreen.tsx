@@ -280,7 +280,7 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
                   <div className="rounded-md border border-slate-200 bg-cobalt-50/50 px-3 py-2 xl:col-start-4 xl:row-span-2 xl:row-start-1" aria-live="polite">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Current account balance</p>
                     <p className="mt-0.5 text-[13px] font-semibold tabular-nums text-ink">{opening === null ? (balanceStatus === "loading" ? "Balance loading…" : balanceStatus === "error" ? "Balance unavailable" : "—") : splitBalanceText(opening)}</p>
-                    <p className="text-[11px] text-slate-500">{opening === null ? "Choose a ledger and a valid date" : "As of voucher date · Debit and credit"}</p>
+                    <p className="text-[11px] text-slate-500">{opening === null ? "Choose a ledger and a valid date" : "As of voucher date"}</p>
                   </div>
                 </div>
               </FormSection>
