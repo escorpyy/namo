@@ -1,3 +1,4 @@
+import { NarrationInput } from "../../components/NarrationInput";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Ban, Check, Pencil, Plus, Save, Trash2, Undo2, X } from "lucide-react";
 import { accountBalancesApi, ApiError, cashBankApi, type AccountBalance, type CbDoc, type CbLookups, type CbStatus, type PDoc } from "../../api";
@@ -350,7 +351,7 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
                   <TextField className="w-[140px] shrink-0" label={form.instrumentType === "CHEQUE" ? "Cheque No" : "Reference No"} name="chequeNumber" value={form.chequeNumber} onChange={(v) => { patch({ chequeNumber: v }); clear("chequeNumber"); }} readOnly={ro || !instrumentOn} max={MAX_CHEQUE_NO} placeholder="e.g. 008421" required={form.instrumentType === "CHEQUE"} error={err("chequeNumber")} />
                   <div className="w-[150px] shrink-0"><DateField label={form.instrumentType === "CHEQUE" ? "Cheque Date" : "Instrument Date"} name="chequeDate" value={form.chequeDate} onChange={(v) => { patch({ chequeDate: v }); clear("chequeDate"); }} calendar={p.calendar} readOnly={ro || !instrumentOn} error={err("chequeDate")} required={form.instrumentType === "CHEQUE"} /></div>
                   <TextField className="min-w-[170px] flex-1" label="Payee / Reference" name="payeeReference" value={form.payeeReference} onChange={(v) => { patch({ payeeReference: v }); clear("payeeReference"); }} readOnly={ro} max={MAX_PAYEE} placeholder="Optional" error={err("payeeReference")} />
-                  <TextField className="min-w-[200px] flex-[1.3]" label="Remarks" name="remarks" value={form.remarks} onChange={(v) => { patch({ remarks: v }); clear("remarks"); }} readOnly={ro} max={MAX_REMARKS} placeholder="Optional note for this voucher" error={err("remarks")} />
+                  <TextField className="min-w-[200px] flex-[1.3]" label="Remarks" name="remarks" value={form.remarks} onChange={(v) => { patch({ remarks: v }); clear("remarks"); }} readOnly={ro} max={MAX_REMARKS} narrationCompanyId={p.companyId} placeholder="Optional note for this voucher" error={err("remarks")} />
                 </div>
               </section>
 
@@ -382,7 +383,7 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
                             options={subOptions} disabled={ro || !gl || (!needSub && subs.length === 0)} onChange={(v) => { patchLine(l.key, { subLedgerId: v }); clear(`lines.${i}.subLedger`); }} onCommit={gridRows.afterCombo} />
                           <input data-field={`L.${i}.r`} aria-label={`Line ${i + 1} receipt`} inputMode="decimal" autoComplete="off" disabled={ro} placeholder="0.00" value={l.receipt} onChange={(e) => setAmount(l.key, "receipt", e.target.value)} onFocus={(e) => e.currentTarget.select()} className={`fld min-w-0 text-right font-mono tabular-nums ${err(`lines.${i}.amount`) ? "fld-err" : ""}`} />
                           <input data-field={`L.${i}.p`} aria-label={`Line ${i + 1} payment`} inputMode="decimal" autoComplete="off" disabled={ro} placeholder="0.00" value={l.payment} onChange={(e) => setAmount(l.key, "payment", e.target.value)} onFocus={(e) => e.currentTarget.select()} className={`fld min-w-0 text-right font-mono tabular-nums ${err(`lines.${i}.amount`) ? "fld-err" : ""}`} />
-                          <input data-field={`L.${i}.n`} aria-label={`Line ${i + 1} narration`} autoComplete="off" disabled={ro} maxLength={MAX_NARRATION} value={l.narration} onChange={(e) => patchLine(l.key, { narration: e.target.value })} onFocus={(e) => e.currentTarget.select()} className="fld min-w-0" />
+                          <NarrationInput companyId={p.companyId} data-field={`L.${i}.n`} aria-label={`Line ${i + 1} narration`} disabled={ro} maxLength={MAX_NARRATION} value={l.narration} onText={(v) => patchLine(l.key, { narration: v })} onFocus={(e) => e.currentTarget.select()} className="fld min-w-0" />
                           <button type="button" data-nav="remove-line" tabIndex={-1} disabled={ro} onClick={() => removeLineAt(i)} aria-label={`Remove line ${i + 1}`} title="Remove line (Shift+Delete)" className="grid h-8 w-full place-items-center text-slate-400 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-30"><X size={14} /></button>
                         </div>
                         {msg && <p className="px-3 pb-1 pt-0.5 text-[12px] text-rose-700" role="alert">{msg}</p>}

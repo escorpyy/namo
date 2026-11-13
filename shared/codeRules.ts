@@ -55,6 +55,7 @@ export const CODE_SPECS: CodeSpec[] = [
   manual("product-units", "Unit", "Products"),
   manual("stock-categories", "Stock Category", "Products"),
   manual("locations", "Location", "Products"),
+  manual("narrations", "Narration", "Accounts", "narration"),
   manual("purchase-terms", "Purchase Billing Term", "Billing"),
   manual("sales-terms", "Sales Billing Term", "Billing"),
 ];

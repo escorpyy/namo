@@ -61,6 +61,7 @@ const CFG: Record<string, ServerCfg> = {
   },
   "product-units": { table: S.productUnit },
   "stock-categories": { table: S.stockCategory },
+  narrations: { table: S.narration },
   "general-ledger": {
     table: S.generalLedger,
     counts: {

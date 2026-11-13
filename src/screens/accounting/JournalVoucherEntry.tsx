@@ -1,3 +1,4 @@
+import { NarrationInput } from "../../components/NarrationInput";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { createPortal } from "react-dom";
 import { Copy, Pencil, Plus, Printer, RotateCcw, Save, Send, Trash2, X } from "lucide-react";
@@ -192,11 +193,11 @@ export default function JournalVoucherEntry(p: JournalEntryProps) {
             <DateField label="Date" name="voucherDate" value={f.voucherDate} onChange={(v) => { s.patch({ voucherDate: v }); s.clearError("voucherDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("voucherDate")} required />
           </div>
           <div className="flex min-h-0 flex-1 flex-col">
-            <JournalLinesGrid lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} accountBalances={accountBalances} balanceStatus={balanceStatus} readOnly={ro} errors={s.errors} clearError={s.clearError} contextKey={String(p.companyId)} />
+            <JournalLinesGrid lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} accountBalances={accountBalances} balanceStatus={balanceStatus} readOnly={ro} errors={s.errors} clearError={s.clearError} contextKey={String(p.companyId)} companyId={p.companyId} />
           </div>
           <div className="shrink-0">
             <Field label="Remarks (for the whole voucher)" error={s.err("remarks")}>
-              <textarea data-field="remarks" rows={2} maxLength={1024} disabled={ro} value={f.remarks} onChange={(e) => { s.patch({ remarks: e.target.value }); s.clearError("remarks"); }} className={`fld h-auto py-1.5 ${ro ? "bg-slate-100 text-slate-600" : ""}`} />
+              <NarrationInput multiline companyId={p.companyId} data-field="remarks" rows={2} maxLength={1024} disabled={ro} value={f.remarks} onText={(v) => { s.patch({ remarks: v }); s.clearError("remarks"); }} className={`fld h-auto py-1.5 ${ro ? "bg-slate-100 text-slate-600" : ""}`} />
             </Field>
           </div>
         </div>

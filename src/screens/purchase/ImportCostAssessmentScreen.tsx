@@ -1,3 +1,4 @@
+import { NarrationInput } from "../../components/NarrationInput";
 import { Fragment, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { ArrowRight, Copy, Download, FileCheck2, Pencil, Plus, RotateCcw, Save, Trash2, X } from "lucide-react";
 import { ApiError, importAssessmentApi, type ImportAssessmentPreview, type ImportAssessmentTermInput, type PLookups } from "../../api";
@@ -564,8 +565,8 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                     <input className={`${fieldClass} bg-slate-100`} readOnly aria-readonly="true" value={billLabel || "Choose a posted goods bill"} />
                   </label>
                   <label className="block lg-label [&>input]:mt-1 [&>textarea]:mt-1 md:col-span-2">Remarks
-                    <textarea id="assessment-remarks" data-assessment-field data-field="remarks" className="fld min-h-[64px] w-full resize-y py-2" rows={2} maxLength={1024}
-                      disabled={!editing || busy} value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} placeholder="Add a note for this assessment" />
+                    <NarrationInput multiline companyId={p.companyId} id="assessment-remarks" data-assessment-field data-field="remarks" className="fld min-h-[64px] w-full resize-y py-2" rows={2} maxLength={1024}
+                      disabled={!editing || busy} value={form.remarks} onText={(v) => setForm({ ...form, remarks: v })} placeholder="Add a note for this assessment" />
                   </label>
                 </div>
               </FormSection>

@@ -12,5 +12,6 @@ export * from "./purchaseBill";
 export * from "./importAssessment";
 export * from "./periodLock";
 export * from "./codeRule";
+export * from "./narration";
 export * from "./relations";
 export * from "./numberSeries";

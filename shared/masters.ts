@@ -562,6 +562,14 @@ const list: MasterDef[] = [
     unique: [["code"], ["name"]],
   },
   {
+    // Reusable narration / remarks texts. Voucher and purchase screens offer them from a narration or remarks field on the Down arrow.
+    // 500 = MAX_NARRATION, the longest narration a voucher line takes, so an entry fits every field it can be picked into.
+    key: "narrations", title: "Narration", singular: "Narration", labelFields: ["code", "narration"],
+    fields: [code(), text("narration", "Narration", 500), active()],
+    columns: [{ ...CODE_COL, width: "84px" }, { name: "narration", label: "Narration", width: "1fr", kind: "text" }, ON_COL],
+    unique: [["code"], ["narration"]],
+  },
+  {
     key: "locations", title: "Location", singular: "Location", labelFields: ["code", "name"],
     fields: [code(), text("name", "Name", 50), lookup("parentId", "Parent Location", "locations", false), active()],
     columns: [CODE_COL, { name: "name", label: "Name", width: "1fr", kind: "text" }, { name: "parentId", label: "Parent", width: "64px", kind: "lookup" }, ON_COL],

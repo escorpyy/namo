@@ -36,14 +36,22 @@ export const api = {
   context: () => req<ContextData>("/api/context"),
 };
 
+// Counts the narrations created, changed or deleted in this browser session, so the cached list that the narration fields offer
+// (src/lib/narrations.ts) knows when it is out of date.
+let narrationEdits = 0;
+export const narrationEditCount = () => narrationEdits;
+
 // Har master ke liye ek hi generic CRUD — key = shared/masters.ts ka key
-export const masterApi = (key: string) => ({
-  list: (companyId: number) => req<Row[]>(`/api/masters/${key}?companyId=${companyId}`),
-  create: (companyId: number, v: Record<string, unknown>) =>
-    req<Row>(`/api/masters/${key}?companyId=${companyId}`, { method: "POST", body: JSON.stringify(v) }),
-  update: (id: number, companyId: number, v: Record<string, unknown>) => req<Row>(`/api/masters/${key}/${id}?companyId=${companyId}`, { method: "PUT", body: JSON.stringify(v) }),
-  remove: (id: number, companyId: number) => req<{ ok: true }>(`/api/masters/${key}/${id}?companyId=${companyId}`, { method: "DELETE" }),
-});
+export const masterApi = (key: string) => {
+  const edited = <T>(p: Promise<T>) => (key === "narrations" ? p.then((r) => { narrationEdits++; return r; }) : p);
+  return {
+    list: (companyId: number) => req<Row[]>(`/api/masters/${key}?companyId=${companyId}`),
+    create: (companyId: number, v: Record<string, unknown>) =>
+      edited(req<Row>(`/api/masters/${key}?companyId=${companyId}`, { method: "POST", body: JSON.stringify(v) })),
+    update: (id: number, companyId: number, v: Record<string, unknown>) => edited(req<Row>(`/api/masters/${key}/${id}?companyId=${companyId}`, { method: "PUT", body: JSON.stringify(v) })),
+    remove: (id: number, companyId: number) => edited(req<{ ok: true }>(`/api/masters/${key}/${id}?companyId=${companyId}`, { method: "DELETE" })),
+  };
+};
 
 // Code numbering rules (shared/codeRules.ts): the rule of every master, and the code to propose for a new record
 export const codeRulesApi = {

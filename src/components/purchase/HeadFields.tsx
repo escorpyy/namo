@@ -3,6 +3,7 @@ import type { PLookups } from "../../api";
 import { MasterReferencePicker, type ReferenceOption } from "../MasterReferencePicker";
 import type { CreateMasterSpec } from "../quickCreateContext";
 import { DateInput } from "../DateInput";
+import { NarrationInput } from "../NarrationInput";
 import { Field, focusStep } from "./Bits";
 
 type Errs = Record<string, string | undefined>;
@@ -50,13 +51,16 @@ export function DateField({ label, name, value, onChange, calendar, readOnly, er
   );
 }
 
-export function TextField({ label, name, value, onChange, readOnly, error, max = 60, placeholder, required, className }: {
-  label: string; name: string; value: string; onChange: (v: string) => void; readOnly: boolean; error?: string; max?: number; placeholder?: string; required?: boolean; className?: string;
+/** `narrationCompanyId`: this is a narration / remarks field, so ↓ offers that company's Narration Master (see NarrationInput). */
+export function TextField({ label, name, value, onChange, readOnly, error, max = 60, placeholder, required, className, narrationCompanyId }: {
+  label: string; name: string; value: string; onChange: (v: string) => void; readOnly: boolean; error?: string; max?: number; placeholder?: string; required?: boolean; className?: string; narrationCompanyId?: number;
 }) {
+  const cls = `fld min-w-0 ${error ? "fld-err" : ""} ${readOnly ? "bg-slate-100 text-slate-600" : ""}`;
   return (
     <Field label={label} error={error} required={required} className={className}>
-      <input data-field={name} value={value} maxLength={max} autoComplete="off" disabled={readOnly} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} onFocus={(e) => e.currentTarget.select()}
-        className={`fld min-w-0 ${error ? "fld-err" : ""} ${readOnly ? "bg-slate-100 text-slate-600" : ""}`} />
+      {narrationCompanyId != null
+        ? <NarrationInput companyId={narrationCompanyId} data-field={name} value={value} maxLength={max} disabled={readOnly} placeholder={placeholder} onText={onChange} onFocus={(e) => e.currentTarget.select()} className={cls} />
+        : <input data-field={name} value={value} maxLength={max} autoComplete="off" disabled={readOnly} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} onFocus={(e) => e.currentTarget.select()} className={cls} />}
     </Field>
   );
 }

@@ -1,3 +1,4 @@
+import { NarrationInput } from "../../components/NarrationInput";
 import { NumberField } from "../../components/purchase/NumberField";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { ArrowRight, ChevronDown, ChevronRight, Copy, Pencil, Plus, RotateCcw, Save, Send, Trash2, X } from "lucide-react";
@@ -695,7 +696,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
                   <label className="flex items-start gap-3">
                     <span className="mt-1.5 w-[64px] shrink-0 text-[12px] font-semibold text-slate-700">Remarks</span>
                     <span className="min-w-0 flex-1">
-                      <textarea data-field="remarks" maxLength={1024} disabled={ro} value={f.remarks} onChange={(e) => s.patch({ remarks: e.target.value })}
+                      <NarrationInput multiline companyId={p.companyId} data-field="remarks" maxLength={1024} disabled={ro} value={f.remarks} onText={(v) => s.patch({ remarks: v })}
                         placeholder="Optional note for this bill…" className={`fld h-14 min-h-14 resize-y py-1.5 ${s.err("remarks") ? "fld-err" : ""}`} aria-label="Remarks" />
                       {s.err("remarks") && <span className="mt-1 block text-[12px] text-rose-700">{s.err("remarks")}</span>}
                     </span>

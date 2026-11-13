@@ -107,7 +107,7 @@ export default function PurchaseOrderEntry(p: PurchaseScreenProps & EntryTabProp
             <TextField label="Vendor Ref No" name="vendorRefNo" value={f.vendorRefNo} onChange={(v) => s.patch({ vendorRefNo: v })} readOnly={ro} error={s.err("vendorRefNo")} />
             <DateField label="Vendor Ref Date" name="vendorRefDate" value={f.vendorRefDate} onChange={(v) => { s.patch({ vendorRefDate: v }); s.clearError("vendorRefDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("vendorRefDate")} />
             <DateField label="Expected By" name="expectedDate" value={f.expectedDate} onChange={(v) => { s.patch({ expectedDate: v }); s.clearError("expectedDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("expectedDate")} />
-            <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} className="col-span-1 sm:col-span-2 2xl:col-span-3" error={s.err("remarks")} />
+            <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} narrationCompanyId={p.companyId} className="col-span-1 sm:col-span-2 2xl:col-span-3" error={s.err("remarks")} />
           </div>
           <h2 className="text-[13px] font-semibold">Lines</h2>
           <LinesGrid kind="order" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} />

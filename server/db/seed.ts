@@ -321,6 +321,16 @@ async function main() {
         { companyId: co.id, code: "TRD", name: "Trading Goods" },
       ]);
 
+    if (!(await hasRows(S.narration, co.id)))
+      await db.insert(S.narration).values([
+        { companyId: co.id, code: "CASHDEP", narration: "Being cash deposited in bank" },
+        { companyId: co.id, code: "CASHWD", narration: "Being cash withdrawn from bank for office use" },
+        { companyId: co.id, code: "ELEC", narration: "Being electricity bill paid" },
+        { companyId: co.id, code: "RENT", narration: "Being office rent paid for the month" },
+        { companyId: co.id, code: "SALARY", narration: "Being staff salary paid for the month" },
+        { companyId: co.id, code: "PURCASH", narration: "Being goods purchased in cash" },
+      ]);
+
     if (!(await hasRows(S.location, co.id))) {
       const [godown] = await db.insert(S.location).values({ companyId: co.id, code: "GD1", name: "Main Godown" }).returning();
       await db.insert(S.location).values([

@@ -190,6 +190,13 @@
       "when": 1794487602290,
       "tag": "0026_cash_bank_voucher_screen",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1794607571070,
+      "tag": "0027_narration_master",
+      "breakpoints": true
     }
   ]
 }

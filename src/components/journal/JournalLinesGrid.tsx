@@ -1,3 +1,4 @@
+import { NarrationInput } from "../NarrationInput";
 import { drCrText } from "../../lib/balanceText";
 import { useCallback, useMemo } from "react";
 import { Plus, X } from "lucide-react";
@@ -28,9 +29,11 @@ interface Props {
   errors: JErrors;
   clearError: (...k: string[]) => void;
   contextKey: string;
+  /** whose Narration Master the narration cells offer on ↓ */
+  companyId: number;
 }
 
-export function JournalLinesGrid({ lines, onChange, lookups, accountBalances, balanceStatus, readOnly, errors, clearError, contextKey }: Props) {
+export function JournalLinesGrid({ lines, onChange, lookups, accountBalances, balanceStatus, readOnly, errors, clearError, contextKey, companyId }: Props) {
   const balanceMap = useMemo(() => new Map((accountBalances ?? []).map((b) => [`${b.generalLedgerId}:${b.subLedgerId ?? ""}`, b])), [accountBalances]);
   const balanceText = useCallback((glId: number, subLedgerId: number | null = null) => {
     const b = balanceMap.get(`${glId}:${subLedgerId ?? ""}`);
@@ -143,8 +146,8 @@ export function JournalLinesGrid({ lines, onChange, lookups, accountBalances, ba
                     options={agentOpts} disabled={readOnly} onChange={(v) => patch(i, { agentId: v })} onCommit={gridRows.afterCombo} />
                   {sideInput(i, "debit", "d", "credit")}
                   {sideInput(i, "credit", "c", "debit")}
-                  <input data-field={`L.${i}.n`} disabled={readOnly} maxLength={500} autoComplete="off" value={l.narration} placeholder="Narration" aria-label={`Narration line ${i + 1}`}
-                    onChange={(e) => patch(i, { narration: e.target.value })} onFocus={(e) => e.currentTarget.select()} className={`fld h-8 ${readOnly ? "bg-slate-100 text-slate-600" : ""}`} />
+                  <NarrationInput companyId={companyId} data-field={`L.${i}.n`} disabled={readOnly} maxLength={500} value={l.narration} placeholder="Narration" aria-label={`Narration line ${i + 1}`}
+                    onText={(v) => patch(i, { narration: v })} onFocus={(e) => e.currentTarget.select()} className={`fld h-8 ${readOnly ? "bg-slate-100 text-slate-600" : ""}`} />
                   <button type="button" data-nav="remove-line" disabled={readOnly} onClick={() => remove(i)} title="Remove line (Delete when the row is selected)" aria-label="Remove line"
                     className="grid h-8 w-8 place-items-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-30"><X size={14} /></button>
                 </div>

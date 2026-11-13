@@ -128,7 +128,7 @@ export default function PurchaseChallanEntry(p: PurchaseScreenProps & EntryTabPr
             <TextField label="Vehicle No" name="vehicleNo" value={f.vehicleNo} onChange={(v) => s.patch({ vehicleNo: v })} readOnly={ro} error={s.err("vehicleNo")} />
             <TextField label="LR No" name="lrNo" value={f.lrNo} onChange={(v) => s.patch({ lrNo: v })} readOnly={ro} error={s.err("lrNo")} />
             <DateField label="LR Date" name="lrDate" value={f.lrDate} onChange={(v) => { s.patch({ lrDate: v }); s.clearError("lrDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("lrDate")} />
-            <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} className="col-span-1 sm:col-span-2" error={s.err("remarks")} />
+            <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} narrationCompanyId={p.companyId} className="col-span-1 sm:col-span-2" error={s.err("remarks")} />
           </div>
           <h2 className="text-[13px] font-semibold">Lines received</h2>
           <LinesGrid kind="challan" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts />
