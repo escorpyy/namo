@@ -10,11 +10,13 @@ import {
 
   // Custom screens that are not driven by the master engine (grids etc.)
   export const CUSTOM_SCREENS = [
+    "cash-bank",
     "opening-balance",
     "stock-opening",
     "purchase-orders",
     "purchase-challans",
     "purchase-bills",
+    "journal",
     "purchase-import-assessments",
     "code-numbering",
     "number-series",

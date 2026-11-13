@@ -13,7 +13,8 @@ import {
 import { createdAt, money, updatedAt } from "./_helpers";
 import { documentTypeEnum, instrumentTypeEnum } from "./enums";
 import { branch, company, user } from "./core";
-import { generalLedger } from "./accounting";
+import { generalLedger, subLedger } from "./accounting";
+import { numberSeries } from "./numberSeries";
 import { agent } from "./parties";
 
 // ============================================================
@@ -34,6 +35,8 @@ export const journalVoucher = pgTable(
     documentType: documentTypeEnum().notNull().default("JOURNAL_VOUCHER"),
     // Unique per branch, not globally — two branches can both have "JV-1".
     voucherNumber: varchar({ length: 30 }).notNull(),
+    // The number series the number came from (null = typed by hand or numbered before series existed).
+    numberSeriesId: integer().references(() => numberSeries.id, { onDelete: "set null" }),
     voucherDate: date({ mode: "date" }).notNull(),
     fiscalYear: varchar({ length: 15 }).notNull(),
     remarks: varchar({ length: 1024 }),
@@ -75,6 +78,8 @@ export const journalVoucherLine = pgTable(
     generalLedgerId: integer()
       .notNull()
       .references(() => generalLedger.id, { onDelete: "restrict" }),
+    // The party (sub-ledger) of the line, for a control ledger such as Sundry Debtors / Creditors.
+    subLedgerId: integer().references(() => subLedger.id, { onDelete: "restrict" }),
 
     debit: money().notNull().default("0"),
     credit: money().notNull().default("0"),
@@ -91,6 +96,7 @@ export const journalVoucherLine = pgTable(
     ),
     index("JournalVoucherLine_generalLedgerId_idx").on(t.generalLedgerId),
     index("JournalVoucherLine_agentId_idx").on(t.agentId),
+    index("JournalVoucherLine_subLedgerId_idx").on(t.subLedgerId),
   ],
 );
 
@@ -116,6 +122,10 @@ export const cashBankVoucher = pgTable(
     fiscalYear: varchar({ length: 15 }).notNull(),
     remarks: varchar({ length: 1024 }),
 
+    // Cash/bank ledger used for the voucher movement and optional payee/reference.
+    cashBankLedgerId: integer().references(() => generalLedger.id, { onDelete: "restrict" }),
+    payeeReference: varchar({ length: 100 }),
+
     reversalOfId: integer().references((): AnyPgColumn => cashBankVoucher.id, {
       onDelete: "set null",
     }),
@@ -138,6 +148,7 @@ export const cashBankVoucher = pgTable(
     index("CashBankVoucher_branchId_idx").on(t.branchId),
     index("CashBankVoucher_documentType_idx").on(t.documentType),
     index("CashBankVoucher_fiscalYear_idx").on(t.fiscalYear),
+    index("CashBankVoucher_cashBankLedgerId_idx").on(t.cashBankLedgerId),
   ],
 );
 
@@ -153,6 +164,9 @@ export const cashBankVoucherLine = pgTable(
     generalLedgerId: integer()
       .notNull()
       .references(() => generalLedger.id, { onDelete: "restrict" }),
+
+    subLedgerId: integer().references(() => subLedger.id, { onDelete: "restrict" }),
+    isCashBankLine: boolean().notNull().default(false),
 
     debit: money().notNull().default("0"),
     credit: money().notNull().default("0"),
@@ -180,5 +194,6 @@ export const cashBankVoucherLine = pgTable(
     index("CashBankVoucherLine_generalLedgerId_idx").on(t.generalLedgerId),
     index("CashBankVoucherLine_agentId_idx").on(t.agentId),
     index("CashBankVoucherLine_chequeNumber_idx").on(t.chequeNumber),
+    index("CashBankVoucherLine_subLedgerId_idx").on(t.subLedgerId),
   ],
 );

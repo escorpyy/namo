@@ -18,6 +18,7 @@ export const DOCUMENT_TYPES = [
   { key: "PURCHASE_ORDER", label: "Purchase Order", module: "Purchase" },
   { key: "PURCHASE_CHALLAN", label: "Purchase Challan", module: "Purchase" },
   { key: "PURCHASE_BILL", label: "Purchase Bill", module: "Purchase" },
+  { key: "JOURNAL_VOUCHER", label: "Journal Voucher", module: "Accounting" },
 ] as const;
 export type DocumentType = (typeof DOCUMENT_TYPES)[number]["key"];
 export const documentType = (key: string) => DOCUMENT_TYPES.find((d) => d.key === key);

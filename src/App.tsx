@@ -13,6 +13,8 @@ import OpeningBalanceScreen from "./screens/OpeningBalanceScreen";
 import StockOpeningScreen from "./screens/StockOpeningScreen";
 import PurchaseOrderScreen from "./screens/purchase/PurchaseOrderScreen";
 import PurchaseChallanScreen from "./screens/purchase/PurchaseChallanScreen";
+import CashBankVoucherScreen from "./screens/cashBank/CashBankVoucherScreen";
+import JournalVoucherWorkspace from "./screens/accounting/JournalVoucherWorkspace";
 import PurchaseBillWorkspace from "./screens/purchase/PurchaseBillWorkspace";
 import ImportCostAssessmentWorkspace from "./screens/purchase/ImportCostAssessmentWorkspace";
 import { MASTERS } from "../shared/masters";
@@ -138,7 +140,19 @@ export default function App() {
             : screen === "purchase-challans" ? <PurchaseChallanScreen key={k} {...pp} onCreateBill={(id) => { setFromChallan({ id, n: Date.now() }); dirtyRef.current = false; setScreen("purchase-bills"); }} />
             : screen === "purchase-import-assessments" ? <ImportCostAssessmentWorkspace key={k} {...pp} />
             : <PurchaseBillWorkspace key={k} {...pp} fromChallan={fromChallan} />;
-        })() : screen === "stock-opening" ? (
+        })() : screen === "journal" ? (
+          <JournalVoucherWorkspace
+            key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} userId={ctx.user.id} companyName={co.name}
+            branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
+            calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note}
+          />
+        ) : screen === "cash-bank" ? (
+          <CashBankVoucherScreen
+            key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} userId={ctx.user.id}
+            branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
+            calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note}
+          />
+        ) : screen === "stock-opening" ? (
           <StockOpeningScreen
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} fyId={fyId}
             branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}

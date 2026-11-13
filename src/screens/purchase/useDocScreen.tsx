@@ -12,8 +12,30 @@ import type { Mode, MsgKind, StatusInfo } from "../../types";
 export type Errors = Record<string, string | undefined>;
 export interface Ctx { companyId: number; branchId: number; fyCode: string; userId: number; calendar: "BS" | "AD" }
 
+// The calls a document screen makes. Purchase screens leave this out (they talk to /api/purchase/<kind>); another module, such as the
+// journal voucher, passes its own. Its documents and lookups are handed over as PDoc / PLookups: the hook only reads id and what the screen's own config reads.
+export interface DocApi {
+  lookups: (companyId: number) => Promise<PLookups>;
+  list: (p: { companyId: number; branchId: number; fiscalYear: string; status?: string; search?: string }) => Promise<{ total: number; rows: PListRow[] }>;
+  get: (id: number, companyId: number) => Promise<PDoc>;
+  create: (body: Record<string, unknown>) => Promise<{ result: Record<string, any>; document: PDoc }>;
+  update: (id: number, companyId: number, body: Record<string, unknown>) => Promise<{ result: Record<string, any>; document: PDoc }>;
+  remove: (id: number, companyId: number, userId?: number) => Promise<unknown>;
+  action: (id: number, companyId: number, action: string, body: Record<string, unknown>) => Promise<{ result: Record<string, any>; document: PDoc }>;
+}
+const purchaseDocApi = (kind: PurchaseKind): DocApi => ({
+  lookups: (c) => purchaseApi.lookups(c),
+  list: (p) => purchaseApi.list(kind, p),
+  get: (id, c) => purchaseApi.get(kind, id, c),
+  create: (b) => purchaseApi.create(kind, b),
+  update: (id, c, b) => purchaseApi.update(kind, id, c, b),
+  remove: (id, c, u) => purchaseApi.remove(kind, id, c, u),
+  action: (id, c, a, b) => purchaseApi.action(kind, id, c, a, b),
+});
+
 export interface DocConfig<F extends object> {
-  kind: PurchaseKind;
+  kind: PurchaseKind | "journal";
+  api?: DocApi;
   title: string;
   singular: string;
   statusOptions: { value: string; label: string }[];
@@ -58,6 +80,7 @@ export interface ActionSpec {
 
 export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extra: { setStatus: (s: StatusInfo) => void; dirtyRef: MutableRefObject<boolean>; externalMessage: { text: string; n: number } | null; hints: string[] } & DocTabOptions<F>) {
   const { kind } = cfg;
+  const A = useMemo(() => cfg.api ?? purchaseDocApi(kind as PurchaseKind), [cfg.api, kind]);
   const skipList = !!extra.skipList;
   // The tabs of the bill workspace share the workspace's lookups (it reloads them); every other screen owns its own.
   const [ownLookups, setLookups] = useState<PLookups | null>(null);
@@ -103,10 +126,10 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
   const loadList = useCallback(async () => {
     if (skipList) return;
     try {
-      const r = await purchaseApi.list(kind, { companyId: ctx.companyId, branchId: ctx.branchId, fiscalYear: ctx.fyCode, status: statusFilter || undefined, search: search.trim() || undefined });
+      const r = await A.list({ companyId: ctx.companyId, branchId: ctx.branchId, fiscalYear: ctx.fyCode, status: statusFilter || undefined, search: search.trim() || undefined });
       setRows(r.rows); setTotal(r.total);
     } catch (e) { flash((e as Error).message, "err"); }
-  }, [kind, ctx.companyId, ctx.branchId, ctx.fyCode, statusFilter, search, flash, skipList]);
+  }, [A, ctx.companyId, ctx.branchId, ctx.fyCode, statusFilter, search, flash, skipList]);
   useEffect(() => { const t = setTimeout(() => void loadList(), search ? 250 : 0); return () => clearTimeout(t); }, [loadList, search]);
 
   const show = (f: F, m: Mode) => { setFormState(f); setBaseSig(sig(f)); setMode(m); setErrors({}); };
@@ -123,7 +146,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
       }
       if (extra.initialDocId) {
         try {
-          const d = await purchaseApi.get(kind, extra.initialDocId, ctx.companyId);
+          const d = await A.get(extra.initialDocId, ctx.companyId);
           if (!live) return;
           setSelectedId(d.id); setDoc(d); show(cfg.toForm(d, l), "view");
           flash(`Opened ${cfg.singular.toLowerCase()}`, "info");
@@ -135,7 +158,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
       setTimeout(() => q("[data-zone=form] [data-field]:not(:disabled)")?.focus(), 60);
     };
     if (extra.sharedLookups) void init(extra.sharedLookups);
-    else purchaseApi.lookups(ctx.companyId).then((l) => { if (live) void init(l); }).catch((e: Error) => live && flash(e.message, "err"));
+    else A.lookups(ctx.companyId).then((l) => { if (live) void init(l); }).catch((e: Error) => live && flash(e.message, "err"));
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx.companyId]);
@@ -143,7 +166,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
   useEffect(() => { extra.dirtyRef.current = dirty; });
   // A master record made with Ctrl+M on one of the pickers: reload the pick-lists so it is in them before the field is set.
   useOnMasterChanged(async () => {
-    const l = await purchaseApi.lookups(ctx.companyId);
+    const l = await A.lookups(ctx.companyId);
     flushSync(() => setLookups(l));
   }, !extra.sharedLookups);
   useEffect(() => { if (extra.snapshotRef && form) extra.snapshotRef.current = { doc, mode, form, baseSig, selectedId }; });
@@ -186,7 +209,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
   });
   const select = (id: number) => guard(async () => {
     if (!lookups) return;
-    try { open(await purchaseApi.get(kind, id, ctx.companyId)); flash(`Opened ${cfg.singular.toLowerCase()}`, "info"); }
+    try { open(await A.get(id, ctx.companyId)); flash(`Opened ${cfg.singular.toLowerCase()}`, "info"); }
     catch (e) { flash((e as Error).message, "err"); }
   });
   const edit = () => {
@@ -221,8 +244,8 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
     try {
       const body = { ...cfg.toPayload(form, doc), userId: ctx.userId };
       const r = mode === "edit" && doc
-        ? await purchaseApi.update(kind, doc.id, ctx.companyId, body)
-        : await purchaseApi.create(kind, { ...body, companyId: ctx.companyId, branchId: ctx.branchId });
+        ? await A.update(doc.id, ctx.companyId, body)
+        : await A.create({ ...body, companyId: ctx.companyId, branchId: ctx.branchId });
       open(r.document);
       flash(`${mode === "edit" ? "Updated" : "Saved"} ${cfg.label(r.document)}`, "ok");
       refreshList();
@@ -249,7 +272,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
           onClick: async () => {
             setDialog(null);
             try {
-              await purchaseApi.remove(kind, target.id, ctx.companyId, ctx.userId);
+              await A.remove(target.id, ctx.companyId, ctx.userId);
               if (extra.onDeleted) extra.onDeleted();
               else { setSelectedId(null); setDoc(null); if (lookups) show(cfg.emptyForm(lookups), "new"); }
               flash(`Deleted ${cfg.label(target)}`, "ok");
@@ -275,7 +298,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
           onClick: async () => {
             setDialog(null);
             try {
-              const r = await purchaseApi.action(kind, target.id, ctx.companyId, spec.action, { ...spec.payload, userId: ctx.userId });
+              const r = await A.action(target.id, ctx.companyId, spec.action, { ...spec.payload, userId: ctx.userId });
               open(r.document);
               flash(spec.done(r.document, r.result), "ok");
               refreshList();

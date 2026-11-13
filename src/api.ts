@@ -131,6 +131,36 @@ export interface PWrite<D = PDoc> { result: Record<string, any>; document: D }
 const qstr = (o: Record<string, string | number | undefined | null>) =>
   Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&");
 
+// ---- Journal voucher ------------------------------------------------------------------------------------------------------------
+export interface JLookups {
+  ledgers: { id: number; code: string; name: string; requiresSubLedger: boolean; isActive: boolean }[];
+  subLedgers: { id: number; code: string; name: string; generalLedgerId: number; isActive: boolean }[];
+  agents: { id: number; code: string; name: string; isActive: boolean }[];
+  fiscalYears: PLookups["fiscalYears"];
+}
+export interface JDocLine {
+  id: number; lineNumber: number; generalLedgerId: number; glCode: string; glName: string; subLedgerId: number | null; subCode: string | null; subName: string | null;
+  agentId: number | null; agentName: string | null; debit: string; credit: string; narration: string | null;
+}
+export type JState = "DRAFT" | "POSTED" | "REVERSED" | "REVERSAL";
+export interface JDoc {
+  id: number; companyId: number; branchId: number; voucherNumber: string; numberSeriesId: number | null; voucherDate: string; fiscalYear: string; remarks: string | null;
+  isPosted: boolean; postedAt: string | null; state: JState; source: string | null; reversalOf: { id: number; voucherNumber: string } | null; reversedBy: { id: number; voucherNumber: string } | null;
+  totalDebit: string; totalCredit: string; editable: boolean; deletable: boolean; reversible: boolean; lines: JDocLine[];
+}
+export interface JListRow { id: number; branchId: number; voucherNumber: string; voucherDate: string; fiscalYear: string; remarks: string | null; state: JState; lineCount: number; totalAmount: string; source: string | null }
+export interface JWrite { result: Record<string, any>; document: JDoc }
+export const journalApi = {
+  lookups: (companyId: number) => req<JLookups>(`/api/journal-vouchers/lookups?companyId=${companyId}`),
+  list: (p: { companyId: number; branchId: number; fiscalYear: string; status?: string; search?: string }) => req<{ total: number; rows: JListRow[] }>(`/api/journal-vouchers?${qstr(p)}`),
+  get: (id: number, companyId: number) => req<JDoc>(`/api/journal-vouchers/${id}?companyId=${companyId}`),
+  create: (body: Record<string, unknown>) => req<JWrite>(`/api/journal-vouchers`, { method: "POST", body: JSON.stringify(body) }),
+  update: (id: number, companyId: number, body: Record<string, unknown>) => req<JWrite>(`/api/journal-vouchers/${id}?companyId=${companyId}`, { method: "PUT", body: JSON.stringify(body) }),
+  remove: (id: number, companyId: number, userId?: number, reason?: string) => req<{ result: { id: number } }>(`/api/journal-vouchers/${id}?${qstr({ companyId, userId, reason })}`, { method: "DELETE" }),
+  action: (id: number, companyId: number, action: "post" | "reverse", body: Record<string, unknown> = {}) =>
+    req<JWrite>(`/api/journal-vouchers/${id}/${action}?companyId=${companyId}`, { method: "POST", body: JSON.stringify(body) }),
+};
+
 export const purchaseApi = {
   lookups: (companyId: number) => req<PLookups>(`/api/purchase/lookups?companyId=${companyId}`),
   list: (kind: PurchaseKind, p: { companyId: number; branchId: number; fiscalYear: string; status?: string; search?: string; vendorGLId?: number }) =>
@@ -169,4 +199,33 @@ export const importAssessmentApi = {
   remove: (id: number, companyId: number, userId: number) => req<{ result: { id: number } }>(`/api/purchase/import-assessments/${id}?${qstr({ companyId, userId })}`, { method: "DELETE" }),
   apply: (id: number, companyId: number, userId: number) => req<{ document: Record<string, any> }>(`/api/purchase/import-assessments/${id}/apply?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId }) }),
   reverse: (id: number, companyId: number, userId: number, reason: string) => req<{ document: Record<string, any> }>(`/api/purchase/import-assessments/${id}/reverse?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId, reason }) }),
+};
+
+// ---- Cash / Bank Voucher: /api/cash-bank-vouchers ----
+export interface CbLedger { id: number; code: string; name: string; glType: string; requiresSubLedger: boolean; isCashOrBank: boolean; isActive: boolean }
+export interface CbSubLedger { id: number; code: string; name: string; generalLedgerId: number; isActive: boolean }
+export interface CbLookups { cashBankLedgers: CbLedger[]; ledgers: CbLedger[]; subLedgers: CbSubLedger[]; fiscalYears: { id: number; code: string; startDate: string; endDate: string; isActive: boolean; isClosed: boolean; isCurrent: boolean }[] }
+export type CbStatus = "DRAFT" | "POSTED" | "REVERSED";
+export interface CbEntry { id: number; lineNumber: number; generalLedgerId: number; code: string; name: string; glType: string; subLedgerId: number | null; subLedgerCode: string | null; subLedgerName: string | null; receipt: string; payment: string; narration: string }
+export interface CbDoc {
+  id: number; companyId: number; branchId: number; voucherNumber: string; voucherDate: string; fiscalYear: string; status: CbStatus; isPosted: boolean; isReversal: boolean;
+  reversalOfId: number | null; reversedById: number | null; reversedByNumber: string | null; cashBankLedgerId: number | null; cashBankSubLedgerId: number | null; cashBankLedgerCode: string | null; cashBankLedgerName: string | null;
+  instrumentType: string | null; chequeNumber: string | null; chequeDate: string | null; payeeReference: string; remarks: string; entries: CbEntry[];
+  totalReceipts: string; totalPayments: string; openingBalance: string; closingBalance: string;
+}
+export interface CbListRow { id: number; branchId: number; voucherNumber: string; voucherDate: string; fiscalYear: string; status: CbStatus; isReversal: boolean; cashBankLedgerName: string; payeeReference: string; totalReceipts: string; totalPayments: string }
+export interface CbBalance { net: string; side: "DR" | "CR"; amount: string }
+export interface CbWrite { result: { id: number; [k: string]: unknown }; document: CbDoc }
+
+export const cashBankApi = {
+  lookups: (companyId: number) => req<CbLookups>(`/api/cash-bank-vouchers/lookups?companyId=${companyId}`),
+  list: (p: { companyId: number; branchId?: number; fiscalYear?: string; status?: string; search?: string }) => req<{ total: number; rows: CbListRow[] }>(`/api/cash-bank-vouchers?${qstr(p)}`),
+  get: (id: number, companyId: number) => req<CbDoc>(`/api/cash-bank-vouchers/${id}?companyId=${companyId}`),
+  create: (body: Record<string, unknown>) => req<CbWrite>("/api/cash-bank-vouchers", { method: "POST", body: JSON.stringify(body) }),
+  update: (id: number, companyId: number, body: Record<string, unknown>) => req<CbWrite>(`/api/cash-bank-vouchers/${id}?companyId=${companyId}`, { method: "PUT", body: JSON.stringify(body) }),
+  remove: (id: number, companyId: number, userId: number) => req<{ result: { id: number } }>(`/api/cash-bank-vouchers/${id}?${qstr({ companyId, userId })}`, { method: "DELETE" }),
+  post: (id: number, companyId: number, userId: number) => req<CbWrite>(`/api/cash-bank-vouchers/${id}/post?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId }) }),
+  reverse: (id: number, companyId: number, userId: number, reason: string, date?: string) =>
+    req<CbWrite>(`/api/cash-bank-vouchers/${id}/reverse?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId, reason, date }) }),
+  balance: (p: { companyId: number; branchId: number; fiscalYear: string; generalLedgerId: number; date: string; excludeId?: number }) => req<CbBalance>(`/api/cash-bank-vouchers/balance?${qstr(p)}`),
 };

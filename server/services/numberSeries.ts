@@ -8,10 +8,11 @@ import { nextNumber, type Tx } from "./purchase/common";
 // The settings (create / edit / list) live in numberSeriesAdmin.ts; documents call assignNumber().
 
 /** where each kind of document keeps its number */
-export const DOC_TABLE: Record<DocumentType, { table: "PurchaseOrder" | "PurchaseChallan" | "PurchaseBill"; col: "orderNumber" | "challanNumber" | "invoiceNumber" }> = {
+export const DOC_TABLE: Record<DocumentType, { table: "PurchaseOrder" | "PurchaseChallan" | "PurchaseBill" | "JournalVoucher"; col: "orderNumber" | "challanNumber" | "invoiceNumber" | "voucherNumber" }> = {
   PURCHASE_ORDER: { table: "PurchaseOrder", col: "orderNumber" },
   PURCHASE_CHALLAN: { table: "PurchaseChallan", col: "challanNumber" },
   PURCHASE_BILL: { table: "PurchaseBill", col: "invoiceNumber" },
+  JOURNAL_VOUCHER: { table: "JournalVoucher", col: "voucherNumber" },
 };
 
 export type SeriesRecord = typeof S.numberSeries.$inferSelect;
@@ -32,7 +33,9 @@ const counterKey = (s: SeriesRecord, w: Where) => ({ branchId: s.perBranch ? w.b
 
 async function taken(tx: Tx, docType: DocumentType, branchId: number, fiscalYear: string, number: string, exceptId?: number) {
   const { table, col } = DOC_TABLE[docType];
-  const r = (await tx.execute(sql`select 1 from ${sql.identifier(table)} where "branchId" = ${branchId} and "fiscalYear" = ${fiscalYear} and ${sql.identifier(col)} = ${number}${exceptId ? sql` and id <> ${exceptId}` : sql``} limit 1`)) as any[];
+  // a voucher number is unique per branch across all fiscal years (its unique index has no fiscal year), the others per branch and year
+  const yearTest = table === "JournalVoucher" ? sql`true` : sql`"fiscalYear" = ${fiscalYear}`;
+  const r = (await tx.execute(sql`select 1 from ${sql.identifier(table)} where "branchId" = ${branchId} and ${yearTest} and ${sql.identifier(col)} = ${number}${exceptId ? sql` and id <> ${exceptId}` : sql``} limit 1`)) as any[];
   return r.length > 0;
 }
 

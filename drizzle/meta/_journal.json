@@ -176,6 +176,20 @@
       "when": 1794461926136,
       "tag": "0024_rounding_method",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1794487602289,
+      "tag": "0025_journal_voucher_screen",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1794487602290,
+      "tag": "0026_cash_bank_voucher_screen",
+      "breakpoints": true
     }
   ]
 }

@@ -150,3 +150,18 @@
   .xl-row .fld:not(:focus):not(.fld-err) { border-color: transparent; border-radius: 0; }
   .xl-row .fld:focus { position: relative; z-index: 1; }
 }
+
+/* Journal voucher print: only the voucher is printed */
+.jv-print { display: none; }
+@media print {
+  body > *:not(.jv-print) { display: none !important; }
+  .jv-print { display: block; padding: 24px; font: 13px/1.4 system-ui, sans-serif; color: #000; }
+  .jv-print h1 { font-size: 18px; margin: 0; text-align: center; }
+  .jv-print h2 { font-size: 14px; margin: 2px 0 12px; text-align: center; }
+  .jv-print table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+  .jv-print th, .jv-print td { border: 1px solid #444; padding: 4px 6px; text-align: left; vertical-align: top; }
+  .jv-print .r { text-align: right; }
+  .jv-print tfoot td { font-weight: 700; }
+  .jv-print .sign { display: flex; justify-content: space-between; margin-top: 60px; }
+  .jv-print .sign span { border-top: 1px solid #000; padding-top: 4px; width: 28%; text-align: center; }
+}
