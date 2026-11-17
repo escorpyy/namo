@@ -1,4 +1,6 @@
 import { NarrationInput } from "../../components/NarrationInput";
+import { PeekPanel, PeekToggle, usePeekOpen, usePeekTarget } from "../../components/PeekPanel";
+import { journalPeekRows, pendingNet } from "../../lib/peek";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { createPortal } from "react-dom";
 import { Copy, Pencil, Plus, Printer, RotateCcw, Save, Send, Trash2, X } from "lucide-react";
@@ -26,13 +28,14 @@ const HELP: [string, string][] = [
   ["Esc", "Cancel editing"],
   ["Enter", "Next cell; after the last cell of a line, the next line (a new one at the end)"],
   ["F8", "On a line: set it to the amount that balances the voucher"],
+  ["F6", "Show / hide the account panel: balance and last entries of the ledger or party the cursor is on"],
   ["Ctrl+D", "Copy the cell (or the selected row) from the line above"],
   ["Delete", "Remove the selected line"],
   ["Alt+, / Alt+.", "Previous / next tab"],
   ["Alt+W", "Close this tab"],
   ["Posted", "A posted voucher is changed only with a reason, or reversed; it is never deleted by accident"],
 ];
-const HINT_LIST = [...HINTS.filter((h) => !h.startsWith("F4")), "F8: Balance line"];
+const HINT_LIST = [...HINTS.filter((h) => !h.startsWith("F4")), "F8: Balance line", "F6: Account panel"];
 
 export interface JournalEntryProps extends PurchaseScreenProps {
   tabId: number;
@@ -72,6 +75,15 @@ export default function JournalVoucherEntry(p: JournalEntryProps) {
   });
   const f = s.form, lk = p.lookups, doc = s.doc as unknown as JDoc | null, ro = s.readOnly;
   lkRef.current = lk;
+
+  // The account panel: follows the line the cursor is on (a line with no ledger chosen yet shows a hint, the date and remarks keep the last account).
+  const [peekOpen, togglePeek] = usePeekOpen();
+  const peekTarget = usePeekTarget((field) => {
+    const m = /^L\.(\d+)\./.exec(field);
+    if (!m) return undefined;
+    const l = f?.lines[Number(m[1])];
+    return l?.glId ? { glId: Number(l.glId), subId: l.subId ? Number(l.subId) : null } : null;
+  });
 
   useEffect(() => {
     const date = f?.voucherDate;
@@ -126,6 +138,8 @@ export default function JournalVoucherEntry(p: JournalEntryProps) {
   if (!f) return <section className="grid min-h-0 flex-1 place-items-center text-slate-500">Loading…</section>;
 
   const state = doc?.state, t = jTotals(f.lines), balanced = t.diff === 0 && t.used > 0;
+  const peekFy = lk.fiscalYears.find((y) => y.startDate <= f.voucherDate && f.voucherDate <= y.endDate)?.code ?? p.fyCode;
+  const peekPending = peekTarget ? pendingNet(peekTarget, journalPeekRows(f.lines)) : 0n;
   const startDate = cfg.emptyForm(lk as unknown as PLookups).voucherDate;
   const reverse = () => {
     if (!doc) return;
@@ -184,8 +198,10 @@ export default function JournalVoucherEntry(p: JournalEntryProps) {
 
   return (
     <>
+      <div className="flex min-h-0 min-w-0 flex-1">
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <DocHeader title="Journal voucher" number={doc?.voucherNumber} pill={state ? <Pill text={state} tone={J_TONE[state]} /> : undefined} branchName={p.branchName} fyCode={p.fyCode} dirty={s.dirty} right={<span className="text-[12px] text-slate-500">F1 help</span>} />
+        <DocHeader title="Journal voucher" number={doc?.voucherNumber} pill={state ? <Pill text={state} tone={J_TONE[state]} /> : undefined} branchName={p.branchName} fyCode={p.fyCode} dirty={s.dirty}
+          right={<span className="flex items-center gap-3"><PeekToggle open={peekOpen} onClick={togglePeek} /><span className="text-[12px] text-slate-500">F1 help</span></span>} />
         {notice}
         <div data-zone="form" onKeyDown={formEnterKey} className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden px-5 py-4">
           <div className="grid shrink-0 grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-4">
@@ -230,6 +246,9 @@ export default function JournalVoucherEntry(p: JournalEntryProps) {
           </div>
         </footer>
       </section>
+      <PeekPanel open={peekOpen} onToggle={togglePeek} target={peekTarget} companyId={p.companyId} branchId={p.branchId} fiscalYear={peekFy} date={f.voucherDate}
+        excludeJournalVoucherId={doc?.id ?? null} pending={peekPending} calendar={p.calendar} ownKind="JOURNAL" onOpen={p.onOpenDoc} />
+      </div>
       {printable}
       {s.dialog && <Dialog spec={s.dialog} onClose={() => s.setDialog(null)} />}
       {s.help && <ShortcutsOverlay onClose={() => s.setHelp(false)} shortcuts={HELP} />}

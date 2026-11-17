@@ -1,4 +1,6 @@
 import { NarrationInput } from "../../components/NarrationInput";
+import { PeekPanel, PeekToggle, usePeekOpen, usePeekTarget } from "../../components/PeekPanel";
+import { cashBankPeekRows, pendingNet } from "../../lib/peek";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Ban, Check, Pencil, Plus, Save, Trash2, Undo2, X } from "lucide-react";
 import { accountBalancesApi, ApiError, cashBankApi, type AccountBalance, type CbDoc, type CbLookups, type CbStatus, type PDoc } from "../../api";
@@ -33,7 +35,7 @@ type Errors = Record<string, string | undefined>;
 
 export const TONE: Record<CbStatus, "slate" | "green" | "red"> = { DRAFT: "slate", POSTED: "green", REVERSED: "red" };
 export const STATUS_OPTIONS = [{ value: "DRAFT", label: "Draft" }, { value: "POSTED", label: "Posted" }, { value: "REVERSED", label: "Reversed" }];
-const HINTS = ["Enter: Next field (new line at the end)", "Shift+Enter: Previous", "Ctrl+S: Save draft", "Ctrl+D: Copy cell above", "Shift+Del: Remove line", "F3: New", "F2: Edit"];
+const HINTS = ["Enter: Next field (new line at the end)", "Shift+Enter: Previous", "Ctrl+S: Save draft", "Ctrl+D: Copy cell above", "Shift+Del: Remove line", "F6: Account panel", "F3: New", "F2: Edit"];
 // Line columns: No, Account / Party, Sub-ledger, Receipt, Payment, Narration, remove. Fluid, so the grid fits a 1366px screen without its own scroll bar.
 const TEMPLATE = "40px minmax(220px,1.6fr) minmax(150px,1fr) 124px 124px minmax(160px,1.2fr) 34px";
 const FILL_FIELDS = ["generalLedgerId", "subLedgerId", "receipt", "payment", "narration"] as const;
@@ -147,6 +149,20 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
   const bankSubs = (lk?.subLedgers ?? []).filter((s) => String(s.generalLedgerId) === bankId);
   const bankNeedsSub = !!bankLedger?.requiresSubLedger;
   const bankSubOptions = useMemo<ReferenceOption[]>(() => bankSubs.map((s) => ({ value: String(s.id), label: `${s.code} — ${s.name}`, code: s.code, name: s.name, detail: bankLedger ? `For ${bankLedger.name}` : undefined, subtext: balanceSubtext(s.generalLedgerId, s.id), isActive: s.isActive })), [bankSubs, bankLedger, balanceSubtext]);
+
+  // ---------- account panel ----------
+  // Follows the cursor: a line shows its account, the cash / bank fields show the bank, the date and remarks keep the last account.
+  const [peekOpen, togglePeek] = usePeekOpen();
+  const peekTarget = usePeekTarget((field) => {
+    if (field === "cashBankLedgerId" || field === "cashBankSubLedgerId") {
+      return form?.cashBankLedgerId ? { glId: Number(form.cashBankLedgerId), subId: form.cashBankSubLedgerId ? Number(form.cashBankSubLedgerId) : null } : null;
+    }
+    const m = /^L\.(\d+)\./.exec(field);
+    if (!m) return undefined;
+    const l = form?.lines[Number(m[1])];
+    return l?.generalLedgerId ? { glId: Number(l.generalLedgerId), subId: l.subLedgerId ? Number(l.subLedgerId) : null } : null;
+  });
+  const peekPending = peekTarget && form ? pendingNet(peekTarget, cashBankPeekRows(form.cashBankLedgerId, form.cashBankSubLedgerId, form.lines)) : 0n;
 
   // ---------- editing ----------
   const patch = (c: Partial<CbForm>) => setForm((f) => (f ? { ...f, ...c } : f));
@@ -316,7 +332,7 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
   return (
     <div className="ledger flex min-h-0 min-w-0 flex-1">
       <section data-purchase-document className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <DocHeader title="Cash / Bank Voucher" number={doc?.voucherNumber} pill={status ? <Pill text={status} tone={TONE[status]} /> : <Pill text="Draft" tone="slate" />} branchName={p.branchName} fyCode={p.fyCode} dirty={dirty} />
+        <DocHeader title="Cash / Bank Voucher" number={doc?.voucherNumber} pill={status ? <Pill text={status} tone={TONE[status]} /> : <Pill text="Draft" tone="slate" />} branchName={p.branchName} fyCode={p.fyCode} dirty={dirty} right={<PeekToggle open={peekOpen} onClick={togglePeek} />} />
         {doc && status !== "DRAFT" && (
           <div className="shrink-0 px-5 pt-2"><p className="border border-amber-300 bg-amber-50 px-2 py-1 text-[12px] text-amber-800">
             {status === "REVERSED" ? <>This voucher was reversed by <b className="font-mono">{doc.reversedByNumber}</b>.</> : doc.isReversal ? "This is a reversal voucher; it cannot be edited or reversed." : "Posted vouchers cannot be edited. Reverse it and enter a correct one."}
@@ -440,6 +456,8 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
           </div>
         </footer>
       </section>
+      <PeekPanel open={peekOpen} onToggle={togglePeek} target={peekTarget} companyId={p.companyId} branchId={p.branchId} fiscalYear={fyCodeFor(voucherDate)} date={voucherDate}
+        excludeCashBankVoucherId={docId ?? null} pending={peekPending} calendar={p.calendar} ownKind="CASH_BANK" onOpen={p.onOpenDoc} />
     </div>
   );
 }

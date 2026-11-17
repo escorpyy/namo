@@ -29,6 +29,8 @@ export interface EntryTabProps<F extends object, L> {
   externalMessage: { text: string; n: number } | null;
   onMeta: (tabId: number, meta: { title: string; dirty: boolean; docId: number | null }) => void;
   onNew: (prefill?: F) => void;
+  /** open another document of this screen in its own tab (one already open is just shown) */
+  onOpenDoc?: (id: number) => void;
   onClose: (tabId: number) => void;
   onListChanged: () => void;
 }
@@ -130,6 +132,12 @@ export default function DocWorkspace<F extends object, R extends { id: number },
     else addTab({ docId: row.id, title: cfg.numberOf(row) });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addTab]);
+  const openDocId = useCallback((id: number) => {
+    const open = tabsRef.current.find((t) => t.docId === id);
+    if (open) setActive(open.id);
+    else addTab({ docId: id, title: Singular }); // the tab renames itself with the document number once it is open
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addTab]);
   const closeTab = useCallback(async (id: number, force = false) => {
     if (!force && tabsRef.current.find((t) => t.id === id)?.dirty
       && !(await dlg.confirm(`This ${singular} has unsaved changes. Close the tab and lose them?`, { title: "Close this tab?", variant: "warning", confirmLabel: "Close tab", cancelLabel: "Keep editing" }))) return;
@@ -220,7 +228,7 @@ export default function DocWorkspace<F extends object, R extends { id: number },
           <div key={activeTab.id} className="flex min-h-0 min-w-0 flex-1">
             {renderEntry({
               tabId: activeTab.id, lookups, docId: activeTab.docId, initialForm: activeTab.initialForm, hookSnapRef: snapOf(activeTab.id), externalMessage: note,
-              onMeta, onNew: openNew, onClose: (id) => void closeTab(id, true), onListChanged: () => void loadList(),
+              onMeta, onNew: openNew, onOpenDoc: openDocId, onClose: (id) => void closeTab(id, true), onListChanged: () => void loadList(),
             })}
           </div>
         ) : (

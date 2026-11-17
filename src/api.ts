@@ -145,6 +145,19 @@ export const accountBalancesApi = {
     req<{ rows: AccountBalance[] }>(`/api/account-balances?${qstr(p)}`),
 };
 
+// The account panel beside the voucher screens: one ledger (or one sub-ledger of it) with its balance on the voucher date and its last posted entries.
+export interface PeekEntry { kind: "JOURNAL" | "CASH_BANK"; voucherId: number; voucherNumber: string; voucherDate: string; narration: string | null; debit: string; credit: string }
+export interface AccountPeek {
+  ledger: { id: number; code: string; name: string; requiresSubLedger: boolean };
+  subLedger: { id: number; code: string; name: string } | null;
+  balance: { debit: string; credit: string };
+  recent: PeekEntry[];
+}
+export const accountPeekApi = {
+  get: (p: { companyId: number; branchId: number; fiscalYear: string; date: string; generalLedgerId: number; subLedgerId?: number | null; excludeJournalVoucherId?: number | null; excludeCashBankVoucherId?: number | null; limit?: number }) =>
+    req<AccountPeek>(`/api/account-peek?${qstr(p)}`),
+};
+
 // ---- Journal voucher ------------------------------------------------------------------------------------------------------------
 export interface JLookups {
   ledgers: { id: number; code: string; name: string; requiresSubLedger: boolean; isActive: boolean }[];

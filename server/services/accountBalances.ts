@@ -19,7 +19,7 @@ export interface AccountBalanceRow {
   credit: string;
 }
 
-function signedPaise(value: string): bigint {
+export function signedPaise(value: string): bigint {
   // The database sums numeric columns that carry more than two decimals (e.g. "500.000000"), so accept any number of
   // decimals and round the magnitude half-up to whole paise.
   const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(value);
