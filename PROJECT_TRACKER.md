@@ -18,17 +18,17 @@
 | Validation | zod, driven by `shared/masters.ts` (single source for UI + server) |
 | Deployment | None found. `npm run build && npm start` serves `dist/` from Express. `docker-compose.yml` = local Postgres only |
 | Release / milestone | None established (package version 0.1.0) |
-| Last actual audit | 2026-11-17 (session 20: Sales Invoice MVP added in the current uncommitted patch; migrations 0028–0029; typecheck, production build and Drizzle check passed. `pnpm test`: 275 passed; 579 DB-backed tests skipped because no local PostgreSQL test DB was available. Fresh-DB migration and UI verification remain open.) |
+| Last actual audit | 2026-11-17 (session 21: Sales Invoice completed and pushed; account side panel pushed. Fresh PostgreSQL 16: `pnpm test:db` 878/878 tests in 54 files; typecheck clean; Drizzle metadata matches migrations 0028–0029. Manual UI verification and owner dev-DB migration remain open.) |
 
 ---
 
 ## B. Current project state
 
-- **Latest inspected application commit:** `743d5cf` (import source costs and dedicated import landed-cost assessment), pushed to GitHub `main`; Sales Invoice work below is uncommitted.
+- **Latest inspected application commit:** `10e90a5` (Sales Invoice tests), pushed to GitHub `main`. Earlier this session: `1d580ca` (account side panel on Journal and Cash/Bank vouchers) and `ed27247` (Sales Invoice schema, migrations, wiring).
 - **Branch:** `main`
-- **Working tree (session 20):** Sales Invoice MVP, shared voucher-writer extraction, and migrations 0028–0029 are uncommitted; do not assume they are on GitHub.
+- **Working tree (session 21):** clean; Sales Invoice MVP, shared voucher writer and migrations 0028–0029 are on GitHub `main`.
 - **Package manager:** pnpm (owner's choice). `package-lock.json` removed in the ERP-004 changes.
-- **Phase:** Purchase documents and import assessments remain implemented. A direct Sales Invoice MVP now covers draft/save, terms, balanced journal posting and reversal through schema, DB guards, service, API and React screen. Periodic inventory accounting remains in effect; stock movements/COGS, deliveries, returns, tax reports and receivables settlement are outside this MVP. Authentication is absent. Fresh-DB migration, DB-backed tests, manual UI checks, owner dev-DB migration and GitHub Actions verification remain open.
+- **Phase:** Purchase documents and import assessments remain implemented. A direct Sales Invoice MVP now covers draft/save, terms, balanced journal posting and reversal through schema, DB guards, service, API and React screen. Periodic inventory accounting remains in effect; stock movements/COGS, deliveries, returns, tax reports and receivables settlement are outside this MVP. Authentication is absent. Fresh-DB migration and DB-backed tests now pass (session 21); manual UI checks, owner dev-DB migration and GitHub Actions verification remain open.
 
 ### Verified complete (session 6 evidence in section G; earlier items from sessions 1-5)
 - Master CRUD engine + the 22 master screens' API layer starts and serves (health, list, create, validation, delete guard exercised for the two term masters only; other masters not re-tested this session).
@@ -43,13 +43,14 @@
 - Opening Balance grid: API tested (17 tests); UI **not** checked.
 - Stock Opening grid + stock reconciliation: API tested (44 tests, session 5); UI **not** checked.
 - Billing-terms schema: purchase forms consume document terms; Sales Invoice now consumes Sales Terms. Sales returns and other downstream sales documents do not exist yet.
-- **Sales Invoice MVP (session 20; uncommitted, DB/UI verification pending):** Direct customer invoices support stock/non-stock/service lines (where a unit is configured), Sales Terms, number series, BS/AD dates, draft edits, posting to a balanced journal voucher, and reversal. Migration 0028 adds invoice tables; 0029 adds tenant/audit/reason/period-lock guards. A rollback-scoped service integration test is added but skipped without local PostgreSQL.
+- **Sales Invoice MVP (session 21; pushed, DB-verified, manual UI pending):** Direct customer invoices support stock/non-stock/service lines (where a unit is configured), Sales Terms, number series, BS/AD dates, draft edits, posting to a balanced journal voucher, and reversal. Migration 0028 adds invoice tables; 0029 adds tenant/audit/reason/period-lock guards. `tests/service.salesInvoice.test.ts` (7 tests) covers pricing/posting/reversal, posted-invoice edit/delete/re-post refusals, reversal reason rule, the database change-reason guard on invoice/lines/terms, draft delete and company scoping, and the list state filter. Not yet tested for Sales Invoice: period lock, number-series/duplicate numbers.
+- **Account side panel (session 21; pushed `1d580ca`):** F6 toggle panel beside Journal and Cash/Bank voucher entry showing the selected ledger's balance and recent entries (`GET /api/account-peek`, `src/components/PeekPanel.tsx`, `src/lib/peek.ts`); tests in `api.accountPeek`, `peek`, `peekPanel.render`.
 - Accounting hierarchy: tables exist for Account Group → Sub Group → General Ledger → Sub Ledger; "Master Account" (Asset/Liability/Equity/Revenue/Expense) appears to be an enum on Account Group, not a table (**verify**).
 
 ### Confirmed missing
 - Authentication, authorization, tenant isolation.
 - Journal Voucher (ERP-005) and Cash/Bank Voucher (ERP-006) services, routes, screens, and migrations 0025-0026 are included; Purchase Bills and Sales Invoices now share the extracted voucher writer. Dr = Cr is enforced at commit (ERP-016, migration 0007); ERP-024 migrations 0008-0010 audit selected financial tables, refuse direct AuditLog INSERTs and require reasons for covered posted-document changes. Company lock and password override are implemented (ERP-025), but the standalone journal/cash-bank services still need `guardPeriod` integration; S9 allows edits in open periods. Sales DB behavior and migrations 0028–0029 remain unverified on PostgreSQL.
-- Purchase documents have services, API routes, UI screens and earlier DB/API tests, but the screens have not been manually re-verified. Sales Invoice is partially implemented as noted above; Sales Returns, stock movements/COGS, Tax/VAT reports and Depreciation remain missing.
+- Purchase documents have services, API routes, UI screens and earlier DB/API tests, but the screens have not been manually re-verified. Sales Invoice is implemented as an MVP as noted above; Sales Returns, stock movements/COGS, Tax/VAT reports and Depreciation remain missing.
 - Reports (Trial Balance, P&L, Balance Sheet, Ledger).
 - Audit trail: **parts 1 and 2 pushed** (`b7f4882`, `f6e6714`, plus hardening `351989c`; migrations 0008-0010). A database trigger logs INSERT / UPDATE / DELETE for vouchers and lines, purchase bills / lines / import detail / terms / allocations, and opening balances, with company, caller-supplied user, and reason. UPDATE, DELETE, TRUNCATE and direct INSERT on `AuditLog` are refused. A non-blank reason is required for INSERTs into an already-posted document and for changes/deletes of posted rows; the purchase service scopes initial child inserts to an exact table/parent so posting/reversal still works. `GET /api/audit` validates PostgreSQL integer ranges and rejects repeated query parameters. **Remaining:** caller-supplied identity is unauthenticated (ERP-002); database-owner/superuser privileges can bypass triggers; a log screen; ERP-026 must pass the reason when it adds posted-bill editing; orders / challans / stock openings are not audited; history before 0008 does not exist. The landed-cost-only exception is deliberately broad: any SQL caller changing only `allocatedTermAmount`, `landedAmount`, and `landedRate` on `PurchaseBillLine` is exempt from a reason.
 - Company lock (closing) date: **added by ERP-025 (session 18 patch, migration 0011, `CompanyLock`; decision S12).** Still missing: a screen for it, the admin-permission override (needs ERP-002), and a defined relation to the year-level `FiscalYear.isClosed` (ERP-007).
@@ -150,12 +151,12 @@
 
 ## E. Current task and next action
 
-- **Current task (session 20):** Sales Invoice MVP is implemented in the current uncommitted patch. It reuses purchase line resolution, number-series services and the shared term calculator; creates balanced journal entries on posting; and reverses by writing an opposite voucher. Migration 0028 creates invoice tables; 0029 adds company consistency, polymorphic-term, audit/reason and period-lock guards. Typecheck, build, Drizzle check and non-DB tests passed; DB migration/tests and manual UI remain unverified. Next: run the local PostgreSQL `pnpm test:db`, check the UI, then decide sales returns/tax/stock scope.
+- **Current task (session 21):** Sales Invoice MVP and the account side panel are pushed to `main` and verified on a fresh PostgreSQL 16 (878/878 tests). Next: manual UI check of draft → post → reverse, then choose between bill-wise adjustment (unpaid bills and credit limit in the side panel) or a Ledger report with Save & New; sales returns/tax/stock-COGS scope still open.
 - **What session 12/13 established (run, not read):** against a local PostgreSQL 16 test DB, baseline `2869c1b` passed 444/444; after ERP-016 the full suite passed 466/466 twice across 20 files. Session 13 independently repeated both full-suite runs, `pnpm build`, and the Drizzle migration-generation check (no schema changes). Only the ERP-017 `it.fails` tests remain.
 - **Files changed for ERP-016:** `drizzle/0007_voucher_balance.sql` (new), `drizzle/meta/0007_snapshot.json` (new, generated), `drizzle/meta/_journal.json`, `tests/db.voucherBalance.test.ts` (new), `PROJECT_TRACKER.md`. Session 13 changed only the tracker after applying commit `624a73c`.
-- **Owner actions still open:** (1) run `pnpm test:db` against the disposable local PostgreSQL test DB to apply all migrations through 0029 and run DB tests; (2) apply pending migrations through 0029 to the owner dev DB with `pnpm db:migrate` (do not recreate it); (3) check GitHub Actions for `743d5cf`; (4) manually verify the new Sales Invoice screen and previously added Purchase screens; (5) confirm or change choices 2-4 in S9; (6) plan DB-role separation before relying on audit triggers against privileged SQL access. The inventory method is decided: periodic.
+- **Owner actions still open:** (1) run `pnpm test:db` locally too (passed in session 21 on a cloud test DB); (2) apply pending migrations through 0029 to the owner dev DB with `pnpm db:migrate` (do not recreate it); (3) check GitHub Actions for `10e90a5`; (4) manually verify the new Sales Invoice screen and previously added Purchase screens; (5) confirm or change choices 2-4 in S9; (6) plan DB-role separation before relying on audit triggers against privileged SQL access. The inventory method is decided: periodic.
 - **Blocker:** no build/test blocker. Audit identity remains caller-supplied (ERP-002), owner dev-DB upgrade, browser/UI verification and GitHub Actions remain unconfirmed, and explicit mutation/concurrency runs remain open under ERP-022. A privileged database role can bypass triggers; landed-cost-only line updates remain an intentional reason-guard exception.
-- **Single best next action:** run `pnpm test:db` locally to prove migrations 0028–0029 and the new Sales Invoice DB behavior, then manually exercise draft → post → reverse in the UI. After that, continue sales follow-ups (returns, tax and stock/COGS scope), ERP-022 purchase mutation/concurrency tests and ERP-026 posted-bill editing. ERP-005, ERP-017 and ERP-007 follow; audit/lock screens and role separation are separate work.
+- **Single best next action:** manually exercise Sales Invoice draft → post → reverse and the account side panel in the browser, apply migrations through 0029 to the dev DB, then continue with bill-wise adjustment or the Ledger report; ERP-022 purchase mutation/concurrency tests and ERP-026 posted-bill editing also remain.
 
 ---
 
@@ -484,6 +485,16 @@ Sandbox: Linux, Node 22, pnpm 12.14.0, throwaway PostgreSQL 16 databases (never 
 - Fixed INSERT and inbound reparenting coverage for posted children; scoped legitimate purchase voucher/reversal inserts to an exact table and parent. Added PostgreSQL range and duplicate-query validation tests. Kept the landed-cost-only reason exception as an explicit broad policy carve-out.
 - `pnpm test:db` passed twice (23 files / 533 tests each), `pnpm build` passed, Drizzle generation had no schema changes (runs completed 2026-10-25). Session 16 mutation checks were not repeated.
 
+
+---
+
+### 2026-11-17 — Session 21 — account side panel, Sales Invoice completion, tests
+- Pushed `1d580ca` (account side panel), `ed27247` (Sales Invoice: Drizzle schema matching migration 0028, migration meta 0028–0029, number-series/audit registration, api.ts merged with the panel API) and `10e90a5` (Sales Invoice tests; `listSalesInvoices` accepts an optional `tx`).
+- Verified: typecheck clean; `pnpm test:db` 878/878.
+- Known fragility: `api.journalVoucher` test can leave vouchers in the seeded company, so `api.company` delete tests can fail if run after it (pre-existing test-order issue).
+
+## HANDOFF (end of session 21)
+**Open:** manual UI checks, dev-DB migration, GitHub Actions, Sales Invoice period-lock/number-series tests, bill-wise adjustment or Ledger report next.
 
 ---
 
