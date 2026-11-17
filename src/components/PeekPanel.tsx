@@ -81,6 +81,10 @@ export interface PeekPanelProps {
   /** the kind of voucher this screen is: only its entries can be opened here */
   ownKind: PeekEntry["kind"];
   onOpen?: (voucherId: number) => void;
+  /** the most this account may owe, in paisa (a customer's credit limit): the panel then shows what is left and warns when the balance would pass it */
+  creditLimit?: bigint | null;
+  /** more to show under the entries (a customer's recent invoices) */
+  extra?: React.ReactNode;
 }
 
 const KIND_LABEL: Record<PeekEntry["kind"], string> = { JOURNAL: "Journal", CASH_BANK: "Cash / Bank" };
@@ -134,6 +138,15 @@ export function PeekPanel(p: PeekPanelProps) {
               <div className="flex items-baseline justify-between gap-2"><dt className="font-medium text-slate-700">After this voucher</dt><dd className="font-semibold tabular-nums text-ink">{netText(net + p.pending)}</dd></div>
             </dl>
           )}
+          {p.creditLimit != null && p.creditLimit > 0n && (() => {
+            const after = net + p.pending, over = after > p.creditLimit!;
+            return (
+              <div role={over ? "alert" : undefined} className={`mt-2.5 rounded-md px-2.5 py-1.5 text-[12.5px] ${over ? "border border-rose-300 bg-rose-50 text-rose-800" : "bg-slate-50 text-slate-700"}`}>
+                Credit limit <b className="tabular-nums">{netText(p.creditLimit!)}</b>
+                <br />{over ? <>Over the limit by <b className="tabular-nums">{netText(after - p.creditLimit!)}</b></> : <>Room left <b className="tabular-nums">{netText(p.creditLimit! - after)}</b></>}
+              </div>
+            );
+          })()}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           <h3 className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Last entries</h3>
@@ -163,6 +176,7 @@ export function PeekPanel(p: PeekPanelProps) {
               })}
             </ul>
           )}
+          {p.extra}
         </div>
       </>
     );

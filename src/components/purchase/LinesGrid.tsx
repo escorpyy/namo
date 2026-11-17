@@ -40,6 +40,11 @@ function lineColumns(kind: LineKind, showAlt: boolean, showLoc: boolean, showBat
   const cols: ColKey[] = ["n", "p"];
   if (showAlt) cols.push("aq", "au");
   cols.push("q", "u", "r", "amt");
+  if (kind === "sales") { // product, quantity, rate, amount, then the line's terms and net when the screen offers them
+    if (showTerms) cols.push("terms", "net");
+    cols.push("rm");
+    return cols;
+  }
   if (kind === "bill") {
     if (showTerms) cols.push("terms");
     if (showLoc) cols.push("lc");
@@ -83,6 +88,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
   const unitCode = useMemo(() => new Map(lookups.units.map((u) => [u.id, u.code])), [lookups.units]);
   const productOpts = useMemo<ReferenceOption[]>(() => lookups.products.map((p) => ({ value: String(p.id), label: `${p.code} — ${p.description}`, code: p.code, name: p.description, detail: p.type.replaceAll("_", " "), searchText: `${p.type} ${p.tracksBatch ? "batch" : ""} ${p.tracksExpiry ? "expiry" : ""}`, isActive: p.isActive, badge: p.type === "STOCK" ? undefined : p.type.replace("_", " ").toLowerCase() })), [lookups.products]);
   const locOpts = useMemo<ReferenceOption[]>(() => lookups.locations.map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, isActive: l.isActive })), [lookups.locations]);
+  const hasTerms = (kind === "bill" || kind === "sales") && !!onOpenTerms; // a per-line "Term Amount" cell that opens the terms dialog
   const stockish = kind === "challan" || kind === "bill"; // order and sales lines have no location, batch or expiry columns
   const layout = useMemo(() => {
     let showAlt = false, showLoc = false, showBatch = false, showExpiry = false, showLink = false;
@@ -96,7 +102,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
       if (stockish && row.link) showLink = true;
     }
     if (stockish && lines.some((row) => row.link)) showLink = true;
-    const cols = lineColumns(kind, showAlt, showLoc, showBatch, showExpiry, showLink, kind === "bill" && !!onOpenTerms);
+    const cols = lineColumns(kind, showAlt, showLoc, showBatch, showExpiry, showLink, hasTerms);
     return { cols, showAlt, showLoc, showBatch, showExpiry, showLink, template: cols.map((c) => COL_SIZE[c]).join(" "), heads: cols.map((c) => COL_HEAD[c]) };
   }, [kind, lines, products, onOpenTerms]);
 
@@ -149,7 +155,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
     onAddRow: () => addRow(), lastRowBlank: () => isBlankLine(lines[lines.length - 1]), leave: (el, dir) => focusStep(el, dir),
     onCellEnter: (cell, el) => {
       if (cell.col === "b" && kind === "bill") { setBatchFor(cell.row); return true; }
-      if (cell.col === "terms" && kind === "bill" && onOpenTerms && lines[cell.row]?.productId) { onOpenTerms(cell.row, () => gridRows.stepFrom(el, 1)); return true; }
+      if (cell.col === "terms" && hasTerms && onOpenTerms && lines[cell.row]?.productId) { onOpenTerms(cell.row, () => gridRows.stepFrom(el, 1)); return true; }
       return false;
     },
   });
@@ -208,7 +214,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                     : <span data-readonly="true" className="text-[12px] text-slate-600" title="Base unit">{p?.baseUnitId ? unitCode.get(p.baseUnitId) : ""}</span>}
                   <input data-field={`L.${i}.r`} disabled={off || !p} inputMode="decimal" autoComplete="off" value={l.rate} placeholder="0.00" onChange={decOnly(RATE, (v) => patch(i, { rate: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("r", "text-right tabular-nums")} aria-label="Rate" />
                   <span data-readonly="true" className="text-right tabular-nums font-medium text-slate-700" title="Calculated amount">{money(lineAmount(l, p))}</span>
-                  {kind === "bill" && onOpenTerms && (() => {
+                  {hasTerms && onOpenTerms && (() => {
                     const summary = termSummary?.(i) ?? { amount: "0.00", count: 0 };
                     return <button type="button" data-field={`L.${i}.terms`} data-nav={`line-terms-${i}`} disabled={!l.productId} onClick={(event) => { const trigger = event.currentTarget; onOpenTerms(i, () => gridRows.stepFrom(trigger, 1)); }} title={`Edit terms for line ${i + 1}${summary.count ? ` · ${summary.count} term${summary.count === 1 ? "" : "s"}` : ""}`} className={`${kind === "bill" ? "h-7" : "h-8"} w-full px-1 text-right tabular-nums text-cobalt-700 underline decoration-cobalt-200 underline-offset-4 hover:bg-cobalt-50 disabled:text-slate-500 disabled:no-underline focus-visible:outline-2 focus-visible:outline-cobalt-700`}>{summary.amount.startsWith("-") ? `− ${money(summary.amount.slice(1))}` : money(summary.amount || "0")}{summary.count > 0 && <span className="ml-1 text-[10px] text-slate-500 no-underline">({summary.count})</span>}</button>;
                   })()}
@@ -237,7 +243,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                     </>
                   )}
                   {layout.showLink && <span className="break-words text-[11px] leading-tight text-slate-600" title={l.link}>{l.link || "—"}</span>}
-                  {kind === "bill" && onOpenTerms && <span data-readonly="true" className="text-right tabular-nums font-medium text-slate-700" title="Net amount (basic ± terms)">{lineNet(lineAmount(l, p), (termSummary?.(i) ?? { amount: "0.00" }).amount)}</span>}
+                  {hasTerms && <span data-readonly="true" className="text-right tabular-nums font-medium text-slate-700" title="Net amount (basic ± terms)">{lineNet(lineAmount(l, p), (termSummary?.(i) ?? { amount: "0.00" }).amount)}</span>}
                   <button type="button" data-nav="remove-line" disabled={off} onClick={() => remove(i)} title="Remove line (Delete when the row is selected)" aria-label="Remove line" className={`${kind === "bill" ? "h-7 w-7" : "h-8 w-8"} grid place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-2 focus-visible:outline-cobalt-700 disabled:opacity-30`}><X size={14} /></button>
                 </div>
                 {errMsgs.length > 0 && <p className="px-3 pb-1 text-[12px] text-rose-700">{errMsgs[0]}</p>}

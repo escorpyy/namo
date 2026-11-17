@@ -4,11 +4,17 @@ import { salesInvoiceApi, type PDoc, type PLookups, type SalesLookups } from "..
 import { parseDec } from "../../../shared/decimal";
 import { previewPurchase } from "../../../shared/purchase-preview";
 import { useDialog } from "../../components/Dialog";
-import { NarrationInput } from "../../components/NarrationInput";
 import type { EntryTabProps } from "../../components/purchase/DocWorkspace";
-import { COMMON_HELP, DocShell, Field, FormSection, Pill, money } from "../../components/purchase/Bits";
+import { COMMON_HELP, DocHeader, Field, Pill, formEnterKey, money } from "../../components/purchase/Bits";
+import { Dialog } from "../../components/Dialog";
+import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
+import { PeekPanel, PeekToggle, usePeekOpen } from "../../components/PeekPanel";
+import { useTermsDialog } from "../../components/purchase/TermsDialog";
+import { parseAmount } from "../../../shared/cashBankVoucher";
+import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
+import CustomerInvoices from "./CustomerInvoices";
 import { DateField, TextField } from "../../components/purchase/HeadFields";
-import { LinesGrid, TermsGrid } from "../../components/purchase/LinesGrid";
+import { LinesGrid } from "../../components/purchase/LinesGrid";
 import { NumberField } from "../../components/purchase/NumberField";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
@@ -35,6 +41,8 @@ export const STATE_OPTIONS = [{ value: "DRAFT", label: "Draft" }, { value: "POST
 export const SALES_HINTS = ["Enter: Next", "Shift+Enter: Previous", "Space/↓: Open list", "Ctrl+S: Save", "F3: New", "F2: Edit", "F4: Search", "F1: Help"];
 const HELP: [string, string][] = [
   ...COMMON_HELP.filter(([k]) => k !== "Alt+4"),
+  ["F6", "Show / hide the customer panel (balance with this invoice, credit limit, recent invoices)"],
+  ["Enter (line term cell)", "Open the terms of that line; the strip under the lines opens the terms of the whole invoice"],
   ["Post (button)", "Create the accounting journal and lock the invoice; a posted invoice is changed only by reversing it"],
   ["Reverse (button)", "Needs a reason; writes an opposite posted invoice and journal, the original stays as it was"],
 ];
@@ -42,7 +50,7 @@ const HELP: [string, string][] = [
 // The sales screens read the same pick-list shape as the purchase ones: customers stand in for vendors, a product's sales rate for its purchase rate.
 export function toPLookups(l: SalesLookups): PLookups {
   return {
-    vendors: l.customers.map((c) => ({ ...c, isActive: true, paymentTermDays: null })),
+    vendors: l.customers.map((c) => ({ ...c, isActive: true, paymentTermDays: c.creditDays })),
     subLedgers: l.subLedgers.map((s) => ({ ...s, isActive: true })),
     agents: l.agents.map((a) => ({ ...a, isActive: true })),
     locations: [],
@@ -178,45 +186,108 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
     </p>
   );
 
+  // ---- terms: one strip for the document, one cell per line, both open the same dialog ----
+  const emptyPreview = useMemo(() => previewPurchase([], [], new Map(), true), []);
+  const T = useTermsDialog({
+    lines: f?.lines ?? [], terms: f?.terms ?? [], lookups: lk, products, masters, readOnly: ro, saved: !!doc, preview: f ? preview : emptyPreview,
+    savedBasic: doc ? String(doc.basicAmount) : undefined, savedNet: doc ? String(doc.totalAmount) : undefined,
+    errors: s.errors, clearError: s.clearError, setTerms: (terms) => s.patch({ terms }), contextKey: String(p.companyId), noun: "invoice",
+  });
+
+  // ---- the customer panel (F6): balance with this invoice added, credit limit, recent invoices ----
+  const [peekOpen, togglePeek] = usePeekOpen();
+  const target = f?.customerGLId ? { glId: Number(f.customerGLId), subId: f.subLedgerId ? Number(f.subLedgerId) : null } : null;
+  const draftLike = !doc || state === "DRAFT";
+  const paise = (v: string | null | undefined) => { if (!v) return 0n; const neg = v.startsWith("-"); const n = parseAmount(neg ? v.slice(1) : v) ?? 0n; return neg ? -n : n; };
+  const pending = target && draftLike && preview.status === "ready" ? paise(preview.netAmount) : 0n; // a posted invoice is already in the balance
+  const peekFy = lk?.fiscalYears.find((y) => f && y.startDate <= f.invoiceDate && f.invoiceDate <= y.endDate)?.code ?? p.fyCode;
+  const creditLimit = customer?.creditLimit ? paise(customer.creditLimit) : null;
+
+  const onFormKey = formEnterKey;
+  if (!f || !lk) return <section data-purchase-document className="grid min-h-0 flex-1 place-items-center text-slate-500">Loading…</section>;
   return (
-    <DocShell s={s} title="Sales Invoice" singular="Invoice" number={doc ? String(doc.invoiceNumber) : undefined} branchName={p.branchName} fyCode={p.fyCode} statusOptions={STATE_OPTIONS}
-      pill={state && <Pill text={state} tone={STATE_TONE[state]} />} canEdit={!!doc && cfg.editable(doc)} canDelete={!!doc && cfg.deletable(doc)} actions={actions} help={HELP} notice={notice}>
-      {f && lk && (
-        <div className="space-y-3 pt-2">
-          <FormSection title="Invoice Header" hint="Number, customer and payment terms">
-            <div className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-3.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-              <NumberField label="Invoice No" documentType="SALES_INVOICE" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.invoiceNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => s.patch(c)} />
-              <DateField label="Invoice Date" name="invoiceDate" value={f.invoiceDate} calendar={p.calendar} readOnly={ro} error={s.err("invoiceDate")} required
-                onChange={(v) => { const due = f.dueDays ? addDaysIso(v, Number(f.dueDays)) : ""; s.patch(due ? { invoiceDate: v, dueDate: due } : { invoiceDate: v }); s.clearError("invoiceDate"); }} />
-              <Field label="Customer" required error={s.err("customerGLId")} className="col-span-1 sm:col-span-2">
-                <MasterReferencePicker fieldName="customerGLId" label="Customer ledger" scopeKey="customer-ledgers" contextKey={String(p.companyId)} placeholder="Choose customer ledger…" required value={f.customerGLId} hasError={!!s.err("customerGLId")} options={customers} disabled={ro}
-                  createMaster={{ key: "party", defaults: { glType: "CUSTOMER" }, valueFrom: (r) => String(r.generalLedgerId ?? r.id) }}
-                  onChange={(v) => { s.patch({ customerGLId: v, subLedgerId: "" }); s.clearError("customerGLId", "subLedgerId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
-              </Field>
-              <Field label={customer?.requiresSubLedger ? "Sub Ledger" : "Sub Ledger (not needed)"} required={!!customer?.requiresSubLedger} error={s.err("subLedgerId")}>
-                <MasterReferencePicker fieldName="subLedgerId" label="Sub Ledger" scopeKey="sub-ledger" contextKey={`${p.companyId}:${f.customerGLId || "none"}`} placeholder={subs.length ? "Choose sub ledger…" : customer?.requiresSubLedger ? "None yet — Ctrl+M to create" : "—"} value={f.subLedgerId} hasError={!!s.err("subLedgerId")} options={subs}
-                  disabled={ro || (subs.length === 0 && !customer?.requiresSubLedger)} required={!!customer?.requiresSubLedger} createMaster={customer?.requiresSubLedger ? { key: "sub-ledger", defaults: { generalLedgerId: f.customerGLId } } : undefined}
-                  onChange={(v) => { s.patch({ subLedgerId: v }); s.clearError("subLedgerId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
-              </Field>
-              <Field label="Salesperson" error={s.err("agentId")}>
-                <MasterReferencePicker fieldName="agentId" label="Salesperson" scopeKey="agents" contextKey={String(p.companyId)} placeholder="Salesperson (optional)" value={f.agentId} hasError={!!s.err("agentId")} options={agents} disabled={ro} createMaster={{ key: "agents" }}
-                  onChange={(v) => s.patch({ agentId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
-              </Field>
-              <TextField label="Due Days" name="dueDays" value={f.dueDays} max={4} readOnly={ro} error={s.err("dueDays")}
-                onChange={(v) => { const due = v ? addDaysIso(f.invoiceDate, Number(v)) : ""; s.patch(due ? { dueDays: v, dueDate: due } : { dueDays: v }); if (due) s.clearError("dueDate"); }} />
-              <DateField label="Due Date" name="dueDate" value={f.dueDate} onChange={(v) => { s.patch({ dueDate: v }); s.clearError("dueDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("dueDate")} />
-              <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} narrationCompanyId={p.companyId} className="col-span-1 sm:col-span-2 2xl:col-span-3" error={s.err("remarks")} />
+    <>
+      <div className="ledger flex min-h-0 min-w-0 flex-1">
+        <section data-purchase-document className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <DocHeader title="Sales Invoice" number={doc ? String(doc.invoiceNumber) : undefined} pill={state && <Pill text={state} tone={STATE_TONE[state]} />} branchName={p.branchName} fyCode={p.fyCode} dirty={s.dirty}
+            right={<PeekToggle open={peekOpen} onClick={togglePeek} />} />
+          {notice && <div className="shrink-0 px-5 pt-2">{notice}</div>}
+          {/* one screen: header on top, the lines take what is left, terms and totals stay at the bottom */}
+          <div data-zone="form" onKeyDown={onFormKey} className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden px-5 py-3">
+            <section className="lg-card shrink-0 px-4 py-3" aria-label="Invoice header">
+              <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 md:grid-cols-4 2xl:grid-cols-6">
+                <NumberField label="Invoice No" documentType="SALES_INVOICE" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.invoiceNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => s.patch(c)} />
+                <DateField label="Invoice Date" name="invoiceDate" value={f.invoiceDate} calendar={p.calendar} readOnly={ro} error={s.err("invoiceDate")} required
+                  onChange={(v) => { const due = f.dueDays ? addDaysIso(v, Number(f.dueDays)) : ""; s.patch(due ? { invoiceDate: v, dueDate: due } : { invoiceDate: v }); s.clearError("invoiceDate"); }} />
+                <Field label="Customer" required error={s.err("customerGLId")} className="col-span-2">
+                  <MasterReferencePicker fieldName="customerGLId" label="Customer ledger" scopeKey="customer-ledgers" contextKey={String(p.companyId)} placeholder="Choose customer ledger…" required value={f.customerGLId} hasError={!!s.err("customerGLId")} options={customers} disabled={ro}
+                    createMaster={{ key: "party", defaults: { glType: "CUSTOMER" }, valueFrom: (r) => String(r.generalLedgerId ?? r.id) }}
+                    onChange={(v) => {
+                      // a new customer brings its credit days, unless due days are already filled
+                      const days = v && v !== f.customerGLId && !f.dueDays ? lk.vendors.find((x) => String(x.id) === v)?.paymentTermDays : null;
+                      s.patch(days ? { customerGLId: v, subLedgerId: "", dueDays: String(days), dueDate: f.invoiceDate ? addDaysIso(f.invoiceDate, days) : f.dueDate } : { customerGLId: v, subLedgerId: "" });
+                      s.clearError("customerGLId", "subLedgerId");
+                    }} onCommit={(el, dir) => focusStep(el, dir)} />
+                </Field>
+                <Field label={customer?.requiresSubLedger ? "Sub Ledger" : "Sub Ledger (not needed)"} required={!!customer?.requiresSubLedger} error={s.err("subLedgerId")}>
+                  <MasterReferencePicker fieldName="subLedgerId" label="Sub Ledger" scopeKey="sub-ledger" contextKey={`${p.companyId}:${f.customerGLId || "none"}`} placeholder={subs.length ? "Choose sub ledger…" : customer?.requiresSubLedger ? "None yet — Ctrl+M to create" : "—"} value={f.subLedgerId} hasError={!!s.err("subLedgerId")} options={subs}
+                    disabled={ro || (subs.length === 0 && !customer?.requiresSubLedger)} required={!!customer?.requiresSubLedger} createMaster={customer?.requiresSubLedger ? { key: "sub-ledger", defaults: { generalLedgerId: f.customerGLId } } : undefined}
+                    onChange={(v) => { s.patch({ subLedgerId: v }); s.clearError("subLedgerId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
+                </Field>
+                <Field label="Salesperson" error={s.err("agentId")}>
+                  <MasterReferencePicker fieldName="agentId" label="Salesperson" scopeKey="agents" contextKey={String(p.companyId)} placeholder="Salesperson (optional)" value={f.agentId} hasError={!!s.err("agentId")} options={agents} disabled={ro} createMaster={{ key: "agents" }}
+                    onChange={(v) => s.patch({ agentId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
+                </Field>
+                <TextField label="Due Days" name="dueDays" value={f.dueDays} max={4} readOnly={ro} error={s.err("dueDays")}
+                  onChange={(v) => { if (!/^\d{0,4}$/.test(v)) return; const due = v ? addDaysIso(f.invoiceDate, Number(v)) : ""; s.patch(due ? { dueDays: v, dueDate: due } : { dueDays: v }); if (due) s.clearError("dueDate"); }} />
+                <DateField label="Due Date" name="dueDate" value={f.dueDate} onChange={(v) => { s.patch({ dueDate: v }); s.clearError("dueDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("dueDate")} />
+                <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} narrationCompanyId={p.companyId} className="col-span-2 md:col-span-4 2xl:col-span-2" error={s.err("remarks")} />
+              </div>
+            </section>
+
+            <section className="lg-card flex min-h-0 flex-1 flex-col">
+              <LinesGrid fill kind="sales" lines={f.lines} onChange={(lines) => T.updateLines(lines, (c) => s.patch(c))} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)}
+                onOpenTerms={(index, continueAfterApply) => T.open({ scope: "line", lineNumber: T.lineNumberAt(index), lineIndex: index, continueAfterApply })} termSummary={T.lineSummary} />
+            </section>
+
+            <section className="lg-card flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2" aria-label="Invoice terms">
+              <div className="min-w-0 flex-1">
+                <h2 className="lg-card-title">Invoice terms</h2>
+                <p className="lg-card-hint mt-0.5">Discount, tax, round off and other charges on the whole invoice. A line's own terms open from its Term Amount cell.</p>
+              </div>
+              <span className="lg-chip">{T.header.count} terms</span>
+              <b className="min-w-[100px] text-right text-[15px] font-semibold tabular-nums">{T.header.amount.startsWith("-") ? `− ${money(T.header.amount.slice(1))}` : money(T.header.amount) || "0.00"}</b>
+              <button type="button" data-nav="header-terms" className="btn" onClick={() => T.open({ scope: "header" })}>{ro ? "View terms" : "Assess terms"}</button>
+              {s.err("terms") && <p role="alert" className="w-full text-[12px] text-rose-700">{s.err("terms")}</p>}
+            </section>
+          </div>
+
+          <footer className="tape flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2.5 px-5 py-3">
+            <div className="min-w-0 flex-1"><PurchaseInvoiceTotals compact noun="invoice" preview={preview} savedDoc={doc} readOnly={ro} hasLines={liveLines > 0} /></div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {!ro ? (
+                <>
+                  <button data-nav className="btn btn-primary" disabled={s.saving} onClick={() => void s.save()}><Save size={14} /> {s.mode === "edit" ? "Update" : "Save"} <span className="kbd">Ctrl+S</span></button>
+                  <button data-nav className="btn" onClick={() => (doc ? s.cancel() : s.guard(() => p.onClose(p.tabId)))}><X size={14} /> Cancel {doc && <span className="kbd">Esc</span>}</button>
+                </>
+              ) : (
+                <>
+                  <button data-nav className="btn" onClick={() => p.onNew()}><Plus size={14} /> New <span className="kbd">F3</span></button>
+                  <button data-nav className="btn" disabled={!doc || !cfg.editable(doc)} onClick={s.edit}><Pencil size={14} /> Edit <span className="kbd">F2</span></button>
+                  <button data-nav className="btn" disabled={!doc || !cfg.deletable(doc)} onClick={s.askDelete}><Trash2 size={14} /> Delete <span className="kbd">Ctrl+Del</span></button>
+                  {actions && <><span className="tape-sep mx-1" />{actions}</>}
+                </>
+              )}
             </div>
-          </FormSection>
-          <h2 className="text-[13px] font-semibold">Lines</h2>
-          <LinesGrid kind="sales" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} />
-          <h2 className="text-[13px] font-semibold">Sales Terms</h2>
-          <TermsGrid terms={f.terms} onChange={(terms) => s.patch({ terms })} lookups={lk} masters={masters} lineCount={liveLines} readOnly={ro} errors={s.errors} clearError={s.clearError} contextKey={String(p.companyId)} excludeCategory="COSTING"
-            calculationPreview={ro ? undefined : preview.terms} previewError={preview.message} />
-          {s.err("terms") && <p role="alert" className="text-[12px] text-rose-700">{s.err("terms")}</p>}
-          <PurchaseInvoiceTotals noun="invoice" preview={preview} savedDoc={doc} readOnly={ro} hasLines={liveLines > 0} />
-        </div>
-      )}
-    </DocShell>
+          </footer>
+        </section>
+        <PeekPanel open={peekOpen} onToggle={togglePeek} target={target} companyId={p.companyId} branchId={p.branchId} fiscalYear={peekFy} date={f.invoiceDate}
+          pending={pending} calendar={p.calendar} ownKind="JOURNAL" creditLimit={creditLimit}
+          extra={target ? <CustomerInvoices companyId={p.companyId} branchId={p.branchId} customerGLId={target.glId} docId={doc?.id} calendar={p.calendar} onOpen={p.onOpenDoc} /> : null} />
+      </div>
+      {T.node}
+      {s.dialog && <Dialog spec={s.dialog} onClose={() => s.setDialog(null)} />}
+      {s.help && <ShortcutsOverlay onClose={() => s.setHelp(false)} shortcuts={HELP} />}
+    </>
   );
 }

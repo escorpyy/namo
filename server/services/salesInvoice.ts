@@ -78,11 +78,11 @@ function voucherNumber(invoice: { id?: number; invoiceNumber: string; fiscalYear
 }
 
 // Read-only form lookups: active customer/control ledgers, sub-ledgers, salesperson, sellable products, sales terms, years and series.
-export function salesInvoiceLookups(companyId: number, branchId: number, userId: number | null) {
-  return inTx(undefined, async (tx) => {
+export function salesInvoiceLookups(companyId: number, branchId: number, userId: number | null, opts: { tx?: any } = {}) {
+  return inTx(opts.tx, async (tx) => {
     const [customers, subLedgers, agents, products, stock, nonStock, services, allUnits, alternateUnits, terms, fiscalYears, series] = await Promise.all([
-      tx.select({ id: S.generalLedger.id, code: S.generalLedger.code, name: S.generalLedger.name, requiresSubLedger: S.generalLedger.requiresSubLedger, isCashOrBank: S.generalLedger.isCashOrBank })
-        .from(S.generalLedger).where(and(eq(S.generalLedger.companyId, companyId), eq(S.generalLedger.isActive, true), or(inArray(S.generalLedger.glType, ["CUSTOMER", "BOTH"]), eq(S.generalLedger.isCashOrBank, true)))).orderBy(asc(S.generalLedger.code)),
+      tx.select({ id: S.generalLedger.id, code: S.generalLedger.code, name: S.generalLedger.name, requiresSubLedger: S.generalLedger.requiresSubLedger, isCashOrBank: S.generalLedger.isCashOrBank, creditLimit: S.customerDetail.creditLimit, creditDays: S.customerDetail.creditDays })
+        .from(S.generalLedger).leftJoin(S.party, eq(S.party.generalLedgerId, S.generalLedger.id)).leftJoin(S.customerDetail, eq(S.customerDetail.partyId, S.party.id)).where(and(eq(S.generalLedger.companyId, companyId), eq(S.generalLedger.isActive, true), or(inArray(S.generalLedger.glType, ["CUSTOMER", "BOTH"]), eq(S.generalLedger.isCashOrBank, true)))).orderBy(asc(S.generalLedger.code)),
       tx.select({ id: S.subLedger.id, code: S.subLedger.code, name: S.subLedger.name, generalLedgerId: S.subLedger.generalLedgerId })
         .from(S.subLedger).innerJoin(S.generalLedger, eq(S.generalLedger.id, S.subLedger.generalLedgerId))
         .where(and(eq(S.generalLedger.companyId, companyId), eq(S.generalLedger.isActive, true), eq(S.subLedger.isActive, true))).orderBy(asc(S.subLedger.code)),
@@ -129,12 +129,13 @@ export function salesInvoiceLookups(companyId: number, branchId: number, userId:
   });
 }
 
-export type SalesListFilter = { companyId: number; branchId?: number; fiscalYear?: string; status?: string; search?: string; limit?: number; tx?: any };
+export type SalesListFilter = { companyId: number; branchId?: number; fiscalYear?: string; status?: string; search?: string; limit?: number; customerGLId?: number; tx?: any };
 export async function listSalesInvoices(f: SalesListFilter) {
   const I = S.salesInvoice, G = S.generalLedger;
   const where: any[] = [eq(I.companyId, f.companyId)];
   if (f.branchId) where.push(eq(I.branchId, f.branchId));
   if (f.fiscalYear) where.push(eq(I.fiscalYear, f.fiscalYear));
+  if (f.customerGLId) where.push(eq(I.customerGLId, f.customerGLId));
   if (f.status) {
     const states: InvoiceState[] = ["DRAFT", "POSTED", "REVERSED", "REVERSAL"];
     if (!states.includes(f.status as InvoiceState)) throw new HttpError(400, `Unknown invoice status ${f.status}.`, "status");

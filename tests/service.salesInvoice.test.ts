@@ -184,4 +184,18 @@ describe.skipIf(!DB_READY)("sales invoice service layer", () => {
       await expect(svc.listSalesInvoices({ companyId: w.companyId, status: "NOPE", tx } as any)).rejects.toMatchObject({ status: 400 });
     });
   });
+  it("filters the list by customer, and the lookups carry the customer's credit limit and days", async () => {
+    await run(async (tx, w) => {
+      const partyId = await ins(tx, "Party", { companyId: w.companyId, generalLedgerId: w.customerGLId, updatedAt: NOW });
+      await ins(tx, "CustomerDetail", { partyId, creditLimit: "50000", creditDays: 30, updatedAt: NOW });
+      const lookups = await svc.salesInvoiceLookups(w.companyId, w.branchId, null, { tx } as any);
+      expect(lookups.customers.find((c: any) => c.id === w.customerGLId)).toMatchObject({ creditLimit: "50000.000000", creditDays: 30 });
+
+      const mine = await svc.saveSalesInvoice(draftInput(w), ACTOR, { tx });
+      const otherGL = await ins(tx, "GeneralLedger", { companyId: w.companyId, code: `CU2${uniq()}`.slice(0, 10), name: "Other customer", accountSubGroupId: (await rows(tx, sql`select "accountSubGroupId" as id from "GeneralLedger" where id = ${w.customerGLId}`))[0].id, normalBalance: "DEBIT", glType: "CUSTOMER", updatedAt: NOW });
+      await svc.saveSalesInvoice(draftInput(w, { customerGLId: otherGL }), ACTOR, { tx });
+      const res: any = await svc.listSalesInvoices({ companyId: w.companyId, customerGLId: w.customerGLId, tx } as any);
+      expect(res.rows.map((r: any) => Number(r.id))).toEqual([mine.id]);
+    });
+  });
 });

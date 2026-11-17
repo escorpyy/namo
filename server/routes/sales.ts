@@ -14,7 +14,7 @@ const HEAD = { invoiceNumber: "str", numberSeriesId: "int", invoiceDate: "date",
 
 const filterOf = (req: Request): SI.SalesListFilter => ({
   companyId: companyOf(req), branchId: optWhole(q(req, "branchId"), "branchId"), fiscalYear: q(req, "fiscalYear")?.slice(0, 15),
-  status: q(req, "status"), search: q(req, "search")?.slice(0, 60), limit: optWhole(q(req, "limit"), "limit"),
+  customerGLId: optWhole(q(req, "customerGLId"), "customerGLId"), status: q(req, "status"), search: q(req, "search")?.slice(0, 60), limit: optWhole(q(req, "limit"), "limit"),
 });
 async function owned(id: number, companyId: number) {
   const [invoice] = await db.select({ id: S.salesInvoice.id, companyId: S.salesInvoice.companyId, branchId: S.salesInvoice.branchId }).from(S.salesInvoice)

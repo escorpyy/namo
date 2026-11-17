@@ -5,7 +5,7 @@ import type { SalesLookups } from "../src/api";
 
 // The sales screen reuses the purchase grids, so it hands them its pick-lists in the purchase shape.
 const sales: SalesLookups = {
-  customers: [{ id: 9, code: "C001", name: "Ram Traders", requiresSubLedger: false, isCashOrBank: false }],
+  customers: [{ id: 9, code: "C001", name: "Ram Traders", requiresSubLedger: false, isCashOrBank: false, creditLimit: "50000.00", creditDays: 30 }],
   subLedgers: [{ id: 4, code: "S1", name: "Branch 1", generalLedgerId: 9 }],
   agents: [{ id: 2, code: "A1", name: "Sita" }],
   products: [{ id: 5, code: "P1", description: "Rice", type: "STOCK", unitId: 3, unitCode: "KG", salesRate: "120", salesGLId: 70, alternateUnits: [{ unitId: 6, unitCode: "BAG", conversionFactor: "25" }] }],
@@ -17,8 +17,8 @@ const sales: SalesLookups = {
 
 describe("sales screen pick-lists", () => {
   const lk = toPLookups(sales);
-  it("customers take the place of vendors and every row is active", () => {
-    expect(lk.vendors).toEqual([{ id: 9, code: "C001", name: "Ram Traders", requiresSubLedger: false, isCashOrBank: false, isActive: true, paymentTermDays: null }]);
+  it("customers take the place of vendors (credit days become the payment term) and every row is active", () => {
+    expect(lk.vendors).toEqual([{ id: 9, code: "C001", name: "Ram Traders", requiresSubLedger: false, isCashOrBank: false, creditLimit: "50000.00", creditDays: 30, isActive: true, paymentTermDays: 30 }]);
     expect(lk.subLedgers[0].isActive && lk.agents[0].isActive).toBe(true);
   });
   it("a product keeps its unit, sales rate and alternate units, and has no batch, expiry or location", () => {

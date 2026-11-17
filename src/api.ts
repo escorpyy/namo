@@ -115,7 +115,7 @@ export const soApi = {
 // ---- Purchase documents (Order -> Challan -> Bill): /api/purchase ----
 export type PurchaseKind = "orders" | "challans" | "bills";
 export interface PLookups {
-  vendors: { id: number; code: string; name: string; requiresSubLedger: boolean; isActive: boolean; paymentTermDays: number | null }[];
+  vendors: { id: number; code: string; name: string; requiresSubLedger: boolean; isActive: boolean; paymentTermDays: number | null; creditLimit?: string | null }[];
   subLedgers: { id: number; code: string; name: string; generalLedgerId: number | null; isActive: boolean }[];
   agents: { id: number; code: string; name: string; isActive: boolean }[];
   locations: { id: number; code: string; name: string; isActive: boolean }[];
@@ -259,7 +259,7 @@ export const cashBankApi = {
 
 // ---- Sales invoices: direct customer invoice flow ----
 export interface SalesLookups {
-  customers: { id: number; code: string; name: string; requiresSubLedger: boolean; isCashOrBank: boolean }[];
+  customers: { id: number; code: string; name: string; requiresSubLedger: boolean; isCashOrBank: boolean; creditLimit: string | null; creditDays: number | null }[];
   subLedgers: { id: number; code: string; name: string; generalLedgerId: number | null }[];
   agents: { id: number; code: string; name: string }[];
   products: {
@@ -294,7 +294,7 @@ export interface SalesInvoiceDoc {
 export interface SalesInvoiceWrite { result: Record<string, any>; document: SalesInvoiceDoc }
 export const salesInvoiceApi = {
   lookups: (p: { companyId: number; branchId: number; userId?: number }) => req<SalesLookups>(`/api/sales/invoices/lookups?${qstr(p)}`),
-  list: (p: { companyId: number; branchId: number; fiscalYear: string; status?: string; search?: string }) =>
+  list: (p: { companyId: number; branchId: number; fiscalYear: string; status?: string; search?: string; customerGLId?: number; limit?: number }) =>
     req<{ total: number; rows: SalesInvoiceRow[] }>(`/api/sales/invoices?${qstr(p)}`),
   get: (id: number, companyId: number) => req<SalesInvoiceDoc>(`/api/sales/invoices/${id}?companyId=${companyId}`),
   create: (body: Record<string, unknown>) => req<SalesInvoiceWrite>("/api/sales/invoices", { method: "POST", body: JSON.stringify(body) }),
