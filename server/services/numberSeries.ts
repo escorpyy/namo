@@ -8,10 +8,11 @@ import { nextNumber, type Tx } from "./purchase/common";
 // The settings (create / edit / list) live in numberSeriesAdmin.ts; documents call assignNumber().
 
 /** where each kind of document keeps its number */
-export const DOC_TABLE: Record<DocumentType, { table: "PurchaseOrder" | "PurchaseChallan" | "PurchaseBill" | "JournalVoucher"; col: "orderNumber" | "challanNumber" | "invoiceNumber" | "voucherNumber" }> = {
+export const DOC_TABLE: Record<DocumentType, { table: "PurchaseOrder" | "PurchaseChallan" | "PurchaseBill" | "SalesInvoice" | "JournalVoucher"; col: "orderNumber" | "challanNumber" | "invoiceNumber" | "voucherNumber" }> = {
   PURCHASE_ORDER: { table: "PurchaseOrder", col: "orderNumber" },
   PURCHASE_CHALLAN: { table: "PurchaseChallan", col: "challanNumber" },
   PURCHASE_BILL: { table: "PurchaseBill", col: "invoiceNumber" },
+  SALES_INVOICE: { table: "SalesInvoice", col: "invoiceNumber" },
   JOURNAL_VOUCHER: { table: "JournalVoucher", col: "voucherNumber" },
 };
 

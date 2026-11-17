@@ -18,6 +18,7 @@ import {
     "purchase-bills",
     "journal",
     "purchase-import-assessments",
+    "sales-invoices",
     "code-numbering",
     "number-series",
   ];
@@ -61,7 +62,7 @@ const sections: Section[] = [
       { id: "purchase-challans", label: "Purchase Challan" },
       { id: "purchase-bills", label: "Purchase Bill" },
       { id: "purchase-import-assessments", label: "Cost Assessment" },
-      { id: "sales", label: "Sales" },
+      { id: "sales-invoices", label: "Sales Invoice" },
       { id: "debit-note", label: "Debit Note" },
       { id: "credit-note", label: "Credit Note" },
     ],

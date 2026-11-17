@@ -13,6 +13,7 @@ import OpeningBalanceScreen from "./screens/OpeningBalanceScreen";
 import StockOpeningScreen from "./screens/StockOpeningScreen";
 import CashBankVoucherWorkspace from "./screens/cashBank/CashBankVoucherWorkspace";
 import JournalVoucherWorkspace from "./screens/accounting/JournalVoucherWorkspace";
+import SalesInvoiceWorkspace from "./screens/sales/SalesInvoiceWorkspace";
 import PurchaseBillWorkspace from "./screens/purchase/PurchaseBillWorkspace";
 import PurchaseOrderWorkspace from "./screens/purchase/PurchaseOrderWorkspace";
 import PurchaseChallanWorkspace from "./screens/purchase/PurchaseChallanWorkspace";
@@ -143,6 +144,12 @@ export default function App() {
         })() : screen === "journal" ? (
           <JournalVoucherWorkspace
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} userId={ctx.user.id} companyName={co.name}
+            branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
+            calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note}
+          />
+        ) : screen === "sales-invoices" ? (
+          <SalesInvoiceWorkspace
+            key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} userId={ctx.user.id}
             branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
             calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note}
           />

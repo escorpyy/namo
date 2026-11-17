@@ -23,7 +23,7 @@ describe.skipIf(!DB_READY)("sales invoice service layer", () => {
 
   async function world(tx: any) {
     const tag = uniq();
-    const code = (s: string) => `${s}${tag}`.slice(0, 20);
+    const code = (s: string) => `${s}${tag}`.slice(0, 10); // the shortest code column among these tables holds 10 characters
     const companyId = await ins(tx, "Company", { code: code("CO"), name: `Sales test ${tag}`, updatedAt: NOW });
     const branchId = await ins(tx, "Branch", { companyId, code: code("BR"), name: `Branch ${tag}`, updatedAt: NOW });
     await ins(tx, "FiscalYear", { companyId, code: "2082/83", startDate: "2025-07-17", endDate: "2026-07-16", isCurrent: true, updatedAt: NOW });

@@ -197,6 +197,20 @@
       "when": 1794607571070,
       "tag": "0027_narration_master",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1794896734608,
+      "tag": "0028_sales_invoice",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1794896740285,
+      "tag": "0029_sales_invoice_guards",
+      "breakpoints": true
     }
   ]
 }
