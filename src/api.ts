@@ -256,3 +256,50 @@ export const cashBankApi = {
     req<CbWrite>(`/api/cash-bank-vouchers/${id}/reverse?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId, reason, date }) }),
   balance: (p: { companyId: number; branchId: number; fiscalYear: string; generalLedgerId: number; date: string; excludeId?: number }) => req<CbBalance>(`/api/cash-bank-vouchers/balance?${qstr(p)}`),
 };
+
+// ---- Sales invoices: direct customer invoice flow ----
+export interface SalesLookups {
+  customers: { id: number; code: string; name: string; requiresSubLedger: boolean; isCashOrBank: boolean }[];
+  subLedgers: { id: number; code: string; name: string; generalLedgerId: number | null }[];
+  agents: { id: number; code: string; name: string }[];
+  products: {
+    id: number; code: string; description: string; type: "STOCK" | "NON_STOCK" | "SERVICE";
+    unitId: number | null; unitCode: string; salesRate: string | null; salesGLId: number | null;
+    alternateUnits: { unitId: number; unitCode: string; conversionFactor: string }[];
+  }[];
+  units: { id: number; code: string; name: string }[];
+  terms: {
+    id: number; code: string; name: string; category: "GENERAL" | "COSTING" | "ROUNDED"; nature: "ADDITIVE" | "DEDUCTIVE";
+    isProductwise: boolean; isMandatory: boolean; isEditable: boolean; defaultCalcType: "PERCENT" | "AMOUNT"; defaultValue: string;
+    calcBase: "ITEM_VALUE" | "RUNNING_TOTAL" | "SINGLE_TERM"; baseTermId: number | null; sequence: number;
+    generalLedgerId: number | null; roundingMethod: "NEAREST" | "UP" | "DOWN" | null;
+  }[];
+  fiscalYears: { id: number; code: string; startDate: string; endDate: string; isCurrent: boolean; isClosed: boolean }[];
+  series: { id: number; name: string; mode: SeriesMode; isDefault: boolean }[];
+}
+export type SalesInvoiceState = "DRAFT" | "POSTED" | "REVERSED" | "REVERSAL";
+export interface SalesInvoiceRow {
+  id: number; branchId: number; invoiceNumber: string; invoiceDate: string; fiscalYear: string; customerGLId: number;
+  customerCode: string; customerName: string; dueDate: string | null; isPosted: boolean; reversalOfId: number | null;
+  basicAmount: string; termAmount: string; totalAmount: string; state: SalesInvoiceState;
+}
+export interface SalesInvoiceDoc {
+  id: number; companyId: number; branchId: number; invoiceNumber: string; invoiceDate: string; fiscalYear: string;
+  customerGLId: number; customerCode: string; customerName: string; subLedgerId: number | null; agentId: number | null;
+  dueDays: number; dueDate: string | null; remarks: string | null; isPosted: boolean; state: SalesInvoiceState;
+  reversalOfId: number | null; reversedBy: { id: number; invoiceNumber: string } | null;
+  basicAmount: string; termAmount: string; totalAmount: string; lines: Record<string, any>[]; terms: Record<string, any>[];
+  [key: string]: any;
+}
+export interface SalesInvoiceWrite { result: Record<string, any>; document: SalesInvoiceDoc }
+export const salesInvoiceApi = {
+  lookups: (p: { companyId: number; branchId: number; userId?: number }) => req<SalesLookups>(`/api/sales/invoices/lookups?${qstr(p)}`),
+  list: (p: { companyId: number; branchId: number; fiscalYear: string; status?: string; search?: string }) =>
+    req<{ total: number; rows: SalesInvoiceRow[] }>(`/api/sales/invoices?${qstr(p)}`),
+  get: (id: number, companyId: number) => req<SalesInvoiceDoc>(`/api/sales/invoices/${id}?companyId=${companyId}`),
+  create: (body: Record<string, unknown>) => req<SalesInvoiceWrite>("/api/sales/invoices", { method: "POST", body: JSON.stringify(body) }),
+  update: (id: number, companyId: number, body: Record<string, unknown>) => req<SalesInvoiceWrite>(`/api/sales/invoices/${id}?companyId=${companyId}`, { method: "PUT", body: JSON.stringify(body) }),
+  remove: (id: number, companyId: number, userId: number) => req<{ result: { id: number; deleted: boolean } }>(`/api/sales/invoices/${id}?${qstr({ companyId, userId })}`, { method: "DELETE" }),
+  post: (id: number, companyId: number, userId: number) => req<SalesInvoiceWrite>(`/api/sales/invoices/${id}/post?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId }) }),
+  reverse: (id: number, companyId: number, userId: number, reason: string) => req<{ result: Record<string, any>; document: SalesInvoiceDoc }>(`/api/sales/invoices/${id}/reverse?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId, reason }) }),
+};
