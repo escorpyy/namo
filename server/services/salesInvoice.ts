@@ -92,7 +92,7 @@ export function salesInvoiceLookups(companyId: number, branchId: number, userId:
       tx.select().from(S.stockDetail).innerJoin(S.product, eq(S.product.id, S.stockDetail.productId)).where(and(eq(S.product.companyId, companyId), eq(S.product.isActive, true))),
       tx.select().from(S.nonStockDetail).innerJoin(S.product, eq(S.product.id, S.nonStockDetail.productId)).where(and(eq(S.product.companyId, companyId), eq(S.product.isActive, true))),
       tx.select().from(S.serviceDetail).innerJoin(S.product, eq(S.product.id, S.serviceDetail.productId)).where(and(eq(S.product.companyId, companyId), eq(S.product.isActive, true))),
-      tx.select({ id: S.productUnit.id, code: S.productUnit.code, name: S.productUnit.name }).from(S.productUnit).where(and(eq(S.productUnit.companyId, companyId), eq(S.productUnit.isActive, true))).orderBy(asc(S.productUnit.code)),
+      tx.select({ id: S.productUnit.id, code: S.productUnit.code, name: S.productUnit.name, decimalPlaces: S.productUnit.decimalPlaces }).from(S.productUnit).where(and(eq(S.productUnit.companyId, companyId), eq(S.productUnit.isActive, true))).orderBy(asc(S.productUnit.code)),
       tx.select({ productId: S.stockDetail.productId, unitId: S.alternateUnit.unitId, conversionFactor: S.alternateUnit.conversionFactor, unitCode: S.productUnit.code })
         .from(S.alternateUnit).innerJoin(S.stockDetail, eq(S.stockDetail.id, S.alternateUnit.stockDetailId)).innerJoin(S.product, eq(S.product.id, S.stockDetail.productId))
         .innerJoin(S.productUnit, eq(S.productUnit.id, S.alternateUnit.unitId)).where(and(eq(S.product.companyId, companyId), eq(S.product.isActive, true))).orderBy(asc(S.productUnit.code)),

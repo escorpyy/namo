@@ -44,6 +44,7 @@
 - Stock Opening grid + stock reconciliation: API tested (44 tests, session 5); UI **not** checked.
 - Billing-terms schema: purchase forms consume document terms; Sales Invoice now consumes Sales Terms. Sales returns and other downstream sales documents do not exist yet.
 - **Sales Invoice MVP (session 21; pushed, DB-verified, manual UI pending):** Direct customer invoices support stock/non-stock/service lines (where a unit is configured), Sales Terms, number series, BS/AD dates, draft edits, posting to a balanced journal voucher, and reversal. Migration 0028 adds invoice tables; 0029 adds tenant/audit/reason/period-lock guards. `tests/service.salesInvoice.test.ts` (7 tests) covers pricing/posting/reversal, posted-invoice edit/delete/re-post refusals, reversal reason rule, the database change-reason guard on invoice/lines/terms, draft delete and company scoping, and the list state filter. Not yet tested for Sales Invoice: period lock, number-series/duplicate numbers.
+- **Sales Invoice screen rebuilt on the shared document components (session 21):** `SalesInvoiceScreen.tsx` (entry tab) + `SalesInvoiceWorkspace.tsx` now use `DocWorkspace` (tab strip, list, search, status filter, shortcuts), `useDocScreen`, `DocShell`, `NumberField`, `HeadFields`, `LinesGrid` (new `sales` line kind: product, qty/alt unit, rate, amount) and `TermsGrid`, plus the live-totals component (`noun="invoice"`) driven by the shared pricing engine. Sales pick-lists are adapted to the purchase shape by `toPLookups`. Post and Reverse are buttons; reverse asks for a reason and a reversal date. Checked in the browser by keyboard: new → save → post → reverse. `tests/salesScreen.test.ts` covers the adapter and line payload.
 - **Account side panel (session 21; pushed `1d580ca`):** F6 toggle panel beside Journal and Cash/Bank voucher entry showing the selected ledger's balance and recent entries (`GET /api/account-peek`, `src/components/PeekPanel.tsx`, `src/lib/peek.ts`); tests in `api.accountPeek`, `peek`, `peekPanel.render`.
 - Accounting hierarchy: tables exist for Account Group → Sub Group → General Ledger → Sub Ledger; "Master Account" (Asset/Liability/Equity/Revenue/Expense) appears to be an enum on Account Group, not a table (**verify**).
 
@@ -491,6 +492,7 @@ Sandbox: Linux, Node 22, pnpm 12.14.0, throwaway PostgreSQL 16 databases (never 
 ### 2026-11-17 — Session 21 — account side panel, Sales Invoice completion, tests
 - Pushed `1d580ca` (account side panel), `ed27247` (Sales Invoice: Drizzle schema matching migration 0028, migration meta 0028–0029, number-series/audit registration, api.ts merged with the panel API) and `10e90a5` (Sales Invoice tests; `listSalesInvoices` accepts an optional `tx`).
 - Verified: typecheck clean; `pnpm test:db` 878/878.
+- Later in session 21: Sales Invoice screen rebuilt on the shared workspace/grid components (see section B); `pnpm test:db` 883/883, production build passes.
 - Known fragility: `api.journalVoucher` test can leave vouchers in the seeded company, so `api.company` delete tests can fail if run after it (pre-existing test-order issue).
 
 ## HANDOFF (end of session 21)

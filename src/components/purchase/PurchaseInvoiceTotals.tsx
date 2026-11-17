@@ -16,6 +16,8 @@ interface Props {
   hasLines: boolean;
   /** One centred line for the fixed footer of the bill entry screen; the explanation moves into a tooltip and only a problem is spelled out. */
   compact?: boolean;
+  /** what the document is called in the explanations ("bill" by default; "invoice" for a sales invoice) */
+  noun?: string;
 }
 
 const safeMoney = (value: unknown) => money(value == null ? "0" : String(value)) || "0.00";
@@ -24,7 +26,7 @@ const signedMoney = (value: unknown) => {
   return text.startsWith("-") ? `− ${money(text.slice(1))}` : money(text);
 };
 
-export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, hasLines, compact }: Props) {
+export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, hasLines, compact, noun = "bill" }: Props) {
   const showSaved = readOnly && !!savedDoc;
   let savedAdditions = "0.00";
   let savedDeductions = "0.00";
@@ -55,10 +57,10 @@ export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, hasLines, c
   const calculationAlert = savedBreakdownMismatch || (!showSaved && preview.status === "error");
 
   const message = showSaved
-    ? savedBreakdownMismatch ? "Saved term detail does not reconcile to the stored net-terms total. Review this bill before relying on the breakdown." : "Saved bill totals · additions and deductions are itemized from the saved terms."
+    ? savedBreakdownMismatch ? `Saved term detail does not reconcile to the stored net-terms total. Review this ${noun} before relying on the breakdown.` : `Saved ${noun} totals · additions and deductions are itemized from the saved terms.`
     : !hasLines ? "Add invoice lines to begin the live calculation."
-      : preview.status === "ready" ? "Live preview · follows the same calculation rules used when saving the bill."
-        : preview.message ?? "Complete the bill inputs to calculate totals.";
+      : preview.status === "ready" ? `Live preview · follows the same calculation rules used when saving the ${noun}.`
+        : preview.message ?? `Complete the ${noun} inputs to calculate totals.`;
 
   if (compact) {
     return (

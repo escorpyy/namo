@@ -83,18 +83,19 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
   const unitCode = useMemo(() => new Map(lookups.units.map((u) => [u.id, u.code])), [lookups.units]);
   const productOpts = useMemo<ReferenceOption[]>(() => lookups.products.map((p) => ({ value: String(p.id), label: `${p.code} — ${p.description}`, code: p.code, name: p.description, detail: p.type.replaceAll("_", " "), searchText: `${p.type} ${p.tracksBatch ? "batch" : ""} ${p.tracksExpiry ? "expiry" : ""}`, isActive: p.isActive, badge: p.type === "STOCK" ? undefined : p.type.replace("_", " ").toLowerCase() })), [lookups.products]);
   const locOpts = useMemo<ReferenceOption[]>(() => lookups.locations.map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, isActive: l.isActive })), [lookups.locations]);
+  const stockish = kind === "challan" || kind === "bill"; // order and sales lines have no location, batch or expiry columns
   const layout = useMemo(() => {
     let showAlt = false, showLoc = false, showBatch = false, showExpiry = false, showLink = false;
     for (const row of lines) {
       const p = products.get(row.productId);
       if (!p) continue;
       if (p.alternateUnits?.length) showAlt = true;
-      if (kind !== "order" && p.type === "STOCK") showLoc = true;
-      if (kind !== "order" && p.tracksBatch) showBatch = true;
-      if (kind !== "order" && p.tracksExpiry) showExpiry = true;
-      if (kind !== "order" && row.link) showLink = true;
+      if (stockish && p.type === "STOCK") showLoc = true;
+      if (stockish && p.tracksBatch) showBatch = true;
+      if (stockish && p.tracksExpiry) showExpiry = true;
+      if (stockish && row.link) showLink = true;
     }
-    if (kind !== "order" && lines.some((row) => row.link)) showLink = true;
+    if (stockish && lines.some((row) => row.link)) showLink = true;
     const cols = lineColumns(kind, showAlt, showLoc, showBatch, showExpiry, showLink, kind === "bill" && !!onOpenTerms);
     return { cols, showAlt, showLoc, showBatch, showExpiry, showLink, template: cols.map((c) => COL_SIZE[c]).join(" "), heads: cols.map((c) => COL_HEAD[c]) };
   }, [kind, lines, products, onOpenTerms]);
@@ -104,7 +105,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
     const p = products.get(id), l = lines[i];
     patch(i, {
       productId: id, altUnitId: "", altQty: "", unitId: "", batchNo: p?.tracksBatch ? l.batchNo : "", expiryDate: p?.tracksExpiry ? l.expiryDate : "", manufactureDate: p?.tracksExpiry ? l.manufactureDate : "",
-      rate: l.rate || (kind !== "challan" && p?.purchaseRate && Number(p.purchaseRate) > 0 ? String(Number(p.purchaseRate)) : ""),
+      rate: l.rate || (kind === "sales" ? (p?.salesRate && Number(p.salesRate) > 0 ? String(Number(p.salesRate)) : "") : kind !== "challan" && p?.purchaseRate && Number(p.purchaseRate) > 0 ? String(Number(p.purchaseRate)) : ""),
       locationId: p?.type === "STOCK" ? l.locationId || (p.defaultLocationId ? String(p.defaultLocationId) : "") : "",
     });
   };

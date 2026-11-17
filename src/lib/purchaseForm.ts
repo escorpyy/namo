@@ -101,7 +101,7 @@ export const lineAmount = (l: LineRow, p: Product | undefined): string => {
 
 // ---- payload ----
 const nn = (s: string) => (s.trim() === "" ? null : s.trim());
-export type LineKind = "order" | "challan" | "bill";
+export type LineKind = "order" | "challan" | "bill" | "sales";
 export function lineToPayload(l: LineRow, p: Product | undefined, kind: LineKind) {
   const useAlt = !!(l.altQty && l.altUnitId);
   const out: Record<string, unknown> = { productId: Number(l.productId) };
@@ -109,7 +109,7 @@ export function lineToPayload(l: LineRow, p: Product | undefined, kind: LineKind
   if (p && !p.baseUnitId && l.unitId) out.unitId = Number(l.unitId);
   out.rate = nn(l.rate);
   if (kind === "order") out.expectedDate = nn(l.expectedDate);
-  else {
+  else if (kind !== "sales") { // a sales invoice line is product, quantity and rate only
     out.locationId = l.locationId ? Number(l.locationId) : null;
     out.batchNo = nn(l.batchNo); out.manufactureDate = nn(l.manufactureDate); out.expiryDate = nn(l.expiryDate);
     out.purchaseOrderLineId = l.purchaseOrderLineId ? Number(l.purchaseOrderLineId) : null;

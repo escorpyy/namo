@@ -34,7 +34,7 @@ const purchaseDocApi = (kind: PurchaseKind): DocApi => ({
 });
 
 export interface DocConfig<F extends object> {
-  kind: PurchaseKind | "journal";
+  kind: PurchaseKind | "journal" | "sales-invoice";
   api?: DocApi;
   title: string;
   singular: string;

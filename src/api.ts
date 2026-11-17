@@ -122,7 +122,7 @@ export interface PLookups {
   units: { id: number; code: string; name: string; decimalPlaces: number }[];
   products: {
     id: number; code: string; description: string; type: "STOCK" | "NON_STOCK" | "SERVICE" | "FIXED_ASSET"; isActive: boolean; baseUnitId: number | null;
-    tracksBatch: boolean; tracksExpiry: boolean; defaultLocationId: number | null; purchaseRate: string | null; alternateUnits: { unitId: number; conversionFactor: string }[];
+    tracksBatch: boolean; tracksExpiry: boolean; defaultLocationId: number | null; purchaseRate: string | null; salesRate?: string | null; alternateUnits: { unitId: number; conversionFactor: string }[];
   }[];
   terms: {
     id: number; code: string; name: string; generalLedgerId?: number | null; affectsStockValue?: boolean; defaultAgainstLedgerId?: number | null; lastAgainstLedgerId?: number | null; allocationBasis?: string; category: "GENERAL" | "COSTING" | "ROUNDED"; nature: "ADDITIVE" | "DEDUCTIVE"; isProductwise: boolean; isMandatory: boolean; isEditable: boolean; roundingMethod?: "NEAREST" | "UP" | "DOWN";
@@ -267,7 +267,7 @@ export interface SalesLookups {
     unitId: number | null; unitCode: string; salesRate: string | null; salesGLId: number | null;
     alternateUnits: { unitId: number; unitCode: string; conversionFactor: string }[];
   }[];
-  units: { id: number; code: string; name: string }[];
+  units: { id: number; code: string; name: string; decimalPlaces: number }[];
   terms: {
     id: number; code: string; name: string; category: "GENERAL" | "COSTING" | "ROUNDED"; nature: "ADDITIVE" | "DEDUCTIVE";
     isProductwise: boolean; isMandatory: boolean; isEditable: boolean; defaultCalcType: "PERCENT" | "AMOUNT"; defaultValue: string;
@@ -301,5 +301,5 @@ export const salesInvoiceApi = {
   update: (id: number, companyId: number, body: Record<string, unknown>) => req<SalesInvoiceWrite>(`/api/sales/invoices/${id}?companyId=${companyId}`, { method: "PUT", body: JSON.stringify(body) }),
   remove: (id: number, companyId: number, userId: number) => req<{ result: { id: number; deleted: boolean } }>(`/api/sales/invoices/${id}?${qstr({ companyId, userId })}`, { method: "DELETE" }),
   post: (id: number, companyId: number, userId: number) => req<SalesInvoiceWrite>(`/api/sales/invoices/${id}/post?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId }) }),
-  reverse: (id: number, companyId: number, userId: number, reason: string) => req<{ result: Record<string, any>; document: SalesInvoiceDoc }>(`/api/sales/invoices/${id}/reverse?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId, reason }) }),
+  reverse: (id: number, companyId: number, userId: number, reason: string, date?: string) => req<{ result: Record<string, any>; document: SalesInvoiceDoc }>(`/api/sales/invoices/${id}/reverse?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId, reason, date }) }),
 };
