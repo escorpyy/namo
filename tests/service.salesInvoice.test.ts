@@ -92,4 +92,96 @@ describe.skipIf(!DB_READY)("sales invoice service layer", () => {
       await expect(svc.reverseSalesInvoice(saved.id, ACTOR, { tx, date: "2025-10-21", reason: "Second attempt" })).rejects.toMatchObject({ status: 409 });
     });
   });
+  const draftInput = (w: Awaited<ReturnType<typeof world>>, extra: Record<string, unknown> = {}) => ({
+    companyId: w.companyId, branchId: w.branchId, invoiceDate: "2025-10-14", fiscalYear: "2082/83",
+    customerGLId: w.customerGLId, dueDays: 0,
+    lines: [{ productId: w.productId, qty: 1, unitId: w.unitId, rate: 100 }], terms: [{ termId: w.termId }], ...extra,
+  });
+  // a statement the database refuses aborts the transaction, so each attempt runs in its own savepoint
+  const refusedByDb = async (tx: any, fn: (t: any) => Promise<unknown>) => {
+    let err: any;
+    try { await tx.transaction(async (t: any) => { await fn(t); }); } catch (e) { err = e; }
+    expect(err, "the database should have refused this").toBeTruthy();
+    return String(err?.cause?.message ?? err?.message ?? err);
+  };
+
+  it("refuses to edit, re-post or delete a posted invoice, and a reversal invoice likewise", async () => {
+    await run(async (tx, w) => {
+      const saved = await svc.saveSalesInvoice(draftInput(w), ACTOR, { tx });
+      await svc.postSalesInvoice(saved.id, ACTOR, { tx });
+      await expect(svc.saveSalesInvoice({ ...draftInput(w), id: saved.id } as any, ACTOR, { tx })).rejects.toMatchObject({ status: 409 });
+      await expect(svc.postSalesInvoice(saved.id, ACTOR, { tx })).rejects.toMatchObject({ status: 409 });
+      await expect(svc.deleteDraftSalesInvoice(saved.id, w.companyId, ACTOR, { tx })).rejects.toMatchObject({ status: 409 });
+      const rev = await svc.reverseSalesInvoice(saved.id, ACTOR, { tx, date: "2025-10-20", reason: "Wrong customer" });
+      await expect(svc.saveSalesInvoice({ ...draftInput(w), id: rev.id } as any, ACTOR, { tx })).rejects.toMatchObject({ status: 409 });
+      await expect(svc.deleteDraftSalesInvoice(rev.id, w.companyId, ACTOR, { tx })).rejects.toMatchObject({ status: 409 });
+      await expect(svc.postSalesInvoice(rev.id, ACTOR, { tx })).rejects.toMatchObject({ status: 409 });
+    });
+  });
+
+  it("deletes a draft, and keeps invoices inside their own company", async () => {
+    await run(async (tx, w) => {
+      const saved = await svc.saveSalesInvoice(draftInput(w), ACTOR, { tx });
+      await expect(svc.deleteDraftSalesInvoice(saved.id, w.companyId + 999_999, ACTOR, { tx })).rejects.toMatchObject({ status: 404 });
+      await svc.deleteDraftSalesInvoice(saved.id, w.companyId, ACTOR, { tx });
+      expect(await rows(tx, sql`select id from "SalesInvoice" where id = ${saved.id}`)).toHaveLength(0);
+    });
+  });
+
+  it("needs a reason of at least 3 characters to reverse, and a draft cannot be reversed", async () => {
+    await run(async (tx, w) => {
+      const saved = await svc.saveSalesInvoice(draftInput(w), ACTOR, { tx });
+      await expect((async () => svc.reverseSalesInvoice(saved.id, ACTOR, { tx, date: "2025-10-20", reason: "ab" }))()).rejects.toMatchObject({ status: 400 });
+      await expect((async () => svc.reverseSalesInvoice(saved.id, ACTOR, { tx, date: "2025-10-20", reason: "   " }))()).rejects.toMatchObject({ status: 400 });
+      await expect((async () => svc.reverseSalesInvoice(saved.id, ACTOR, { tx, date: "2025-10-20", reason: "Not posted yet" }))()).rejects.toMatchObject({ status: 409 });
+    });
+  });
+
+  it("refuses a draft with no lines", async () => {
+    await run(async (tx, w) => {
+      await expect(svc.saveSalesInvoice(draftInput(w, { lines: [] }), ACTOR, { tx })).rejects.toMatchObject({ status: 400 });
+    });
+  });
+
+  it("the database needs a reason to change a posted invoice, its lines or its terms", async () => {
+    await run(async (tx, w) => {
+      const saved = await svc.saveSalesInvoice(draftInput(w), ACTOR, { tx });
+      // drafts change freely, with no reason
+      await tx.execute(sql`update "SalesInvoice" set remarks = 'draft note' where id = ${saved.id}`);
+      await svc.postSalesInvoice(saved.id, ACTOR, { tx });
+
+      const msg = await refusedByDb(tx, (t) => t.execute(sql`update "SalesInvoice" set remarks = 'sneaky' where id = ${saved.id}`));
+      expect(msg).toMatch(/reason is required/i);
+      await refusedByDb(tx, (t) => t.execute(sql`update "SalesInvoiceLine" set rate = 1 where "salesInvoiceId" = ${saved.id}`));
+      await refusedByDb(tx, (t) => t.execute(sql`delete from "SalesDocumentTerm" where "documentType" = 'SALES_INVOICE' and "documentId" = ${saved.id}`));
+      await refusedByDb(tx, (t) => t.execute(sql`delete from "SalesInvoice" where id = ${saved.id}`));
+
+      // with a reason the same change goes through
+      await tx.execute(sql`select set_config('namo.change_reason', 'Correcting a typo in the note', true)`);
+      await tx.execute(sql`update "SalesInvoice" set remarks = 'corrected' where id = ${saved.id}`);
+      const [after] = await rows(tx, sql`select remarks from "SalesInvoice" where id = ${saved.id}`);
+      expect(after.remarks).toBe("corrected");
+    });
+  });
+
+  it("lists invoices by state: draft, posted, reversed and reversal", async () => {
+    await run(async (tx, w) => {
+      const draft = await svc.saveSalesInvoice(draftInput(w), ACTOR, { tx });
+      const posted = await svc.saveSalesInvoice(draftInput(w), ACTOR, { tx });
+      await svc.postSalesInvoice(posted.id, ACTOR, { tx });
+      const reversedOne = await svc.saveSalesInvoice(draftInput(w), ACTOR, { tx });
+      await svc.postSalesInvoice(reversedOne.id, ACTOR, { tx });
+      const reversal = await svc.reverseSalesInvoice(reversedOne.id, ACTOR, { tx, date: "2025-10-20", reason: "Issued twice" });
+
+      const idsFor = async (status: string) => {
+        const res: any = await svc.listSalesInvoices({ companyId: w.companyId, status, tx } as any);
+        return (Array.isArray(res) ? res : res.rows).map((r: any) => Number(r.id)).sort();
+      };
+      expect(await idsFor("DRAFT")).toEqual([draft.id]);
+      expect(await idsFor("POSTED")).toEqual([posted.id]);
+      expect(await idsFor("REVERSED")).toEqual([reversedOne.id]);
+      expect(await idsFor("REVERSAL")).toEqual([reversal.id]);
+      await expect(svc.listSalesInvoices({ companyId: w.companyId, status: "NOPE", tx } as any)).rejects.toMatchObject({ status: 400 });
+    });
+  });
 });

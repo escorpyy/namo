@@ -129,7 +129,7 @@ export function salesInvoiceLookups(companyId: number, branchId: number, userId:
   });
 }
 
-export type SalesListFilter = { companyId: number; branchId?: number; fiscalYear?: string; status?: string; search?: string; limit?: number };
+export type SalesListFilter = { companyId: number; branchId?: number; fiscalYear?: string; status?: string; search?: string; limit?: number; tx?: any };
 export async function listSalesInvoices(f: SalesListFilter) {
   const I = S.salesInvoice, G = S.generalLedger;
   const where: any[] = [eq(I.companyId, f.companyId)];
@@ -148,7 +148,7 @@ export async function listSalesInvoices(f: SalesListFilter) {
     const s = like(f.search.trim());
     where.push(or(ilike(I.invoiceNumber, s), ilike(G.name, s), ilike(G.code, s)));
   }
-  return inTx(undefined, async (tx) => {
+  return inTx(f.tx, async (tx) => {
     const [{ count }] = await tx.select({ count: sql<number>`count(*)::int` }).from(I).innerJoin(G, eq(G.id, I.customerGLId)).where(and(...where));
     const rows = await tx.select({ id: I.id, branchId: I.branchId, invoiceNumber: I.invoiceNumber, invoiceDate: I.invoiceDate, fiscalYear: I.fiscalYear,
       customerGLId: I.customerGLId, customerCode: G.code, customerName: G.name, dueDate: I.dueDate, isPosted: I.isPosted,
