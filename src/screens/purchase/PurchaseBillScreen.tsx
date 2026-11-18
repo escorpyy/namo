@@ -543,7 +543,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
 
           <SidePanel side="right" title="Vendor" collapsed={rightCollapsed} onToggle={toggleRight} shortcut="Alt+]">
             {headerReady
-              ? <VendorPanel lookups={lk} companyId={p.companyId} branchId={p.branchId} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} vendorInvoiceNo={f.vendorInvoiceNo} docId={doc?.id} calendar={p.calendar} />
+              ? <VendorPanel lookups={lk} companyId={p.companyId} branchId={p.branchId} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} vendorInvoiceNo={f.vendorInvoiceNo} docId={doc?.id} calendar={p.calendar} userId={p.userId} doc={doc ? { id: doc.id, number: String(doc.invoiceNumber), state: String(doc.state), fiscalYear: String(doc.fiscalYear) } : null} />
               : <EmptyPanel>The vendor's details appear here once the header is complete.</EmptyPanel>}
           </SidePanel>
         </div>

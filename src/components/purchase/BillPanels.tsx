@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { Eye, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil } from "lucide-react";
 import { purchaseApi, type PListRow, type PLookups } from "../../api";
 import { adToBs } from "../../lib/nepaliDate";
+import { AdvanceBlock, type AdvanceDoc } from "../AdvanceBlock";
 import { Pill, money } from "./Bits";
 
 // The two side panels of the purchase bill entry screen. Each takes about a sixth of the width (never less than 208px), or folds to a thin strip so the lines get the room.
@@ -100,8 +101,8 @@ export function HeaderSummary({ form, invoiceNumber, calendar, readOnly, onEdit 
 }
 
 // Right panel: who the bill is from, and what is already on file for that vendor.
-export function VendorPanel({ lookups, companyId, branchId, vendorGLId, subLedgerId, agentId, vendorInvoiceNo, docId, calendar }: {
-  lookups: PLookups; companyId: number; branchId: number; vendorGLId: string; subLedgerId: string; agentId: string; vendorInvoiceNo: string; docId?: number; calendar: "BS" | "AD";
+export function VendorPanel({ lookups, companyId, branchId, vendorGLId, subLedgerId, agentId, vendorInvoiceNo, docId, calendar, doc, userId }: {
+  lookups: PLookups; companyId: number; branchId: number; vendorGLId: string; subLedgerId: string; agentId: string; vendorInvoiceNo: string; docId?: number; calendar: "BS" | "AD"; doc?: AdvanceDoc; userId?: number;
 }) {
   const vendor = lookups.vendors.find((v) => String(v.id) === vendorGLId);
   const sub = lookups.subLedgers.find((s) => String(s.id) === subLedgerId);
@@ -129,6 +130,11 @@ export function VendorPanel({ lookups, companyId, branchId, vendorGLId, subLedge
         <p role="alert" className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] leading-snug text-amber-900">
           Vendor invoice <b>{vendorInvoiceNo.trim()}</b> is already on bill <b className="font-mono">{duplicate.invoiceNumber}</b>. A repeated vendor invoice number is refused on save.
         </p>
+      )}
+      {vendorGLId && userId !== undefined && (
+        <div className="-mx-4 mt-3">
+          <AdvanceBlock companyId={companyId} userId={userId} kind="PURCHASE_BILL" generalLedgerId={Number(vendorGLId)} doc={doc ?? null} fiscalYears={lookups.fiscalYears} calendar={calendar} />
+        </div>
       )}
       <h3 className="mb-2 mt-5 text-[12px] font-semibold text-ink">Recent bills from this vendor</h3>
       {bills === null ? <p className="text-[12px] text-slate-500">Loading…</p>

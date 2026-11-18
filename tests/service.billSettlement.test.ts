@@ -168,4 +168,16 @@ describe.skipIf(!DB_READY)("bill-wise settlement", () => {
       expect(await bs.openAdvances(tx, { companyId: w.companyId, kind: "SALES_INVOICE", generalLedgerId: w.customerGLId })).toHaveLength(0);
     });
   });
+
+  it("vendor advances: a payment with no bill settled is an advance on the vendor ledger", async () => {
+    await run(async (tx, w) => {
+      const pay = await cb.createVoucher({ companyId: w.companyId, branchId: w.branchId, voucherDate: "2025-11-01", fiscalYear: "2082/83", cashBankLedgerId: w.cashGLId,
+        lines: [{ generalLedgerId: w.otherCustomerGLId, payment: 700 }], settlements: [] }, ACTOR, { tx, post: true });
+      const key = { companyId: w.companyId, kind: "PURCHASE_BILL" as const, generalLedgerId: w.otherCustomerGLId };
+      expect(await bs.openAdvances(tx, key)).toEqual([expect.objectContaining({ voucherId: pay.id, available: "700.00" })]);
+      expect(await bs.advanceTotal(tx, key)).toEqual({ count: 1, total: "700.00" });
+      // a payment is never a customer advance
+      expect(await bs.openAdvances(tx, { ...key, kind: "SALES_INVOICE" })).toHaveLength(0);
+    });
+  });
 });
