@@ -237,6 +237,9 @@ export interface CbEntry { id: number; lineNumber: number; generalLedgerId: numb
 export type SettleKind = "SALES_INVOICE" | "PURCHASE_BILL";
 export interface CbSettlement { id: number; kind: SettleKind; documentId: number; number: string; date: string; generalLedgerId: number; amount: string }
 export interface OpenDocument { id: number; kind: SettleKind; number: string; date: string; dueDate: string | null; total: string; settled: string; outstanding: string; overdueDays: number }
+export type AgeBucketKey = "current" | "d1_30" | "d31_60" | "d61_90" | "d90";
+export type AgeingRow = { generalLedgerId: number; code: string; name: string; bills: number; total: string; advance: string; net: string } & Record<AgeBucketKey, string>;
+export interface AgeingReport { asOf: string; rows: AgeingRow[]; totals: Record<AgeBucketKey | "total" | "advance" | "net", string> & { bills: number } }
 export interface OpenAdvance { voucherId: number; voucherNumber: string; date: string; amount: string; used: string; available: string }
 export interface AdvanceApplied { id: number; voucherId: number; voucherNumber: string; date: string; amount: string }
 export interface CbDoc {
@@ -260,6 +263,7 @@ export const cashBankApi = {
   post: (id: number, companyId: number, userId: number) => req<CbWrite>(`/api/cash-bank-vouchers/${id}/post?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId }) }),
   reverse: (id: number, companyId: number, userId: number, reason: string, date?: string) =>
     req<CbWrite>(`/api/cash-bank-vouchers/${id}/reverse?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId, reason, date }) }),
+  ageing: (p: { companyId: number; kind: SettleKind; asOf?: string }) => req<AgeingReport>(`/api/cash-bank-vouchers/ageing?${qstr(p)}`),
   advances: (p: { companyId: number; kind: SettleKind; generalLedgerId: number }) =>
     req<{ rows: OpenAdvance[]; count: number; total: string }>(`/api/cash-bank-vouchers/advances?${qstr(p)}`),
   advanceApplications: (p: { companyId: number; kind: SettleKind; documentId: number }) =>

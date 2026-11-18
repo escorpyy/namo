@@ -19,6 +19,8 @@ import {
     "journal",
     "purchase-import-assessments",
     "sales-invoices",
+    "rpt-outstanding",
+    "rpt-ageing",
     "code-numbering",
     "number-series",
   ];

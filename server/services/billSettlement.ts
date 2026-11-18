@@ -12,7 +12,7 @@ import { type Actor, type Opts, type Tx, inActorTx, parseDate } from "./purchase
 
 export type SettlementInput = { kind: "SALES_INVOICE" | "PURCHASE_BILL"; documentId: number; amount: unknown };
 export type SettlementKind = SettlementInput["kind"];
-export type OpenDocument = { id: number; kind: SettlementKind; number: string; date: string; dueDate: string | null; total: string; settled: string; outstanding: string; overdueDays: number };
+export type OpenDocument = { generalLedgerId: number; id: number; kind: SettlementKind; number: string; date: string; dueDate: string | null; total: string; settled: string; outstanding: string; overdueDays: number };
 
 const paise = (v: unknown) => toCents(String(v ?? "0"));
 type Reader = Pick<Tx, "execute">;
@@ -22,48 +22,48 @@ const live = (a: string) => sql`exists (select 1 from "CashBankVoucher" cv where
   and not exists (select 1 from "CashBankVoucher" r where r."reversalOfId" = cv.id and r."isPosted"))`;
 
 // Documents of one customer / vendor ledger that still have something to pay, oldest first. `all` also lists settled ones.
-export async function openDocuments(db_: Reader, o: { companyId: number; kind: SettlementKind; generalLedgerId: number; all?: boolean; asOf?: string }): Promise<OpenDocument[]> {
+export async function openDocuments(db_: Reader, o: { companyId: number; kind: SettlementKind; generalLedgerId?: number; all?: boolean; asOf?: string }): Promise<OpenDocument[]> {
   const sales = o.kind === "SALES_INVOICE";
   const asOf = o.asOf ?? new Date().toISOString().slice(0, 10);
   const rows = (await db_.execute(sales
-    ? sql`select d.id, d."invoiceNumber" as number, to_char(d."invoiceDate",'YYYY-MM-DD') as date, to_char(d."dueDate",'YYYY-MM-DD') as "dueDate", d."totalAmount"::text as total,
+    ? sql`select d.id, d."customerGLId" as gl, d."invoiceNumber" as number, to_char(d."invoiceDate",'YYYY-MM-DD') as date, to_char(d."dueDate",'YYYY-MM-DD') as "dueDate", d."totalAmount"::text as total,
             (coalesce((select sum(bs.amount) from "BillSettlement" bs where bs."salesInvoiceId" = d.id and ${live("bs")}), 0)
               + coalesce((select sum(aa.amount) from "AdvanceApplication" aa where aa."salesInvoiceId" = d.id and ${live("aa")}), 0))::text as settled,
             (${asOf}::date - coalesce(d."dueDate", d."invoiceDate")) as late
-          from "SalesInvoice" d where d."companyId" = ${o.companyId} and d."customerGLId" = ${o.generalLedgerId} and d."isPosted" and d."reversalOfId" is null
+          from "SalesInvoice" d where d."companyId" = ${o.companyId} ${o.generalLedgerId ? sql`and d."customerGLId" = ${o.generalLedgerId}` : sql``} and d."isPosted" and d."reversalOfId" is null
             and not exists (select 1 from "SalesInvoice" r where r."reversalOfId" = d.id and r."isPosted") order by d."invoiceDate", d.id`
-    : sql`select d.id, d."invoiceNumber" as number, to_char(d."invoiceDate",'YYYY-MM-DD') as date, null::text as "dueDate", d."totalAmount"::text as total,
+    : sql`select d.id, d."vendorGLId" as gl, d."invoiceNumber" as number, to_char(d."invoiceDate",'YYYY-MM-DD') as date, null::text as "dueDate", d."totalAmount"::text as total,
             (coalesce((select sum(bs.amount) from "BillSettlement" bs where bs."purchaseBillId" = d.id and ${live("bs")}), 0)
               + coalesce((select sum(aa.amount) from "AdvanceApplication" aa where aa."purchaseBillId" = d.id and ${live("aa")}), 0))::text as settled,
             (${asOf}::date - d."invoiceDate") as late
-          from "PurchaseBill" d where d."companyId" = ${o.companyId} and d."vendorGLId" = ${o.generalLedgerId} and d."isPosted" and d."reversalOfId" is null
+          from "PurchaseBill" d where d."companyId" = ${o.companyId} ${o.generalLedgerId ? sql`and d."vendorGLId" = ${o.generalLedgerId}` : sql``} and d."isPosted" and d."reversalOfId" is null
             and not exists (select 1 from "PurchaseBill" r where r."reversalOfId" = d.id and r."isPosted") order by d."invoiceDate", d.id`)) as any[];
   return rows.map((r) => {
     const out = paise(r.total) - paise(r.settled);
-    return { id: r.id as number, kind: o.kind, number: r.number as string, date: r.date as string, dueDate: (r.dueDate ?? null) as string | null, total: formatPaise(paise(r.total)), settled: formatPaise(paise(r.settled)), outstanding: formatPaise(out), overdueDays: Math.max(0, Number(r.late ?? 0)), _out: out };
+    return { id: r.id as number, generalLedgerId: r.gl as number, kind: o.kind, number: r.number as string, date: r.date as string, dueDate: (r.dueDate ?? null) as string | null, total: formatPaise(paise(r.total)), settled: formatPaise(paise(r.settled)), outstanding: formatPaise(out), overdueDays: Math.max(0, Number(r.late ?? 0)), _out: out };
   }).filter((r) => o.all || r._out > 0n).map(({ _out, ...r }) => r);
 }
 
 // ---------- advances ----------
-export type OpenAdvance = { voucherId: number; voucherNumber: string; date: string; amount: string; used: string; available: string };
+export type OpenAdvance = { generalLedgerId: number; voucherId: number; voucherNumber: string; date: string; amount: string; used: string; available: string };
 
 // Receipts (customer) / payments (vendor) on one ledger that were not fully settled against bills, oldest first.
 //   available = what the voucher received / paid on that ledger - its settlements for that ledger's documents - applications taken from it
-export async function openAdvances(db_: Reader, o: { companyId: number; kind: SettlementKind; generalLedgerId: number }): Promise<OpenAdvance[]> {
+export async function openAdvances(db_: Reader, o: { companyId: number; kind: SettlementKind; generalLedgerId?: number }): Promise<OpenAdvance[]> {
   const sales = o.kind === "SALES_INVOICE";
   const rows = (await db_.execute(sql`
-    select v.id, v."voucherNumber" as number, to_char(v."voucherDate",'YYYY-MM-DD') as date,
+    select v.id, l."generalLedgerId" as gl, v."voucherNumber" as number, to_char(v."voucherDate",'YYYY-MM-DD') as date,
            sum(${sales ? sql`l.credit` : sql`l.debit`})::text as amount,
-           (coalesce((select sum(bs.amount) from "BillSettlement" bs ${sales ? sql`join "SalesInvoice" d on d.id = bs."salesInvoiceId" and d."customerGLId"` : sql`join "PurchaseBill" d on d.id = bs."purchaseBillId" and d."vendorGLId"`} = ${o.generalLedgerId}
+           (coalesce((select sum(bs.amount) from "BillSettlement" bs ${sales ? sql`join "SalesInvoice" d on d.id = bs."salesInvoiceId" and d."customerGLId"` : sql`join "PurchaseBill" d on d.id = bs."purchaseBillId" and d."vendorGLId"`} = l."generalLedgerId"
                        where bs."cashBankVoucherId" = v.id), 0)
-            + coalesce((select sum(aa.amount) from "AdvanceApplication" aa where aa."cashBankVoucherId" = v.id and aa."generalLedgerId" = ${o.generalLedgerId}), 0))::text as used
-      from "CashBankVoucher" v join "CashBankVoucherLine" l on l."cashBankVoucherId" = v.id and not l."isCashBankLine" and l."generalLedgerId" = ${o.generalLedgerId}
+            + coalesce((select sum(aa.amount) from "AdvanceApplication" aa where aa."cashBankVoucherId" = v.id and aa."generalLedgerId" = l."generalLedgerId"), 0))::text as used
+      from "CashBankVoucher" v join "CashBankVoucherLine" l on l."cashBankVoucherId" = v.id and not l."isCashBankLine" ${o.generalLedgerId ? sql`and l."generalLedgerId" = ${o.generalLedgerId}` : sql``}
      where v."companyId" = ${o.companyId} and v."isPosted" and v."reversalOfId" is null
        and not exists (select 1 from "CashBankVoucher" r where r."reversalOfId" = v.id and r."isPosted")
-     group by v.id order by v."voucherDate", v.id`)) as any[];
-  return rows.map((r) => ({ voucherId: r.id as number, voucherNumber: r.number as string, date: r.date as string, amount: paise(r.amount), used: paise(r.used) }))
+     group by v.id, l."generalLedgerId" order by v."voucherDate", v.id`)) as any[];
+  return rows.map((r) => ({ generalLedgerId: r.gl as number, voucherId: r.id as number, voucherNumber: r.number as string, date: r.date as string, amount: paise(r.amount), used: paise(r.used) }))
     .filter((r) => r.amount > r.used)
-    .map((r) => ({ voucherId: r.voucherId, voucherNumber: r.voucherNumber, date: r.date, amount: formatPaise(r.amount), used: formatPaise(r.used), available: formatPaise(r.amount - r.used) }));
+    .map((r) => ({ generalLedgerId: r.generalLedgerId, voucherId: r.voucherId, voucherNumber: r.voucherNumber, date: r.date, amount: formatPaise(r.amount), used: formatPaise(r.used), available: formatPaise(r.amount - r.used) }));
 }
 
 export async function advanceTotal(db_: Reader, o: { companyId: number; kind: SettlementKind; generalLedgerId: number }) {
@@ -207,3 +207,31 @@ export const applyAdvancesFor = (actor: Actor, o: Parameters<typeof applyAdvance
   });
 export const undoApplicationFor = (actor: Actor, o: Parameters<typeof undoApplication>[1], opts: Opts = {}) =>
   inActorTx(actor, opts.tx, (tx) => undoApplication(tx, o));
+
+// ---------- ageing ----------
+export const AGE_BUCKETS = ["current", "d1_30", "d31_60", "d61_90", "d90"] as const;
+export type AgeBucket = (typeof AGE_BUCKETS)[number];
+export type AgeingRow = { generalLedgerId: number; code: string; name: string; bills: number; total: string; advance: string; net: string } & Record<AgeBucket, string>;
+
+// What each customer owes (invoices) or each vendor is owed (bills), by how late it is. Age counts from the due date (invoice) or the bill date
+// (bill) to `asOf`; "current" is not yet due. Advances are shown beside, not netted into the buckets. Payments are counted as of today.
+export async function ageingReport(db_: Reader, o: { companyId: number; kind: SettlementKind; asOf?: string }) {
+  const asOf = o.asOf ?? new Date().toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf)) throw new HttpError(400, "The ageing date must look like 2026-11-30.", "asOf");
+  const [docs, advs] = await Promise.all([openDocuments(db_, { companyId: o.companyId, kind: o.kind, asOf }), openAdvances(db_, { companyId: o.companyId, kind: o.kind })]);
+  const ids = [...new Set([...docs.map((d) => d.generalLedgerId), ...advs.map((a) => a.generalLedgerId)])];
+  const names = new Map<number, { code: string; name: string }>();
+  if (ids.length) for (const g of (await db_.execute(sql`select id, code, name from "GeneralLedger" where id in (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})`)) as any[]) names.set(g.id, { code: g.code, name: g.name });
+  const bucketOf = (days: number): AgeBucket => (days <= 0 ? "current" : days <= 30 ? "d1_30" : days <= 60 ? "d31_60" : days <= 90 ? "d61_90" : "d90");
+  const acc = new Map<number, { buckets: Record<AgeBucket, bigint>; bills: number; advance: bigint }>();
+  const get = (id: number) => acc.get(id) ?? (acc.set(id, { buckets: { current: 0n, d1_30: 0n, d31_60: 0n, d61_90: 0n, d90: 0n }, bills: 0, advance: 0n }), acc.get(id)!);
+  for (const d of docs) { const r = get(d.generalLedgerId); r.buckets[bucketOf(d.overdueDays)] += paise(d.outstanding); r.bills += 1; }
+  for (const a of advs) get(a.generalLedgerId).advance += paise(a.available);
+  const rows: AgeingRow[] = [...acc.entries()].map(([id, r]) => {
+    const total = AGE_BUCKETS.reduce((t, k) => t + r.buckets[k], 0n);
+    return { generalLedgerId: id, code: names.get(id)?.code ?? "", name: names.get(id)?.name ?? `Ledger ${id}`, bills: r.bills, total: formatPaise(total), advance: formatPaise(r.advance), net: formatPaise(total - r.advance),
+      current: formatPaise(r.buckets.current), d1_30: formatPaise(r.buckets.d1_30), d31_60: formatPaise(r.buckets.d31_60), d61_90: formatPaise(r.buckets.d61_90), d90: formatPaise(r.buckets.d90) };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+  const sum = (k: "total" | "advance" | "net" | AgeBucket) => formatPaise(rows.reduce((t, r) => t + paise(r[k]), 0n));
+  return { asOf, rows, totals: { total: sum("total"), advance: sum("advance"), net: formatPaise(rows.reduce((t, r) => t + paise(r.total) - paise(r.advance), 0n)), current: sum("current"), d1_30: sum("d1_30"), d31_60: sum("d31_60"), d61_90: sum("d61_90"), d90: sum("d90"), bills: rows.reduce((t, r) => t + r.bills, 0) } };
+}

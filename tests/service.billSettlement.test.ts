@@ -180,4 +180,22 @@ describe.skipIf(!DB_READY)("bill-wise settlement", () => {
       expect(await bs.openAdvances(tx, { ...key, kind: "SALES_INVOICE" })).toHaveLength(0);
     });
   });
+
+  it("ageing: buckets by days past due, per customer, with advances beside and payments taken off", async () => {
+    await run(async (tx, w) => {
+      const old = await postedInvoice(tx, w, 100, w.customerGLId, "2025-10-10");   // 41 days late on 2025-11-20
+      await postedInvoice(tx, w, 40, w.customerGLId, "2025-11-15");                // 5 days late
+      await postedInvoice(tx, w, 30, w.customerGLId, "2025-12-01");                // not due yet
+      await postedInvoice(tx, w, 900, w.otherCustomerGLId, "2025-07-20");          // 123 days late
+      await cb.createVoucher(receipt(w, 160, [{ kind: "SALES_INVOICE", documentId: old, amount: 60 }]), ACTOR, { tx, post: true }); // 60 settled, 100 advance
+      await cb.createVoucher(receipt(w, 500, [], {}, w.otherCustomerGLId), ACTOR, { tx, post: true }); // a customer paid more than they owe: net is negative
+      const r = await bs.ageingReport(tx, { companyId: w.companyId, kind: "SALES_INVOICE", asOf: "2025-11-20" });
+      const mine = r.rows.find((x) => x.generalLedgerId === w.customerGLId)!, other = r.rows.find((x) => x.generalLedgerId === w.otherCustomerGLId)!;
+      expect([mine.current, mine.d1_30, mine.d31_60, mine.d61_90, mine.d90]).toEqual(["30.00", "40.00", "40.00", "0.00", "0.00"]);
+      expect([mine.total, mine.advance, mine.net, mine.bills]).toEqual(["110.00", "100.00", "10.00", 3]);
+      expect([other.d90, other.total, other.advance, other.net]).toEqual(["900.00", "900.00", "500.00", "400.00"]);
+      expect(r.totals).toMatchObject({ total: "1010.00", advance: "600.00", net: "410.00", d90: "900.00", bills: 4 });
+      await expect(bs.ageingReport(tx, { companyId: w.companyId, kind: "SALES_INVOICE", asOf: "20-11-2025" })).rejects.toMatchObject({ status: 400 });
+    });
+  });
 });

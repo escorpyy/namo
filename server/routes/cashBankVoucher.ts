@@ -1,7 +1,7 @@
 import { Router } from "express";
 import * as V from "../services/cashBankVoucher";
 import { db } from "../db";
-import { advanceTotal, applicationsOf, applyAdvancesFor, openAdvances, openDocuments, outstandingTotal, undoApplicationFor, type SettlementKind } from "../services/billSettlement";
+import { ageingReport, advanceTotal, applicationsOf, applyAdvancesFor, openAdvances, openDocuments, outstandingTotal, undoApplicationFor, type SettlementKind } from "../services/billSettlement";
 import { INSTRUMENTS, MAX_ENTRY_LINES } from "../../shared/cashBankVoucher";
 import { HttpError, idParam, wrap } from "./_util";
 import { actorOf, companyOf, lockOverrideOf, pick, q, rows, whole, optWhole, type Kind } from "./_input";
@@ -56,6 +56,10 @@ const kindOf = (v: unknown): SettlementKind => {
   if (v !== "SALES_INVOICE" && v !== "PURCHASE_BILL") throw new HttpError(400, "kind must be SALES_INVOICE or PURCHASE_BILL.", "kind");
   return v;
 };
+
+cashBankVoucherRouter.get("/ageing", wrap(async (req, res) => {
+  res.json(await ageingReport(db, { companyId: companyOf(req), kind: kindOf(q(req, "kind")), asOf: q(req, "asOf") || undefined }));
+}));
 
 // Advances (receipts / payments not fully settled against bills) of one account, and what has been applied to one document.
 cashBankVoucherRouter.get("/advances", wrap(async (req, res) => {
