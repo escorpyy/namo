@@ -127,4 +127,45 @@ describe.skipIf(!DB_READY)("bill-wise settlement", () => {
       await tx.execute(sql`rollback to savepoint f`);
     });
   });
+
+  it("an advance (receipt beyond the settled invoices) can be applied to a later invoice, and undone with a reason", async () => {
+    await run(async (tx, w) => {
+      const a = await postedInvoice(tx, w, 100);
+      const r = await cb.createVoucher(receipt(w, 500, [{ kind: "SALES_INVOICE", documentId: a, amount: 100 }]), ACTOR, { tx, post: true });
+      const key = { companyId: w.companyId, kind: "SALES_INVOICE" as const, generalLedgerId: w.customerGLId };
+      expect(await bs.openAdvances(tx, key)).toEqual([expect.objectContaining({ voucherId: r.id, amount: "500.00", used: "100.00", available: "400.00" })]);
+      expect(await bs.advanceTotal(tx, key)).toEqual({ count: 1, total: "400.00" });
+      const b = await postedInvoice(tx, w, 250, w.customerGLId, "2025-12-01");
+      const apply = (items: any[], id = b) => bs.applyAdvancesFor(ACTOR, { companyId: w.companyId, kind: "SALES_INVOICE", documentId: id, date: "2025-12-05", items }, { tx });
+      const attempt = async (fn: () => Promise<unknown>) => { await tx.execute(sql`savepoint s`); try { await fn(); } catch (e) { await tx.execute(sql`rollback to savepoint s`); throw e; } };
+      await expect(attempt(() => apply([{ voucherId: r.id, amount: 400.01 }]))).rejects.toMatchObject({ status: 409 }); // more than the advance
+      await expect(attempt(() => apply([{ voucherId: r.id, amount: 300 }]))).rejects.toMatchObject({ status: 409 }); // more than the invoice owes
+      await expect(attempt(() => apply([{ voucherId: 999999999, amount: 10 }]))).rejects.toMatchObject({ status: 409 });
+      await expect(attempt(() => apply([]))).rejects.toMatchObject({ status: 400 });
+      expect(await apply([{ voucherId: r.id, amount: 250 }])).toMatchObject({ applied: "250.00" });
+      expect((await bs.openAdvances(tx, key))[0].available).toBe("150.00");
+      expect((await open(tx, w, true)).map((d) => [d.id, d.outstanding])).toEqual([[a, "0.00"], [b, "0.00"]]);
+      const apps = await bs.applicationsOf(tx, { kind: "SALES_INVOICE", documentId: b });
+      expect(apps.map((x) => x.amount)).toEqual(["250.00"]);
+      await expect(attempt(() => bs.undoApplicationFor(ACTOR, { companyId: w.companyId, id: apps[0].id, reason: "x" }, { tx }))).rejects.toMatchObject({ status: 400 });
+      await tx.execute(sql`savepoint u`);
+      await expect(tx.execute(sql`delete from "AdvanceApplication" where id = ${apps[0].id}`)).rejects.toThrow(); // the database wants a reason
+      await tx.execute(sql`rollback to savepoint u`);
+      await bs.undoApplicationFor(ACTOR, { companyId: w.companyId, id: apps[0].id, reason: "Applied to the wrong invoice" }, { tx });
+      expect((await open(tx, w)).map((d) => [d.id, d.outstanding])).toEqual([[b, "250.00"]]);
+      expect((await bs.openAdvances(tx, key))[0].available).toBe("400.00");
+    });
+  });
+
+  it("reversing the receipt takes the advance away from the invoice it was applied to", async () => {
+    await run(async (tx, w) => {
+      const r = await cb.createVoucher(receipt(w, 200, []), ACTOR, { tx, post: true });
+      const b = await postedInvoice(tx, w, 150);
+      await bs.applyAdvancesFor(ACTOR, { companyId: w.companyId, kind: "SALES_INVOICE", documentId: b, date: "2025-12-05", items: [{ voucherId: r.id, amount: 150 }] }, { tx });
+      expect(await open(tx, w)).toHaveLength(0);
+      await cb.reverseVoucher(r.id, w.companyId, ACTOR, { tx, date: "2025-12-06", reason: "Wrong customer" });
+      expect((await open(tx, w)).map((d) => d.outstanding)).toEqual(["150.00"]);
+      expect(await bs.openAdvances(tx, { companyId: w.companyId, kind: "SALES_INVOICE", generalLedgerId: w.customerGLId })).toHaveLength(0);
+    });
+  });
 });

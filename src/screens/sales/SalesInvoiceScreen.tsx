@@ -12,7 +12,7 @@ import { PeekPanel, PeekToggle, usePeekOpen } from "../../components/PeekPanel";
 import { useTermsDialog } from "../../components/purchase/TermsDialog";
 import { parseAmount } from "../../../shared/cashBankVoucher";
 import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
-import CustomerInvoices from "./CustomerInvoices";
+import CustomerSide from "./CustomerSide";
 import { DateField, TextField } from "../../components/purchase/HeadFields";
 import { LinesGrid } from "../../components/purchase/LinesGrid";
 import { NumberField } from "../../components/purchase/NumberField";
@@ -283,7 +283,7 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
         </section>
         <PeekPanel open={peekOpen} onToggle={togglePeek} target={target} companyId={p.companyId} branchId={p.branchId} fiscalYear={peekFy} date={f.invoiceDate}
           pending={pending} calendar={p.calendar} ownKind="JOURNAL" creditLimit={creditLimit}
-          extra={target ? <CustomerInvoices companyId={p.companyId} branchId={p.branchId} customerGLId={target.glId} docId={doc?.id} calendar={p.calendar} onOpen={p.onOpenDoc} /> : null} />
+          extra={target ? <CustomerSide companyId={p.companyId} branchId={p.branchId} userId={p.userId} customerGLId={target.glId} doc={doc ? { id: doc.id, invoiceNumber: doc.invoiceNumber, state: doc.state, fiscalYear: doc.fiscalYear } : null} fiscalYears={lk?.fiscalYears} calendar={p.calendar} onOpen={p.onOpenDoc} /> : null} />
       </div>
       {T.node}
       {s.dialog && <Dialog spec={s.dialog} onClose={() => s.setDialog(null)} />}

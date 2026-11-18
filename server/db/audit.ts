@@ -12,7 +12,7 @@ export const AUDITED_TABLES = [
   "CashBankVoucher", "CashBankVoucherLine", "CompanyLock", "JournalVoucher", "JournalVoucherLine", "OpeningBalance",
   "PurchaseBill", "PurchaseBillImportDetail", "PurchaseBillLine", "PurchaseDocumentTerm", "PurchaseDocumentTermAllocation",
   "PurchaseImportAssessment", "PurchaseImportAssessmentAllocation", "PurchaseImportAssessmentLine", "PurchaseImportAssessmentTerm",
-  "BillSettlement", "SalesDocumentTerm", "SalesInvoice", "SalesInvoiceLine",
+  "BillSettlement", "AdvanceApplication", "SalesDocumentTerm", "SalesInvoice", "SalesInvoiceLine",
 ] as const;
 
 export type AuditContext = { userId?: number | null; reason?: string | null };

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import * as V from "../services/cashBankVoucher";
 import { db } from "../db";
-import { openDocuments, outstandingTotal, type SettlementKind } from "../services/billSettlement";
+import { advanceTotal, applicationsOf, applyAdvancesFor, openAdvances, openDocuments, outstandingTotal, undoApplicationFor, type SettlementKind } from "../services/billSettlement";
 import { INSTRUMENTS, MAX_ENTRY_LINES } from "../../shared/cashBankVoucher";
 import { HttpError, idParam, wrap } from "./_util";
 import { actorOf, companyOf, lockOverrideOf, pick, q, rows, whole, optWhole, type Kind } from "./_input";
@@ -50,6 +50,29 @@ cashBankVoucherRouter.get("/open-documents", wrap(async (req, res) => {
   const o = { companyId: companyOf(req), kind: kind as SettlementKind, generalLedgerId: whole(q(req, "generalLedgerId"), "generalLedgerId"), all: q(req, "all") === "1" };
   const rowsOut = await openDocuments(db, o);
   res.json({ rows: rowsOut, ...(await outstandingTotal(db, o)) });
+}));
+
+const kindOf = (v: unknown): SettlementKind => {
+  if (v !== "SALES_INVOICE" && v !== "PURCHASE_BILL") throw new HttpError(400, "kind must be SALES_INVOICE or PURCHASE_BILL.", "kind");
+  return v;
+};
+
+// Advances (receipts / payments not fully settled against bills) of one account, and what has been applied to one document.
+cashBankVoucherRouter.get("/advances", wrap(async (req, res) => {
+  const o = { companyId: companyOf(req), kind: kindOf(q(req, "kind")), generalLedgerId: whole(q(req, "generalLedgerId"), "generalLedgerId") };
+  res.json({ rows: await openAdvances(db, o), ...(await advanceTotal(db, o)) });
+}));
+cashBankVoucherRouter.get("/advances/applications", wrap(async (req, res) => {
+  companyOf(req);
+  res.json({ rows: await applicationsOf(db, { kind: kindOf(q(req, "kind")), documentId: whole(q(req, "documentId"), "documentId") }) });
+}));
+cashBankVoucherRouter.post("/advances/apply", wrap(async (req, res) => {
+  const companyId = companyOf(req), b = (req.body ?? {}) as Record<string, unknown>;
+  const items = rows(b.items, { voucherId: "int", amount: "num" } as const satisfies Record<string, Kind>, "items", 50, "Advance");
+  res.json(await applyAdvancesFor(await actorOf(req), { companyId, kind: kindOf(b.kind), documentId: whole(String(b.documentId ?? ""), "documentId"), date: String(b.date ?? ""), items: items as { voucherId: number; amount: unknown }[], lockOverride: lockOverrideOf(req) }));
+}));
+cashBankVoucherRouter.post("/advances/applications/:id/undo", wrap(async (req, res) => {
+  res.json(await undoApplicationFor(await actorOf(req), { companyId: companyOf(req), id: idParam(req.params.id, "Adjustment"), reason: String((req.body as any)?.reason ?? "") }));
 }));
 
 cashBankVoucherRouter.get("/balance", wrap(async (req, res) => {

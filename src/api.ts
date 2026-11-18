@@ -237,6 +237,8 @@ export interface CbEntry { id: number; lineNumber: number; generalLedgerId: numb
 export type SettleKind = "SALES_INVOICE" | "PURCHASE_BILL";
 export interface CbSettlement { id: number; kind: SettleKind; documentId: number; number: string; date: string; generalLedgerId: number; amount: string }
 export interface OpenDocument { id: number; kind: SettleKind; number: string; date: string; dueDate: string | null; total: string; settled: string; outstanding: string; overdueDays: number }
+export interface OpenAdvance { voucherId: number; voucherNumber: string; date: string; amount: string; used: string; available: string }
+export interface AdvanceApplied { id: number; voucherId: number; voucherNumber: string; date: string; amount: string }
 export interface CbDoc {
   id: number; companyId: number; branchId: number; voucherNumber: string; voucherDate: string; fiscalYear: string; status: CbStatus; isPosted: boolean; isReversal: boolean;
   reversalOfId: number | null; reversedById: number | null; reversedByNumber: string | null; cashBankLedgerId: number | null; cashBankSubLedgerId: number | null; cashBankLedgerCode: string | null; cashBankLedgerName: string | null;
@@ -258,6 +260,14 @@ export const cashBankApi = {
   post: (id: number, companyId: number, userId: number) => req<CbWrite>(`/api/cash-bank-vouchers/${id}/post?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId }) }),
   reverse: (id: number, companyId: number, userId: number, reason: string, date?: string) =>
     req<CbWrite>(`/api/cash-bank-vouchers/${id}/reverse?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId, reason, date }) }),
+  advances: (p: { companyId: number; kind: SettleKind; generalLedgerId: number }) =>
+    req<{ rows: OpenAdvance[]; count: number; total: string }>(`/api/cash-bank-vouchers/advances?${qstr(p)}`),
+  advanceApplications: (p: { companyId: number; kind: SettleKind; documentId: number }) =>
+    req<{ rows: AdvanceApplied[] }>(`/api/cash-bank-vouchers/advances/applications?${qstr(p)}`),
+  applyAdvances: (body: { companyId: number; userId: number; kind: SettleKind; documentId: number; date: string; items: { voucherId: number; amount: string }[] }) =>
+    req<{ documentId: number; applied: string }>(`/api/cash-bank-vouchers/advances/apply?companyId=${body.companyId}`, { method: "POST", body: JSON.stringify(body) }),
+  undoAdvance: (id: number, companyId: number, userId: number, reason: string) =>
+    req<{ id: number }>(`/api/cash-bank-vouchers/advances/applications/${id}/undo?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId, reason }) }),
   openDocuments: (p: { companyId: number; kind: SettleKind; generalLedgerId: number; all?: boolean }) =>
     req<{ rows: OpenDocument[]; count: number; total: string }>(`/api/cash-bank-vouchers/open-documents?${qstr({ ...p, all: p.all ? 1 : undefined })}`),
   balance: (p: { companyId: number; branchId: number; fiscalYear: string; generalLedgerId: number; date: string; excludeId?: number }) => req<CbBalance>(`/api/cash-bank-vouchers/balance?${qstr(p)}`),

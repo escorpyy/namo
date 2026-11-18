@@ -11,6 +11,7 @@ export * from "./purchaseChallan";
 export * from "./purchaseBill";
 export * from "./salesInvoice";
 export * from "./billSettlement";
+export * from "./advanceApplication";
 export * from "./importAssessment";
 export * from "./periodLock";
 export * from "./codeRule";

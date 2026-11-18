@@ -18,7 +18,7 @@ describe.skipIf(!DB_READY)("audit trail (database level)", () => {
     "CashBankVoucher", "CashBankVoucherLine", "CompanyLock", "JournalVoucher", "JournalVoucherLine", "OpeningBalance",
     "PurchaseBill", "PurchaseBillImportDetail", "PurchaseBillLine", "PurchaseDocumentTerm", "PurchaseDocumentTermAllocation",
     "PurchaseImportAssessment", "PurchaseImportAssessmentAllocation", "PurchaseImportAssessmentLine", "PurchaseImportAssessmentTerm",
-    "BillSettlement", "SalesDocumentTerm", "SalesInvoice", "SalesInvoiceLine",
+    "BillSettlement", "AdvanceApplication", "SalesDocumentTerm", "SalesInvoice", "SalesInvoiceLine",
   ];
 
   beforeAll(async () => {
