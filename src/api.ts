@@ -173,7 +173,7 @@ export type JState = "DRAFT" | "POSTED" | "REVERSED" | "REVERSAL";
 export interface JDoc {
   id: number; companyId: number; branchId: number; voucherNumber: string; numberSeriesId: number | null; voucherDate: string; fiscalYear: string; remarks: string | null;
   isPosted: boolean; postedAt: string | null; state: JState; source: string | null; reversalOf: { id: number; voucherNumber: string } | null; reversedBy: { id: number; voucherNumber: string } | null;
-  totalDebit: string; totalCredit: string; editable: boolean; deletable: boolean; reversible: boolean; lines: JDocLine[];
+  totalDebit: string; totalCredit: string; editable: boolean; deletable: boolean; reversible: boolean; lines: JDocLine[]; settlements?: CbSettlement[];
 }
 export interface JListRow { id: number; branchId: number; voucherNumber: string; voucherDate: string; fiscalYear: string; remarks: string | null; state: JState; lineCount: number; totalAmount: string; source: string | null }
 export interface JWrite { result: Record<string, any>; document: JDoc }

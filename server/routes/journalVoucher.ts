@@ -82,13 +82,23 @@ function linesOf(v: unknown): J.JvLineInput[] {
   });
 }
 
+function settlementsOf(v: unknown): J.JournalVoucherInput["settlements"] {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v) || v.length > 200) throw new HttpError(400, "settlements must be a list of at most 200 entries.", "settlements");
+  return v.map((x: any, i: number) => {
+    if (!x || typeof x !== "object") throw new HttpError(400, `Settlement ${i + 1} is not valid.`, "settlements");
+    if (x.kind !== "SALES_INVOICE" && x.kind !== "PURCHASE_BILL") throw new HttpError(400, `Settlement ${i + 1}: unknown document type.`, `settlements.${i}.kind`);
+    return { kind: x.kind, documentId: whole(x.documentId, `settlements.${i}.documentId`), amount: typeof x.amount === "number" || typeof x.amount === "string" ? x.amount : "" };
+  });
+}
+
 function inputOf(req: Request, companyId: number): J.JournalVoucherInput {
   const b = req.body ?? {};
   if (typeof b !== "object" || Array.isArray(b)) throw new HttpError(400, "The request body must be an object.");
   if (typeof b.voucherDate !== "string") throw new HttpError(400, "voucherDate is required.", "voucherDate");
   return {
     companyId, branchId: whole(b.branchId, "branchId"), voucherNumber: text(b.voucherNumber, "voucherNumber", 60), numberSeriesId: optWhole(b.numberSeriesId, "numberSeriesId") ?? null,
-    voucherDate: b.voucherDate, fiscalYear: text(b.fiscalYear, "fiscalYear", 15) || undefined, remarks: text(b.remarks, "remarks", 5000) ?? null, lines: linesOf(b.lines),
+    voucherDate: b.voucherDate, fiscalYear: text(b.fiscalYear, "fiscalYear", 15) || undefined, remarks: text(b.remarks, "remarks", 5000) ?? null, lines: linesOf(b.lines), settlements: settlementsOf(b.settlements),
   };
 }
 

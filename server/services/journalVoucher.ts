@@ -4,6 +4,7 @@ import { withInitialPostedChildInsert } from "../db/audit";
 import * as S from "../db/schema";
 import { HttpError } from "../routes/_util";
 import { numberForSave } from "./numberSeries";
+import { recheckSettlements, settlementsOf, writeSettlements, type SettlementInput } from "./billSettlement";
 import { guardPeriod, type LockOverride } from "./periodLock";
 import { type Actor, type Opts, type Tx, assertBranch, inActorTx, parseDate, resolveFiscalYear, today } from "./purchase/common";
 import { ZERO, fmt, toMicro, type Micro } from "./purchase/money";
@@ -37,6 +38,8 @@ export type JournalVoucherInput = {
   fiscalYear?: string;
   remarks?: string | null;
   lines: JvLineInput[];
+  // bill-wise adjustment (optional): a credit on a customer ledger settles its invoices, a debit on a vendor ledger settles its bills
+  settlements?: SettlementInput[] | null;
 };
 type LockOpts = { lockOverride?: LockOverride | null };
 
@@ -184,6 +187,7 @@ export function saveJournalVoucher(input: JournalVoucherInput, actor: Actor, opt
       if (existing.isPosted) {
         if (await reversalOf(tx, existing.id)) throw new HttpError(409, "This voucher has been reversed and cannot be changed.");
         needReason(opts.reason, "changing a posted voucher");
+        if ((await settlementsOf(tx, existing.id, "JOURNAL")).length) throw new HttpError(409, "This voucher settles invoices or bills, so it cannot be edited after posting. Reverse it and enter a corrected one.");
       }
     }
     await guardPeriod(tx, input.companyId, existing ? [existing.voucherDate, date] : [date], opts.lockOverride, "voucherDate");
@@ -213,6 +217,7 @@ export function saveJournalVoucher(input: JournalVoucherInput, actor: Actor, opt
       id = v.id;
     }
     await writeLines(tx, id, lines, false);
+    await writeSettlements(tx, { voucherId: id, companyId: input.companyId, source: "JOURNAL", settlements: input.settlements });
     const dr = lines.reduce((a, l) => a + l.debit, ZERO), cr = lines.reduce((a, l) => a + l.credit, ZERO);
     return { id, voucherNumber: numbered.number, fiscalYear: fy.code, isPosted: !!existing?.isPosted, debit: fmt(dr, 2), credit: fmt(cr, 2), balanced: dr === cr };
   });
@@ -232,6 +237,7 @@ export function postJournalVoucher(id: number, companyId: number | null, actor: 
     // check again as if freshly entered: a ledger may have been deactivated or turned into a cash ledger since the draft was saved
     const lines = await resolveLines(tx, v.companyId, stored.map((l) => ({ generalLedgerId: l.generalLedgerId, subLedgerId: l.subLedgerId, agentId: l.agentId, debit: l.debit, credit: l.credit, narration: l.narration })));
     assertPostable(lines);
+    await recheckSettlements(tx, id, v.companyId, "JOURNAL");
     await tx.update(S.journalVoucher).set({ isPosted: true, postedAt: new Date(), postedBy: actor.userId, updatedAt: new Date() }).where(eq(S.journalVoucher.id, id));
     const dr = lines.reduce((a, l) => a + l.debit, ZERO);
     return { id, voucherNumber: v.voucherNumber, isPosted: true as const, total: fmt(dr, 2) };
@@ -364,6 +370,7 @@ export async function getJournalVoucher(id: number, companyId: number) {
     const final = !!source || !!v.reversalOfId || !!reversedBy;
     return {
       id: v.id, companyId: v.companyId, branchId: v.branchId, voucherNumber: v.voucherNumber, numberSeriesId: v.numberSeriesId, voucherDate: iso(v.voucherDate), fiscalYear: v.fiscalYear,
+      settlements: await settlementsOf(tx, id, "JOURNAL"),
       remarks: v.remarks, isPosted: v.isPosted, postedAt: v.postedAt?.toISOString() ?? null, state, source, reversalOf: orig ?? null, reversedBy,
       totalDebit: fmt(dr, 2), totalCredit: fmt(cr, 2),
       editable: !final, deletable: !final, reversible: v.isPosted && !final,

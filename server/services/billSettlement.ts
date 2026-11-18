@@ -18,8 +18,14 @@ const paise = (v: unknown) => toCents(String(v ?? "0"));
 type Reader = Pick<Tx, "execute">;
 
 // Posted, not-reversed vouchers' rows (settlements, or applications of an advance taken from that voucher). `a` is the row alias.
-const live = (a: string) => sql`exists (select 1 from "CashBankVoucher" cv where cv.id = ${sql.raw(a)}."cashBankVoucherId" and cv."isPosted"
-  and not exists (select 1 from "CashBankVoucher" r where r."reversalOfId" = cv.id and r."isPosted"))`;
+const live = (a: string) => {
+  const cash = sql`exists (select 1 from "CashBankVoucher" cv where cv.id = ${sql.raw(a)}."cashBankVoucherId" and cv."isPosted"
+    and not exists (select 1 from "CashBankVoucher" r where r."reversalOfId" = cv.id and r."isPosted"))`;
+  if (a !== "bs") return cash;
+  const journal = sql`exists (select 1 from "JournalVoucher" jv where jv.id = bs."journalVoucherId" and jv."isPosted"
+    and not exists (select 1 from "JournalVoucher" r where r."reversalOfId" = jv.id and r."isPosted"))`;
+  return sql`(${cash} or ${journal})`;
+};
 
 // Documents of one customer / vendor ledger that still have something to pay, oldest first. `all` also lists settled ones.
 export async function openDocuments(db_: Reader, o: { companyId: number; kind: SettlementKind; generalLedgerId?: number; all?: boolean; asOf?: string }): Promise<OpenDocument[]> {
@@ -131,12 +137,13 @@ export async function outstandingTotal(db_: Reader, o: { companyId: number; kind
 }
 
 // The settlements of one voucher, with the document they point at.
-export async function settlementsOf(db_: Reader, voucherId: number) {
+export type SettlementSource = "CASH_BANK" | "JOURNAL";
+export async function settlementsOf(db_: Reader, voucherId: number, source: SettlementSource = "CASH_BANK") {
   const rows = (await db_.execute(sql`
     select bs.id, bs."salesInvoiceId", bs."purchaseBillId", bs.amount::text as amount, coalesce(si."invoiceNumber", pb."invoiceNumber") as number,
            to_char(coalesce(si."invoiceDate", pb."invoiceDate"),'YYYY-MM-DD') as date, coalesce(si."customerGLId", pb."vendorGLId") as "generalLedgerId"
       from "BillSettlement" bs left join "SalesInvoice" si on si.id = bs."salesInvoiceId" left join "PurchaseBill" pb on pb.id = bs."purchaseBillId"
-     where bs."cashBankVoucherId" = ${voucherId} order by bs.id`)) as any[];
+     where ${source === "JOURNAL" ? sql`bs."journalVoucherId"` : sql`bs."cashBankVoucherId"`} = ${voucherId} order by bs.id`)) as any[];
   return rows.map((r) => ({
     id: r.id as number, kind: (r.salesInvoiceId ? "SALES_INVOICE" : "PURCHASE_BILL") as SettlementKind, documentId: (r.salesInvoiceId ?? r.purchaseBillId) as number,
     number: r.number as string, date: r.date as string, generalLedgerId: r.generalLedgerId as number, amount: formatPaise(paise(r.amount)),
@@ -147,12 +154,15 @@ export async function settlementsOf(db_: Reader, voucherId: number) {
 //   - a receipt settles invoices only, a payment settles bills only, for the ledger the voucher line names
 //   - each document is posted, belongs to this company, and is settled for no more than is still outstanding
 //   - the amounts settled against a ledger never exceed what the voucher receives / pays on it
-export async function writeSettlements(tx: Tx, o: { voucherId: number; companyId: number; settlements?: SettlementInput[] | null }) {
-  await tx.delete(S.billSettlement).where(eq(S.billSettlement.cashBankVoucherId, o.voucherId));
+export async function writeSettlements(tx: Tx, o: { voucherId: number; companyId: number; settlements?: SettlementInput[] | null; source?: SettlementSource }) {
+  const journal = o.source === "JOURNAL";
+  await tx.delete(S.billSettlement).where(eq(journal ? S.billSettlement.journalVoucherId : S.billSettlement.cashBankVoucherId, o.voucherId));
   const list = (o.settlements ?? []).filter((s) => paise(s.amount) > 0n || String(s.amount ?? "").trim() !== "");
   if (!list.length) return;
-  const lines = await tx.select({ gl: S.cashBankVoucherLine.generalLedgerId, debit: S.cashBankVoucherLine.debit, credit: S.cashBankVoucherLine.credit })
-    .from(S.cashBankVoucherLine).where(and(eq(S.cashBankVoucherLine.cashBankVoucherId, o.voucherId), eq(S.cashBankVoucherLine.isCashBankLine, false)));
+  const lines = journal
+    ? await tx.select({ gl: S.journalVoucherLine.generalLedgerId, debit: S.journalVoucherLine.debit, credit: S.journalVoucherLine.credit }).from(S.journalVoucherLine).where(eq(S.journalVoucherLine.journalVoucherId, o.voucherId))
+    : await tx.select({ gl: S.cashBankVoucherLine.generalLedgerId, debit: S.cashBankVoucherLine.debit, credit: S.cashBankVoucherLine.credit })
+      .from(S.cashBankVoucherLine).where(and(eq(S.cashBankVoucherLine.cashBankVoucherId, o.voucherId), eq(S.cashBankVoucherLine.isCashBankLine, false)));
   const received = new Map<number, bigint>(), paid = new Map<number, bigint>();
   for (const l of lines) {
     received.set(l.gl, (received.get(l.gl) ?? 0n) + paise(l.credit));
@@ -185,17 +195,17 @@ export async function writeSettlements(tx: Tx, o: { voucherId: number; companyId
     used.set(ck, total);
     if (total > (side.get(doc.gl) ?? 0n)) throw new HttpError(409, `Settlement ${n}: more is settled than this voucher ${s.kind === "SALES_INVOICE" ? "receives" : "pays"} on that account (${formatPaise(side.get(doc.gl) ?? 0n)}).`, field);
     await tx.insert(S.billSettlement).values({
-      companyId: o.companyId, cashBankVoucherId: o.voucherId, amount: formatPaise(amt),
+      companyId: o.companyId, cashBankVoucherId: journal ? null : o.voucherId, journalVoucherId: journal ? o.voucherId : null, amount: formatPaise(amt),
       salesInvoiceId: s.kind === "SALES_INVOICE" ? s.documentId : null, purchaseBillId: s.kind === "PURCHASE_BILL" ? s.documentId : null,
     });
   }
 }
 
 // Called when a draft is posted: what was valid when saved may have been used up by another voucher since.
-export async function recheckSettlements(tx: Tx, voucherId: number, companyId: number) {
-  const rows = (await settlementsOf(tx, voucherId));
+export async function recheckSettlements(tx: Tx, voucherId: number, companyId: number, source: SettlementSource = "CASH_BANK") {
+  const rows = (await settlementsOf(tx, voucherId, source));
   if (!rows.length) return;
-  await writeSettlements(tx, { voucherId, companyId, settlements: rows.map((r) => ({ kind: r.kind, documentId: r.documentId, amount: r.amount })) });
+  await writeSettlements(tx, { voucherId, companyId, source, settlements: rows.map((r) => ({ kind: r.kind, documentId: r.documentId, amount: r.amount })) });
 }
 
 

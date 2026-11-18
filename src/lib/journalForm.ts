@@ -4,8 +4,9 @@ import { fromPaise, toPaise } from "./money";
 
 // The journal voucher form <-> document <-> payload, and its rules. The server repeats every rule; these only let the screen say so before saving.
 
+import { settlementsPayload, settlementsToMap, type SettleMap } from "../screens/cashBank/BillSettlementPanel";
 export interface JLine { key: string; glId: string; subId: string; agentId: string; debit: string; credit: string; narration: string }
-export interface JForm { numberSeriesId: string; docNumber: string; voucherDate: string; remarks: string; lines: JLine[] }
+export interface JForm { numberSeriesId: string; docNumber: string; voucherDate: string; remarks: string; lines: JLine[]; settle?: SettleMap }
 export type JErrors = Record<string, string | undefined>;
 
 export const blankJLine = (over: Partial<JLine> = {}): JLine => ({ key: newKey(), glId: "", subId: "", agentId: "", debit: "", credit: "", narration: "", ...over });
@@ -27,15 +28,16 @@ export const jLineFromDoc = (l: JDoc["lines"][number]): JLine => ({
 });
 export const jFormFromDoc = (d: JDoc): JForm => ({
   numberSeriesId: str(d.numberSeriesId), docNumber: d.voucherNumber, voucherDate: d.voucherDate, remarks: str(d.remarks),
-  lines: d.lines.length ? d.lines.map(jLineFromDoc) : emptyJLines(),
+  lines: d.lines.length ? d.lines.map(jLineFromDoc) : emptyJLines(), settle: settlementsToMap(d.settlements),
 });
 // A new draft from a saved voucher: same lines and remarks, today's date, a new number.
-export const copyJForm = (f: JForm, date: string): JForm => ({ numberSeriesId: "", docNumber: "", voucherDate: date, remarks: f.remarks, lines: f.lines.map((l) => ({ ...l, key: newKey() })) });
+export const copyJForm = (f: JForm, date: string): JForm => ({ numberSeriesId: "", docNumber: "", voucherDate: date, remarks: f.remarks, lines: f.lines.map((l) => ({ ...l, key: newKey() })), settle: {} });
 
 export const jToPayload = (f: JForm, doc: JDoc | null, reason?: string) => ({
   voucherDate: f.voucherDate, remarks: f.remarks.trim() || null,
   ...(doc ? {} : { voucherNumber: f.docNumber.trim() || null, numberSeriesId: f.numberSeriesId ? Number(f.numberSeriesId) : null }),
   ...(reason ? { reason } : {}),
+  settlements: settlementsPayload(f.settle ?? {}),
   lines: f.lines.filter((l) => !isBlankJLine(l)).map((l) => ({
     generalLedgerId: Number(l.glId), subLedgerId: l.subId ? Number(l.subId) : null, agentId: l.agentId ? Number(l.agentId) : null,
     debit: l.debit.trim() || "0", credit: l.credit.trim() || "0", narration: l.narration.trim() || null,

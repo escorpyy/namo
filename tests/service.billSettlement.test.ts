@@ -8,6 +8,7 @@ describe.skipIf(!DB_READY)("bill-wise settlement", () => {
   let inv: typeof import("../server/services/salesInvoice");
   let cb: typeof import("../server/services/cashBankVoucher");
   let bs: typeof import("../server/services/billSettlement");
+  let jv: typeof import("../server/services/journalVoucher");
   class Rollback extends Error {}
   const NOW = sql`now()`;
   const ACTOR = { userId: null };
@@ -16,6 +17,7 @@ describe.skipIf(!DB_READY)("bill-wise settlement", () => {
     inv = await import("../server/services/salesInvoice");
     cb = await import("../server/services/cashBankVoucher");
     bs = await import("../server/services/billSettlement");
+    jv = await import("../server/services/journalVoucher");
   });
   const ins = async (tx: any, table: string, vals: Record<string, unknown>) => {
     const keys = Object.keys(vals);
@@ -36,12 +38,13 @@ describe.skipIf(!DB_READY)("bill-wise settlement", () => {
       ins(tx, "GeneralLedger", { companyId, code: code(key), name: key, accountSubGroupId: sub, normalBalance: normal, glType, updatedAt: NOW, ...extra });
     const customerGLId = await gl(assetSub, "CUST", "DEBIT", "CUSTOMER"), otherCustomerGLId = await gl(assetSub, "CUST2", "DEBIT", "CUSTOMER");
     const salesGLId = await gl(revenueSub, "SALES", "CREDIT"), cashGLId = await gl(assetSub, "CASH", "DEBIT", "OTHER", { isCashOrBank: true });
+    const rebateGLId = await gl(assetSub, "REBATE", "DEBIT");
     const unitId = await ins(tx, "ProductUnit", { companyId, code: code("UNIT"), name: "Unit", updatedAt: NOW });
     const pg = await ins(tx, "ProductGroup", { companyId, code: code("PG"), name: "Products", updatedAt: NOW });
     const psg = await ins(tx, "ProductSubGroup", { code: code("PSG"), name: "Goods", productGroupId: pg, updatedAt: NOW });
     const productId = await ins(tx, "Product", { companyId, code: code("CONSULT"), description: "Consulting", type: "NON_STOCK", productSubGroupId: psg, updatedAt: NOW });
     await ins(tx, "NonStockDetail", { productId, unitId, salesGLId, purchaseGLId: salesGLId, updatedAt: NOW });
-    return { companyId, branchId, customerGLId, otherCustomerGLId, cashGLId, productId, unitId };
+    return { companyId, branchId, customerGLId, otherCustomerGLId, cashGLId, rebateGLId, productId, unitId };
   }
   const run = async (body: (tx: any, w: Awaited<ReturnType<typeof world>>) => Promise<void>) => {
     try { await db.transaction(async (tx: any) => { await body(tx, await world(tx)); throw new Rollback(); }); } catch (e) { if (!(e instanceof Rollback)) throw e; }
@@ -196,6 +199,29 @@ describe.skipIf(!DB_READY)("bill-wise settlement", () => {
       expect([other.d90, other.total, other.advance, other.net]).toEqual(["900.00", "900.00", "500.00", "400.00"]);
       expect(r.totals).toMatchObject({ total: "1010.00", advance: "600.00", net: "410.00", d90: "900.00", bills: 4 });
       await expect(bs.ageingReport(tx, { companyId: w.companyId, kind: "SALES_INVOICE", asOf: "20-11-2025" })).rejects.toMatchObject({ status: 400 });
+    });
+  });
+
+  it("a Journal voucher can settle invoices too (credit on the customer), and reversing it releases them", async () => {
+    await run(async (tx, w) => {
+      const a = await postedInvoice(tx, w, 100);
+      const rebate = w.rebateGLId;
+      const draft = (extra: any = {}) => ({ companyId: w.companyId, branchId: w.branchId, voucherDate: "2025-11-02", fiscalYear: "2082/83",
+        lines: [{ generalLedgerId: rebate, debit: 30 }, { generalLedgerId: w.customerGLId, credit: 30 }], ...extra });
+      const attempt = async (fn: () => Promise<unknown>) => { await tx.execute(sql`savepoint s`); try { await fn(); } catch (e) { await tx.execute(sql`rollback to savepoint s`); throw e; } };
+      await expect(attempt(() => jv.saveJournalVoucher(draft({ settlements: [{ kind: "SALES_INVOICE", documentId: a, amount: 31 }] }), ACTOR, { tx }))).rejects.toMatchObject({ status: 409 }); // more than credited
+      await expect(attempt(() => jv.saveJournalVoucher(draft({ settlements: [{ kind: "PURCHASE_BILL", documentId: a, amount: 10 }] }), ACTOR, { tx }))).rejects.toMatchObject({ status: 404 });
+      const saved = await jv.saveJournalVoucher(draft({ settlements: [{ kind: "SALES_INVOICE", documentId: a, amount: 30 }] }), ACTOR, { tx });
+      expect((await open(tx, w)).map((d) => d.outstanding)).toEqual(["100.00"]); // a draft settles nothing
+      await jv.postJournalVoucher(saved.id, w.companyId, ACTOR, { tx });
+      expect((await open(tx, w)).map((d) => d.outstanding)).toEqual(["70.00"]);
+      expect((await bs.settlementsOf(tx, saved.id, "JOURNAL")).map((x) => x.amount)).toEqual(["30.00"]);
+      await expect(attempt(() => jv.saveJournalVoucher({ ...draft(), id: saved.id }, ACTOR, { tx, reason: "fix" }))).rejects.toMatchObject({ status: 409 }); // frozen once posted
+      await tx.execute(sql`savepoint f`);
+      await expect(tx.execute(sql`delete from "BillSettlement" where "journalVoucherId" = ${saved.id}`)).rejects.toThrow(); // the database wants a reason
+      await tx.execute(sql`rollback to savepoint f`);
+      await jv.reverseJournalVoucher(saved.id, w.companyId, ACTOR, { tx, date: "2025-11-05", reason: "Rebate cancelled" });
+      expect((await open(tx, w)).map((d) => d.outstanding)).toEqual(["100.00"]);
     });
   });
 });

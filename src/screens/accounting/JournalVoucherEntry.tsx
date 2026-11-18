@@ -12,6 +12,8 @@ import { COMMON_HELP, DocHeader, Field, Pill, formEnterKey, HINTS } from "../../
 import { DateField } from "../../components/purchase/HeadFields";
 import { NumberField } from "../../components/purchase/NumberField";
 import { defaultDate } from "../../lib/purchaseForm";
+import { BillSettlementPanel, SettlementList } from "../cashBank/BillSettlementPanel";
+import { parseAmount } from "../../../shared/cashBankVoucher";
 import { copyJForm, emptyJLines, fmtAmt, jFormFromDoc, jToPayload, jTotals, validateJournal, type JForm } from "../../lib/journalForm";
 import type { PurchaseScreenProps } from "../purchase/PurchaseOrderScreen";
 import { useDocScreen, type DocApi, type DocConfig, type DocSnapshot } from "../purchase/useDocScreen";
@@ -84,6 +86,16 @@ export default function JournalVoucherEntry(p: JournalEntryProps) {
     const l = f?.lines[Number(m[1])];
     return l?.glId ? { glId: Number(l.glId), subId: l.subId ? Number(l.subId) : null } : null;
   });
+
+  // Bill-wise adjustment: if the panel's account has only credits (a customer paying) or only debits (a vendor being paid), its bills can be settled here.
+  const settleTarget = useMemo(() => {
+    if (!peekTarget || !f) return null;
+    const mine = f.lines.filter((l) => l.glId === String(peekTarget.glId));
+    const dr = mine.reduce((a, l) => a + (parseAmount(l.debit) ?? 0n), 0n), cr = mine.reduce((a, l) => a + (parseAmount(l.credit) ?? 0n), 0n);
+    if (cr > 0n && dr === 0n) return { kind: "SALES_INVOICE" as const, glId: peekTarget.glId, total: cr };
+    if (dr > 0n && cr === 0n) return { kind: "PURCHASE_BILL" as const, glId: peekTarget.glId, total: dr };
+    return null;
+  }, [peekTarget, f]);
 
   useEffect(() => {
     const date = f?.voucherDate;
@@ -247,7 +259,9 @@ export default function JournalVoucherEntry(p: JournalEntryProps) {
         </footer>
       </section>
       <PeekPanel open={peekOpen} onToggle={togglePeek} target={peekTarget} companyId={p.companyId} branchId={p.branchId} fiscalYear={peekFy} date={f.voucherDate}
-        excludeJournalVoucherId={doc?.id ?? null} pending={peekPending} calendar={p.calendar} ownKind="JOURNAL" onOpen={p.onOpenDoc} />
+        excludeJournalVoucherId={doc?.id ?? null} pending={peekPending} calendar={p.calendar} ownKind="JOURNAL" onOpen={p.onOpenDoc}
+        extra={ro ? <SettlementList rows={doc?.settlements ?? []} calendar={p.calendar} />
+          : settleTarget ? <BillSettlementPanel companyId={p.companyId} kind={settleTarget.kind} glId={settleTarget.glId} lineTotal={settleTarget.total} values={f.settle ?? {}} calendar={p.calendar} onChange={(settle) => s.patch({ settle })} /> : null} />
       </div>
       {printable}
       {s.dialog && <Dialog spec={s.dialog} onClose={() => s.setDialog(null)} />}

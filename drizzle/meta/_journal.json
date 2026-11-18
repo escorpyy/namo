@@ -225,6 +225,13 @@
       "when": 1794985661979,
       "tag": "0031_advance_application",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1794986636723,
+      "tag": "0032_bill_settlement_journal",
+      "breakpoints": true
     }
   ]
 }
