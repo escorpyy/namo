@@ -1,5 +1,7 @@
 import { Router } from "express";
 import * as V from "../services/cashBankVoucher";
+import { db } from "../db";
+import { openDocuments, outstandingTotal, type SettlementKind } from "../services/billSettlement";
 import { INSTRUMENTS, MAX_ENTRY_LINES } from "../../shared/cashBankVoucher";
 import { HttpError, idParam, wrap } from "./_util";
 import { actorOf, companyOf, lockOverrideOf, pick, q, rows, whole, optWhole, type Kind } from "./_input";
@@ -9,6 +11,7 @@ import { actorOf, companyOf, lockOverrideOf, pick, q, rows, whole, optWhole, typ
 //
 //   GET    /api/cash-bank-vouchers/lookups?companyId=
 //   GET    /api/cash-bank-vouchers/balance?companyId=&branchId=&fiscalYear=&generalLedgerId=&date=&excludeId=
+//   GET    /api/cash-bank-vouchers/open-documents?companyId=&kind=SALES_INVOICE|PURCHASE_BILL&generalLedgerId=&all=1   unpaid invoices / bills of one account
 //   GET    /api/cash-bank-vouchers?companyId=&branchId=&fiscalYear=&status=&search=&limit=
 //   GET    /api/cash-bank-vouchers/:id?companyId=
 //   POST   /api/cash-bank-vouchers                 body: companyId, branchId, ...fields, lines, post?   (post: true saves and posts in one go)
@@ -25,18 +28,28 @@ export const cashBankVoucherRouter = Router();
 const HEAD = {
   fiscalYear: "str", voucherDate: "date", cashBankLedgerId: "int", cashBankSubLedgerId: "int", instrumentType: INSTRUMENTS.map((i) => i.value) as string[], chequeNumber: "str", chequeDate: "date", payeeReference: "str", remarks: "str",
 } as const satisfies Record<string, Kind>;
+const SETTLEMENT = { kind: ["SALES_INVOICE", "PURCHASE_BILL"] as string[], documentId: "int", amount: "num" } as const satisfies Record<string, Kind>;
 const LINE = { generalLedgerId: "int", subLedgerId: "int", receipt: "num", payment: "num", narration: "str" } as const satisfies Record<string, Kind>;
 
 function inputOf(body: unknown, companyId: number, branchId: number): V.VoucherInput {
   const head = pick(body, HEAD, "Voucher");
   const lines = rows((body as any)?.lines, LINE, "lines", MAX_ENTRY_LINES, "Line");
-  return { ...head, companyId, branchId, lines } as V.VoucherInput;
+  const settlements = rows((body as any)?.settlements, SETTLEMENT, "settlements", 200, "Settlement");
+  return { ...head, companyId, branchId, lines, settlements } as V.VoucherInput;
 }
 
 const asWrite = async (result: { id: number } & Record<string, unknown>, companyId: number) => ({ result, document: await V.getVoucher(result.id, companyId) });
 
 cashBankVoucherRouter.get("/lookups", wrap(async (req, res) => {
   res.json(await V.voucherLookups(companyOf(req)));
+}));
+
+cashBankVoucherRouter.get("/open-documents", wrap(async (req, res) => {
+  const kind = q(req, "kind");
+  if (kind !== "SALES_INVOICE" && kind !== "PURCHASE_BILL") throw new HttpError(400, "kind must be SALES_INVOICE or PURCHASE_BILL.", "kind");
+  const o = { companyId: companyOf(req), kind: kind as SettlementKind, generalLedgerId: whole(q(req, "generalLedgerId"), "generalLedgerId"), all: q(req, "all") === "1" };
+  const rowsOut = await openDocuments(db, o);
+  res.json({ rows: rowsOut, ...(await outstandingTotal(db, o)) });
 }));
 
 cashBankVoucherRouter.get("/balance", wrap(async (req, res) => {

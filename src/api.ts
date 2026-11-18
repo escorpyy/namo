@@ -234,11 +234,15 @@ export interface CbSubLedger { id: number; code: string; name: string; generalLe
 export interface CbLookups { cashBankLedgers: CbLedger[]; ledgers: CbLedger[]; subLedgers: CbSubLedger[]; fiscalYears: { id: number; code: string; startDate: string; endDate: string; isActive: boolean; isClosed: boolean; isCurrent: boolean }[] }
 export type CbStatus = "DRAFT" | "POSTED" | "REVERSED";
 export interface CbEntry { id: number; lineNumber: number; generalLedgerId: number; code: string; name: string; glType: string; subLedgerId: number | null; subLedgerCode: string | null; subLedgerName: string | null; receipt: string; payment: string; narration: string }
+export type SettleKind = "SALES_INVOICE" | "PURCHASE_BILL";
+export interface CbSettlement { id: number; kind: SettleKind; documentId: number; number: string; date: string; generalLedgerId: number; amount: string }
+export interface OpenDocument { id: number; kind: SettleKind; number: string; date: string; dueDate: string | null; total: string; settled: string; outstanding: string; overdueDays: number }
 export interface CbDoc {
   id: number; companyId: number; branchId: number; voucherNumber: string; voucherDate: string; fiscalYear: string; status: CbStatus; isPosted: boolean; isReversal: boolean;
   reversalOfId: number | null; reversedById: number | null; reversedByNumber: string | null; cashBankLedgerId: number | null; cashBankSubLedgerId: number | null; cashBankLedgerCode: string | null; cashBankLedgerName: string | null;
   instrumentType: string | null; chequeNumber: string | null; chequeDate: string | null; payeeReference: string; remarks: string; entries: CbEntry[];
   totalReceipts: string; totalPayments: string; openingBalance: string; closingBalance: string;
+  settlements: CbSettlement[];
 }
 export interface CbListRow { id: number; branchId: number; voucherNumber: string; voucherDate: string; fiscalYear: string; status: CbStatus; isReversal: boolean; cashBankLedgerName: string; payeeReference: string; totalReceipts: string; totalPayments: string }
 export interface CbBalance { net: string; side: "DR" | "CR"; amount: string }
@@ -254,6 +258,8 @@ export const cashBankApi = {
   post: (id: number, companyId: number, userId: number) => req<CbWrite>(`/api/cash-bank-vouchers/${id}/post?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId }) }),
   reverse: (id: number, companyId: number, userId: number, reason: string, date?: string) =>
     req<CbWrite>(`/api/cash-bank-vouchers/${id}/reverse?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId, reason, date }) }),
+  openDocuments: (p: { companyId: number; kind: SettleKind; generalLedgerId: number; all?: boolean }) =>
+    req<{ rows: OpenDocument[]; count: number; total: string }>(`/api/cash-bank-vouchers/open-documents?${qstr({ ...p, all: p.all ? 1 : undefined })}`),
   balance: (p: { companyId: number; branchId: number; fiscalYear: string; generalLedgerId: number; date: string; excludeId?: number }) => req<CbBalance>(`/api/cash-bank-vouchers/balance?${qstr(p)}`),
 };
 

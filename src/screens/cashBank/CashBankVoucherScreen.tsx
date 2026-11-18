@@ -1,5 +1,6 @@
 import { NarrationInput } from "../../components/NarrationInput";
 import { PeekPanel, PeekToggle, usePeekOpen, usePeekTarget } from "../../components/PeekPanel";
+import { BillSettlementPanel, SettlementList, settlementsPayload, settlementsToMap, type SettleMap } from "./BillSettlementPanel";
 import { cashBankPeekRows, pendingNet } from "../../lib/peek";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Ban, Check, Pencil, Plus, Save, Trash2, Undo2, X } from "lucide-react";
@@ -29,7 +30,7 @@ export interface CashBankScreenProps {
 
 interface Line { key: number; generalLedgerId: string; subLedgerId: string; receipt: string; payment: string; narration: string }
 export interface CbForm {
-  voucherDate: string; cashBankLedgerId: string; cashBankSubLedgerId: string; instrumentType: string; chequeNumber: string; chequeDate: string; payeeReference: string; remarks: string; lines: Line[];
+  voucherDate: string; cashBankLedgerId: string; cashBankSubLedgerId: string; instrumentType: string; chequeNumber: string; chequeDate: string; payeeReference: string; remarks: string; lines: Line[]; settle: SettleMap;
 }
 type Errors = Record<string, string | undefined>;
 
@@ -81,12 +82,12 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
     const banks = l.cashBankLedgers.filter((b) => b.isActive);
     return {
       voucherDate: defaultDate(l.fiscalYears.find((y) => y.code === p.fyCode)), cashBankLedgerId: banks.length === 1 ? String(banks[0].id) : "", cashBankSubLedgerId: "", instrumentType: "", chequeNumber: "", chequeDate: "", payeeReference: "", remarks: "",
-      lines: [blankLine(), blankLine()],
+      lines: [blankLine(), blankLine()], settle: {},
     };
   }, [p.fyCode]);
   const toForm = (d: CbDoc): CbForm => ({
     voucherDate: d.voucherDate, cashBankLedgerId: d.cashBankLedgerId ? String(d.cashBankLedgerId) : "", cashBankSubLedgerId: d.cashBankSubLedgerId ? String(d.cashBankSubLedgerId) : "", instrumentType: d.instrumentType ?? "", chequeNumber: d.chequeNumber ?? "", chequeDate: d.chequeDate ?? "",
-    payeeReference: d.payeeReference, remarks: d.remarks,
+    payeeReference: d.payeeReference, remarks: d.remarks, settle: settlementsToMap(d.settlements),
     lines: d.entries.length ? d.entries.map((e) => ({ key: ++keySeq, generalLedgerId: String(e.generalLedgerId), subLedgerId: e.subLedgerId ? String(e.subLedgerId) : "", receipt: e.receipt, payment: e.payment, narration: e.narration })) : [blankLine()],
   });
   const show = (f: CbForm, m: Mode, d: CbDoc | null) => { setForm(f); setBaseSig(sigOf(f)); setMode(m); setDoc(d); setErrors({}); };
@@ -164,6 +165,16 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
   });
   const peekPending = peekTarget && form ? pendingNet(peekTarget, cashBankPeekRows(form.cashBankLedgerId, form.cashBankSubLedgerId, form.lines)) : 0n;
 
+  // Bill-wise adjustment: the panel's target account, if a line on it receives (invoices) or pays (bills), and what those lines add up to.
+  const settleTarget = useMemo(() => {
+    if (!peekTarget || !form) return null;
+    const mineLines = form.lines.filter((l) => l.generalLedgerId === String(peekTarget.glId));
+    const rec = mineLines.reduce((a, l) => a + (parseAmount(l.receipt) ?? 0n), 0n), pay = mineLines.reduce((a, l) => a + (parseAmount(l.payment) ?? 0n), 0n);
+    if (rec > 0n && pay === 0n) return { kind: "SALES_INVOICE" as const, glId: peekTarget.glId, total: rec };
+    if (pay > 0n && rec === 0n) return { kind: "PURCHASE_BILL" as const, glId: peekTarget.glId, total: pay };
+    return null;
+  }, [peekTarget, form]);
+
   // ---------- editing ----------
   const patch = (c: Partial<CbForm>) => setForm((f) => (f ? { ...f, ...c } : f));
   const clear = (...ks: string[]) => setErrors((e) => { const n = { ...e }; ks.forEach((k) => delete n[k]); return n; });
@@ -229,6 +240,7 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
   const payload = (f: CbForm) => ({
     companyId: p.companyId, branchId: p.branchId, userId: p.userId, fiscalYear: fyCodeFor(f.voucherDate), voucherDate: f.voucherDate, cashBankLedgerId: Number(f.cashBankLedgerId), cashBankSubLedgerId: f.cashBankSubLedgerId ? Number(f.cashBankSubLedgerId) : null,
     instrumentType: f.instrumentType || null, chequeNumber: f.chequeNumber.trim() || null, chequeDate: f.chequeDate || null, payeeReference: f.payeeReference.trim() || null, remarks: f.remarks.trim() || null,
+    settlements: settlementsPayload(f.settle ?? {}),
     lines: f.lines.filter((l) => !isBlankEntry(toEntry(l))).map((l) => ({ generalLedgerId: Number(l.generalLedgerId) || null, subLedgerId: l.subLedgerId ? Number(l.subLedgerId) : null, receipt: l.receipt || null, payment: l.payment || null, narration: l.narration.trim() || null })),
   });
   // The cell an error belongs to: header errors are named like their field; a line error is lines.<row>.<account|subLedger|amount>.
@@ -457,7 +469,9 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
         </footer>
       </section>
       <PeekPanel open={peekOpen} onToggle={togglePeek} target={peekTarget} companyId={p.companyId} branchId={p.branchId} fiscalYear={fyCodeFor(voucherDate)} date={voucherDate}
-        excludeCashBankVoucherId={docId ?? null} pending={peekPending} calendar={p.calendar} ownKind="CASH_BANK" onOpen={p.onOpenDoc} />
+        excludeCashBankVoucherId={docId ?? null} pending={peekPending} calendar={p.calendar} ownKind="CASH_BANK" onOpen={p.onOpenDoc}
+        extra={ro ? <SettlementList rows={doc?.settlements ?? []} calendar={p.calendar} />
+          : settleTarget && form ? <BillSettlementPanel companyId={p.companyId} kind={settleTarget.kind} glId={settleTarget.glId} lineTotal={settleTarget.total} values={form.settle ?? {}} calendar={p.calendar} onChange={(settle) => patch({ settle })} /> : null} />
     </div>
   );
 }

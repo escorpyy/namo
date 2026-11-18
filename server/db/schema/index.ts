@@ -10,6 +10,7 @@ export * from "./purchaseOrder";
 export * from "./purchaseChallan";
 export * from "./purchaseBill";
 export * from "./salesInvoice";
+export * from "./billSettlement";
 export * from "./importAssessment";
 export * from "./periodLock";
 export * from "./codeRule";

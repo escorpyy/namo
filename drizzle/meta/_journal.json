@@ -211,6 +211,13 @@
       "when": 1794896740285,
       "tag": "0029_sales_invoice_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1794957354595,
+      "tag": "0030_bill_settlement",
+      "breakpoints": true
     }
   ]
 }

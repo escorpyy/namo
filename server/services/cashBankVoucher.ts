@@ -4,6 +4,7 @@ import * as S from "../db/schema";
 import { HttpError } from "../routes/_util";
 import { formatPaise, journalLines, swapSides, voucherProblems, type JournalLine } from "../../shared/cashBankVoucher";
 import { parseDec, toCents } from "../../shared/decimal";
+import { recheckSettlements, settlementsOf, writeSettlements, type SettlementInput } from "./billSettlement";
 import { guardPeriod, type LockOverride } from "./periodLock";
 import { type Actor, type Opts, type Tx, assertBranch, inActorTx, parseDate, resolveFiscalYear, today } from "./purchase/common";
 
@@ -24,6 +25,8 @@ export type VoucherInput = {
   companyId: number; branchId: number; voucherDate: string; fiscalYear?: string | null; cashBankLedgerId: number; cashBankSubLedgerId?: number | null;
   instrumentType?: string | null; chequeNumber?: string | null; chequeDate?: string | null; payeeReference?: string | null; remarks?: string | null;
   lines: VoucherEntryInput[];
+  // bill-wise adjustment (optional): the invoices / bills this voucher pays off
+  settlements?: SettlementInput[] | null;
 };
 
 const day = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
@@ -129,6 +132,7 @@ export function createVoucher(input: VoucherInput, actor: Actor, opts: Opts & Lo
       cashBankLedgerId: input.cashBankLedgerId, payeeReference: input.payeeReference?.trim() || null, remarks: input.remarks?.trim() || null, createdBy: actor.userId,
     }).returning({ id: S.cashBankVoucher.id });
     await insertLines(tx, v.id, lines);
+    await writeSettlements(tx, { voucherId: v.id, companyId: input.companyId, settlements: input.settlements });
     if (opts.post) await markPosted(tx, v.id, actor);
     return { id: v.id, posted: !!opts.post };
   });
@@ -152,6 +156,7 @@ export function updateVoucher(id: number, input: VoucherInput, actor: Actor, opt
     }).where(eq(S.cashBankVoucher.id, id));
     await tx.delete(S.cashBankVoucherLine).where(eq(S.cashBankVoucherLine.cashBankVoucherId, id));
     await insertLines(tx, id, lines);
+    await writeSettlements(tx, { voucherId: id, companyId: v.companyId, settlements: input.settlements });
     if (opts.post) await markPosted(tx, id, actor);
     return { id, posted: !!opts.post };
   });
@@ -181,6 +186,7 @@ export function postVoucher(id: number, companyId: number, actor: Actor, opts: O
     const gls = await tx.select({ code: S.generalLedger.code, isActive: S.generalLedger.isActive }).from(S.generalLedger).where(inArray(S.generalLedger.id, ledgerIds));
     const off = gls.find((g) => !g.isActive);
     if (off) throw new HttpError(409, `Ledger ${off.code} is not active any more.`);
+    await recheckSettlements(tx, id, companyId);
     await markPosted(tx, id, actor);
     return { id, posted: true as const };
   });
@@ -270,6 +276,7 @@ export async function getVoucher(id: number, companyId: number) {
     entries, lines: entries, totalReceipts: formatPaise(receipts), totalPayments: formatPaise(payments),
     openingBalance: formatPaise(opening), closingBalance: formatPaise(opening + receipts - payments),
     postedAt: h.postedAt, postedBy: h.postedBy,
+    settlements: await settlementsOf(db, id),
   };
 }
 

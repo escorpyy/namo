@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { salesInvoiceApi, type SalesInvoiceRow } from "../../api";
+import { cashBankApi, salesInvoiceApi, type SalesInvoiceRow } from "../../api";
 import { Pill, money } from "../../components/purchase/Bits";
 import { adToBs } from "../../lib/nepaliDate";
 import { STATE_TONE } from "./SalesInvoiceScreen";
@@ -15,10 +15,22 @@ export default function CustomerInvoices({ companyId, branchId, customerGLId, do
     salesInvoiceApi.list({ companyId, branchId, fiscalYear: "", customerGLId, limit: 8 }).then((r) => { if (live) setRows(r.rows); }).catch(() => { if (live) setRows([]); });
     return () => { live = false; };
   }, [companyId, branchId, customerGLId, docId]);
+  const [unpaid, setUnpaid] = useState<{ count: number; total: string } | null>(null);
+  useEffect(() => {
+    let live = true;
+    setUnpaid(null);
+    cashBankApi.openDocuments({ companyId, kind: "SALES_INVOICE", generalLedgerId: customerGLId }).then((r) => { if (live) setUnpaid({ count: r.count, total: r.total }); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [companyId, customerGLId, docId]);
   const others = useMemo(() => (rows ?? []).filter((r) => r.id !== docId).slice(0, 6), [rows, docId]);
   const date = (v: string) => (calendar === "BS" ? adToBs(v.slice(0, 10)) ?? v.slice(0, 10) : v.slice(0, 10));
   return (
     <div>
+      {unpaid && unpaid.count > 0 && (
+        <p className="mx-4 mt-3 border border-amber-300 bg-amber-50 px-2 py-1 text-[12.5px] text-amber-800" role="status">
+          Unpaid: <b className="tabular-nums">{money(unpaid.total)}</b> on {unpaid.count} invoice{unpaid.count === 1 ? "" : "s"}
+        </p>
+      )}
       <h3 className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Recent invoices</h3>
       {rows === null ? <p className="px-4 py-2 text-[12.5px] text-slate-500">Loading…</p>
         : others.length === 0 ? <p className="px-4 py-2 text-[12.5px] text-slate-500">No earlier invoices to this customer.</p>

@@ -18,7 +18,7 @@
 | Validation | zod, driven by `shared/masters.ts` (single source for UI + server) |
 | Deployment | None found. `npm run build && npm start` serves `dist/` from Express. `docker-compose.yml` = local Postgres only |
 | Release / milestone | None established (package version 0.1.0) |
-| Last actual audit | 2026-11-17 (session 21: Sales Invoice completed and pushed; account side panel pushed. Fresh PostgreSQL 16: `pnpm test:db` 878/878 tests in 54 files; typecheck clean; Drizzle metadata matches migrations 0028–0029. Manual UI verification and owner dev-DB migration remain open.) |
+| Last actual audit | 2026-11-17 (session 21: Sales Invoice completed and pushed; account side panel pushed. Fresh PostgreSQL 16: `pnpm test:db` 889/889 tests in 56 files; typecheck clean; Drizzle metadata matches migrations 0028–0030. Manual UI verification and owner dev-DB migration remain open.) |
 
 ---
 
@@ -660,6 +660,7 @@ Sandbox: Linux, Node 22, pnpm 12.14.0, throwaway PostgreSQL 16 databases (never 
 
 ---
 
+- **Bill-wise adjustment (session 21; pushed, DB-verified, browser-checked):** migration 0030 adds `BillSettlement` (a Cash/Bank voucher's amount split over posted sales invoices / purchase bills; exactly one document per row, amount > 0, one row per voucher+document). DB guards: tenant consistency, audit + period lock, only posted documents can be settled, and a posted voucher's settlements cannot change without a change reason. `server/services/billSettlement.ts`: outstanding = total − settlements of posted, not-reversed vouchers (reversing the voucher gives the money back to the invoice); `writeSettlements` validates (receipt→invoices, payment→bills, ≤ outstanding, ≤ line amount, no duplicates) and is re-run at posting so two drafts cannot both use the same balance. API: `GET /api/cash-bank-vouchers/open-documents`; voucher create/update accept `settlements`, voucher GET returns them. UI: with F6 open, the Cash/Bank voucher panel shows the focused customer's unpaid invoices (or vendor's bills) with an amount box each, an Auto (oldest first) button and a settled/advance line; posted vouchers show "Settled against". The Sales Invoice customer panel shows the unpaid total. `tests/service.billSettlement.test.ts` (5 tests). Not done: Journal Voucher settlement, credit/debit notes, ageing report, settlement from the invoice screen.
 ## (superseded) HANDOFF (end of session 6)
 
 **Accomplished:** Fresh clone of GitHub `main` (`dbf5b4b`) verified; tracker reconciled (338/338 then). Superseded by the session-7 handoff above.
