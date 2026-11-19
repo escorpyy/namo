@@ -21,6 +21,7 @@ import {
     "sales-invoices",
     "rpt-outstanding",
     "rpt-ageing",
+    "fs-ledgers",
     "code-numbering",
     "number-series",
   ];
