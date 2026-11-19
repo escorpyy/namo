@@ -114,7 +114,7 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
         v."postedAt", v."postedBy", u.name AS "postedByName", COALESCE(ia.remarks, v.remarks) AS remarks, l.narration, ia."referenceNo" AS reference,
         v."reversalOfId", (rv.id IS NOT NULL) AS "hasReversal", g.code AS "ledgerCode", g.name AS "ledgerName",
         s.code AS "subLedgerCode", s.name AS "subLedgerName", l.debit::text AS debit, l.credit::text AS credit,
-        COALESCE(si.invoiceNumber, ia."assessmentNumber", pb.invoiceNumber, v."voucherNumber") AS "sourceNumber",
+        COALESCE(si."invoiceNumber", ia."assessmentNumber", pb."invoiceNumber", v."voucherNumber") AS "sourceNumber",
         CASE WHEN si.id IS NOT NULL THEN 'Sales invoice' WHEN ia.id IS NOT NULL THEN 'Import cost assessment' WHEN pb.id IS NOT NULL THEN 'Purchase bill' ELSE 'Journal voucher' END AS "sourceLabel",
         COALESCE(sp.products, pp.products, '[]'::jsonb) AS products,
         COALESCE(sp.ids, pp.ids, '[]'::jsonb) AS "productIds"
