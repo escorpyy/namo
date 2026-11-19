@@ -28,7 +28,7 @@ contextRouter.get(
           .map((b) => ({ id: b.id, name: b.name, isHeadOffice: b.isHeadOffice })),
         fiscalYears: years
           .filter((y) => y.companyId === c.id)
-          .map((y) => ({ id: y.id, code: y.code, isCurrent: y.isCurrent })),
+          .map((y) => ({ id: y.id, code: y.code, isCurrent: y.isCurrent, startDate: y.startDate.toISOString().slice(0, 10), endDate: y.endDate.toISOString().slice(0, 10) })),
       })),
     });
   }),

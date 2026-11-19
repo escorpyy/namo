@@ -139,6 +139,27 @@ export interface PWrite<D = PDoc> { result: Record<string, any>; document: D }
 const qstr = (o: Record<string, string | number | undefined | null>) =>
   Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&");
 
+export interface LedgerReportProduct { id: number; code: string; description: string; qty: string; unit: string; altQty?: string | null; altUnit?: string | null; rate: string; amount: string; location?: string | null; batch?: string | null; expiry?: string | null }
+export interface LedgerReportRow {
+  lineId: number; voucherId: number; generalLedgerId: number; subLedgerId: number | null; d: string; voucherNumber: string;
+  kind: "JOURNAL" | "CASH_BANK"; voucherLabel: string; posted: boolean; postedAt: string | null; postedBy: number | null; postedByName: string | null;
+  remarks: string | null; narration: string | null; reference: string | null; reversalOfId: number | null; hasReversal: boolean;
+  ledgerCode: string; ledgerName: string; subLedgerCode: string | null; subLedgerName: string | null; debit: string; credit: string;
+  sourceNumber: string; sourceLabel: string; products: LedgerReportProduct[]; productIds: number[]; running: string; total: number;
+}
+export interface LedgerReportSummary { generalLedgerId: number; code: string; name: string; opening: string; debit: string; credit: string; closing: string }
+export interface LedgerReportLookups {
+  ledgers: { id: number; code: string; name: string; type: string; requiresSubLedger: boolean; isActive: boolean }[];
+  subLedgers: { id: number; code: string; name: string; generalLedgerId: number }[];
+  products: { id: number; code: string; description: string }[];
+}
+export interface LedgerReportResult { rows: LedgerReportRow[]; summary: LedgerReportSummary[]; total: number; page: number; pageSize: number; fiscalYear: string; from: string; to: string }
+export const ledgerReportApi = {
+  lookups: (companyId: number) => req<LedgerReportLookups>(`/api/ledger-report/lookups?companyId=${companyId}`),
+  get: (p: { companyId: number; branchId: number; fiscalYear: string; from: string; to: string; ledgerIds?: string; subLedgerId?: number | ""; page?: number; pageSize?: number; status?: string; voucherType?: string; productId?: number | ""; search?: string }) =>
+    req<LedgerReportResult>(`/api/ledger-report?${qstr(p)}`),
+};
+
 export interface AccountBalance { generalLedgerId: number; subLedgerId: number | null; debit: string; credit: string }
 export const accountBalancesApi = {
   get: (p: { companyId: number; branchId: number; fiscalYear: string; date: string; excludeJournalVoucherId?: number; excludeCashBankVoucherId?: number }) =>

@@ -16,7 +16,7 @@ export interface CompanyCtx {
   code: string;
   name: string;
   branches: { id: number; name: string; isHeadOffice: boolean }[];
-  fiscalYears: { id: number; code: string; isCurrent: boolean }[];
+  fiscalYears: { id: number; code: string; isCurrent: boolean; startDate: string; endDate: string }[];
 }
 export interface ContextData {
   user: { id: number; name: string };

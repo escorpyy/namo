@@ -14,6 +14,7 @@ import StockOpeningScreen from "./screens/StockOpeningScreen";
 import CashBankVoucherWorkspace from "./screens/cashBank/CashBankVoucherWorkspace";
 import JournalVoucherWorkspace from "./screens/accounting/JournalVoucherWorkspace";
 import AgeingScreen from "./screens/reports/AgeingScreen";
+import LedgerReportScreen from "./screens/reports/LedgerReportScreen";
 import SalesInvoiceWorkspace from "./screens/sales/SalesInvoiceWorkspace";
 import PurchaseBillWorkspace from "./screens/purchase/PurchaseBillWorkspace";
 import PurchaseOrderWorkspace from "./screens/purchase/PurchaseOrderWorkspace";
@@ -152,6 +153,13 @@ export default function App() {
           <AgeingScreen
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"}
             fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"} calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef}
+          />
+        ) : screen === "fs-ledgers" ? (
+          <LedgerReportScreen
+            key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId}
+            branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
+            fyStart={co.fiscalYears.find((y) => y.id === fyId)?.startDate ?? ""} fyEnd={co.fiscalYears.find((y) => y.id === fyId)?.endDate ?? ""}
+            calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef}
           />
         ) : screen === "sales-invoices" ? (
           <SalesInvoiceWorkspace
