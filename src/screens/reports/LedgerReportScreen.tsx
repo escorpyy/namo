@@ -1,10 +1,10 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Download, Filter, RefreshCw, Search, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, RefreshCw, Search, X } from "lucide-react";
 import { ledgerReportApi, type LedgerReportLookups, type LedgerReportResult, type LedgerReportRow } from "../../api";
 import { Combobox, type ComboOption } from "../../components/Combobox";
 import { DateInput } from "../../components/DateInput";
 import { adToBs } from "../../lib/nepaliDate";
-import { amount, balanceOf, balanceText, buildBlocks, csvCell, fmtMinor, money, monthsOf, pickInitialMonth, todayLocal, voucherRef, type LedgerBlock } from "../../lib/ledgerReportLayout";
+import { amount, balanceOf, balanceText, buildBlocks, csvCell, fmtMinor, minor, money, monthsOf, pickInitialMonth, todayLocal, voucherRef, type LedgerBlock } from "../../lib/ledgerReportLayout";
 import type { StatusInfo } from "../../types";
 
 type Ledger = LedgerReportLookups["ledgers"][number];
@@ -38,6 +38,10 @@ const rowKey = (r: LedgerReportRow) => `${r.kind}-${r.lineId}`; // journal and c
 const particulars = (r: LedgerReportRow) => r.narration || r.remarks || `${r.sourceLabel} ${r.sourceNumber}`;
 const th = "lg-th whitespace-nowrap px-3 py-1.5 text-left";
 const td = "border-b border-slate-100 px-3 py-1 align-middle";
+const balanceSides = (value: string) => {
+  const n = minor(value);
+  return { debit: n > 0n ? n : 0n, credit: n < 0n ? -n : 0n };
+};
 
 function RowDetail({ r }: { r: LedgerReportRow }) {
   const h = "mb-1 text-[12px] font-semibold text-slate-500";
@@ -82,7 +86,7 @@ export default function LedgerReportScreen(p: {
   const [error, setError] = useState("");
   const [dialogError, setDialogError] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [detailed, setDetailed] = useState(false); // false = Summary (one line per entry, the default); true = Details (every line opened)
+  const [viewMode, setViewMode] = useState<"summary" | "lines" | "details">("lines");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [ledgerFilter, setLedgerFilter] = useState("");
   const requestNo = useRef(0), resultScope = useRef(""), keyHandler = useRef<(e: KeyboardEvent) => void>();
@@ -194,6 +198,14 @@ export default function LedgerReportScreen(p: {
   const showSub = rows.some((r) => r.subLedgerName);
   const cols = showSub ? 7 : 6;
   const summary = single && !query.subLedgerId ? result?.summary.find((s) => s.generalLedgerId === query.ledgerIds[0]) : undefined;
+  const summaryRows = result?.summary ?? [];
+  const summaryTotals = useMemo(() => summaryRows.reduce((t, s) => {
+    const opening = balanceSides(s.opening), closing = balanceSides(s.closing);
+    t.openingDebit += opening.debit; t.openingCredit += opening.credit;
+    t.periodDebit += minor(s.debit); t.periodCredit += minor(s.credit);
+    t.closingDebit += closing.debit; t.closingCredit += closing.credit;
+    return t;
+  }, { openingDebit: 0n, openingCredit: 0n, periodDebit: 0n, periodCredit: 0n, closingDebit: 0n, closingCredit: 0n }), [summaryRows]);
   const toggleRow = (key: string) => setExpanded((x) => x === key ? null : key);
   const onRowKey = (e: React.KeyboardEvent<HTMLElement>, key: string) => {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleRow(key); }
@@ -242,7 +254,7 @@ export default function LedgerReportScreen(p: {
   const periodNote = monthValue === "custom" ? `${shownDate(query.from, p.calendar)} → ${shownDate(query.to, p.calendar)}` : "";
 
   const lineRow = (r: LedgerReportRow) => {
-    const key = rowKey(r), tag = statusTag(r), open = detailed || expanded === key, ref = voucherRef(r);
+    const key = rowKey(r), tag = statusTag(r), open = viewMode === "details" || expanded === key, ref = voucherRef(r);
     return (
       <Fragment key={key}>
         <tr data-row tabIndex={0} className={`cursor-pointer hover:bg-cobalt-50/70 focus:bg-cobalt-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cobalt-600 ${r.posted ? "" : "bg-amber-50/30"}`} onClick={() => toggleRow(key)} onKeyDown={(e) => onRowKey(e, key)} aria-expanded={open} aria-label={`${ref}, ${r.ledgerName}, ${r.posted ? "posted" : "draft"}; press Enter for details`}>
@@ -271,7 +283,9 @@ export default function LedgerReportScreen(p: {
           <button type="button" className="btn px-1.5" onClick={() => stepMonth(1)} disabled={monthIdx < 0 || monthIdx >= months.length - 1} aria-label="Next month" title="Next month"><ChevronRight size={14} /></button>
         </div>
         {periodNote && <span className="text-[11px] tabular-nums text-slate-500">{periodNote}</span>}
-        <button type="button" className="btn" onClick={() => { setDetailed((d) => !d); setExpanded(null); }} aria-pressed={detailed} title={detailed ? "Showing details: every line opened. Click for the summary." : "Showing the summary: one line per entry. Click for details."}>{detailed ? <ChevronsDownUp size={13} /> : <ChevronsUpDown size={13} />} {detailed ? "Details" : "Summary"}</button>
+        <div className="inline-flex rounded-md border border-slate-300 bg-slate-50 p-0.5" role="group" aria-label="Ledger report view">
+          {(["summary", "lines", "details"] as const).map((mode) => <button key={mode} type="button" className={`rounded px-2 py-1 text-[12px] font-medium transition-colors ${viewMode === mode ? "bg-white text-cobalt-800 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:text-slate-900"}`} onClick={() => { setViewMode(mode); setExpanded(null); }} aria-pressed={viewMode === mode}>{mode[0].toUpperCase() + mode.slice(1)}</button>)}
+        </div>
         <button ref={filterButtonRef} type="button" className="btn" onClick={openFilters} aria-haspopup="dialog" aria-expanded={filtersOpen}><Filter size={13} /> Filters{activeFilters > 0 && <span className="lg-count">{activeFilters}</span>}<kbd className="kbd hidden 2xl:inline">F2</kbd></button>
         <div className="ml-auto flex items-center gap-1.5">
           {summary && <span className="lg-chip" title={`Opening ${balanceText(summary.opening)} · Debit ${amount(summary.debit)} · Credit ${amount(summary.credit)}`}>Closing <b className="tabular-nums">{balanceText(summary.closing)}</b></span>}
@@ -341,11 +355,35 @@ export default function LedgerReportScreen(p: {
                 </div>
               </div>
             ) : ready && !result && !error ? <p className="px-5 py-10 text-[13px] text-slate-500">Running ledger query…</p>
-            : ready && result && blocks.length === 0 ? (
+            : ready && result && blocks.length === 0 && viewMode !== "summary" ? (
               <div className="px-5 py-14 text-center">
                 <p className="text-[14px] font-medium text-slate-700">No transactions match</p>
                 <p className="mt-1 text-[12px] text-slate-500">{monthValue === "fy" ? "Nothing in this fiscal year for the chosen ledger and filters." : "Nothing in this period for the chosen ledger and filters."}</p>
                 <div className="mt-3 flex justify-center gap-2">{monthValue !== "fy" && <button type="button" className="btn" onClick={() => setPeriod(p.fyStart, p.fyEnd)}>Show full fiscal year</button>}<button type="button" className="btn" onClick={openFilters}><Filter size={13} /> More filters</button></div>
+              </div>
+            ) : result && viewMode === "summary" ? (
+              <div className={loading ? "opacity-60 transition-opacity" : "transition-opacity"}>
+                <p className="border-b border-slate-100 px-3 py-2 text-[11px] text-slate-500">Balances show posted activity for the selected period; transaction filters apply to Lines and Details.</p>
+                <div className="hidden overflow-x-auto md:block">
+                  <table className="lg-ledger w-full min-w-[900px] text-[12px]">
+                    <thead><tr><th className={th}>Ledger</th><th className={`${th} text-right`}>Opening Dr</th><th className={`${th} text-right`}>Opening Cr</th><th className={`${th} text-right`}>Period Dr</th><th className={`${th} text-right`}>Period Cr</th><th className={`${th} text-right`}>Closing Dr</th><th className={`${th} text-right`}>Closing Cr</th></tr></thead>
+                    <tbody>
+                      {summaryRows.map((s) => { const opening = balanceSides(s.opening), closing = balanceSides(s.closing); return <tr key={s.generalLedgerId}>
+                        <td className={`${td} whitespace-nowrap`}><span className="mr-2 font-mono text-[11px] text-slate-500">{s.code}</span><span className="font-medium text-slate-800">{s.name}</span></td>
+                        {[opening.debit, opening.credit, minor(s.debit), minor(s.credit), closing.debit, closing.credit].map((v, i) => <td key={i} className={`${td} whitespace-nowrap text-right tabular-nums`}>{v ? fmtMinor(v) : "—"}</td>)}
+                      </tr>; })}
+                      <tr className="bg-slate-50 font-semibold text-slate-900"><td className="border-t border-slate-300 px-3 py-1.5">Total</td>{Object.values(summaryTotals).map((v, i) => <td key={i} className="border-t border-slate-300 px-3 py-1.5 text-right tabular-nums">{v ? fmtMinor(v) : "—"}</td>)}</tr>
+                      {summaryRows.length === 0 && <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-500">No ledger balances in this selection.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="space-y-2 p-2 md:hidden">
+                  {summaryRows.map((s) => { const opening = balanceSides(s.opening), closing = balanceSides(s.closing); const values = [opening.debit, opening.credit, minor(s.debit), minor(s.credit), closing.debit, closing.credit]; return <article key={s.generalLedgerId} className="rounded-lg border border-slate-200 bg-white p-2.5">
+                    <h2 className="truncate text-[12px] font-semibold text-slate-800"><span className="mr-1.5 font-mono text-[11px] font-normal text-slate-500">{s.code}</span>{s.name}</h2>
+                    <div className="mt-2 grid grid-cols-3 gap-x-2 gap-y-1.5 border-t border-slate-100 pt-2 text-[11px]">{["Opening Dr", "Opening Cr", "Period Dr", "Period Cr", "Closing Dr", "Closing Cr"].map((label, i) => <div key={label}><div className="text-slate-400">{label}</div><b className="tabular-nums">{values[i] ? fmtMinor(values[i]) : "—"}</b></div>)}</div>
+                  </article>; })}
+                  {summaryRows.length === 0 && <p className="px-2 py-6 text-center text-[12px] text-slate-500">No ledger balances in this selection.</p>}
+                </div>
               </div>
             ) : result ? (
               <div className={loading ? "opacity-60 transition-opacity" : "transition-opacity"}>
@@ -368,7 +406,7 @@ export default function LedgerReportScreen(p: {
                     {!single && <h2 className="px-1 pt-1 text-[12px] font-semibold text-slate-700"><span className="mr-1.5 font-mono text-[11px] font-normal text-slate-500">{b.code}</span>{b.name}</h2>}
                     {b.start && <div className="flex justify-between px-1 text-[12px] italic text-slate-600"><span>{b.start.label}</span><span className="tabular-nums">{balanceOf(b.start.balance)}</span></div>}
                     {b.rows.length === 0 && <p className="px-1 py-2 text-[12px] text-slate-500">No transactions in this period.</p>}
-                    {b.rows.map((r) => { const key = rowKey(r), tag = statusTag(r), open = detailed || expanded === key; return (
+                    {b.rows.map((r) => { const key = rowKey(r), tag = statusTag(r), open = viewMode === "details" || expanded === key; return (
                       <article key={key} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
                         <button type="button" className="block w-full p-2.5 text-left" onClick={() => toggleRow(key)} aria-expanded={open}>
                           <div className="flex items-center justify-between gap-2"><span className="text-[11px] tabular-nums text-slate-500">{shownDate(r.d.slice(0, 10), p.calendar)}</span><span className="text-[13px] font-semibold text-cobalt-800">{voucherRef(r)}{tag && <span className={`ml-1.5 rounded px-1 text-[10px] font-semibold ring-1 ring-inset ${tag.cls}`}>{tag.text}</span>}</span></div>
