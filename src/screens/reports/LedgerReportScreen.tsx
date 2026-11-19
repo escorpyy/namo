@@ -86,6 +86,8 @@ export default function LedgerReportScreen(p: {
   const [error, setError] = useState("");
   const [dialogError, setDialogError] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
+  const [selectedSummaryLedgerId, setSelectedSummaryLedgerId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<"summary" | "lines" | "details">("lines");
   const drillOrigin = useRef<Pick<Query, "ledgerIds" | "allLedgers" | "subLedgerId"> | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -141,6 +143,10 @@ export default function LedgerReportScreen(p: {
   }, [p.companyId, p.branchId, p.fyCode, query, page, ready, scopeKey]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => () => { requestNo.current += 1; }, []);
+  useEffect(() => {
+    setSelectedRowKey(result?.rows[0] ? rowKey(result.rows[0]) : null);
+    setSelectedSummaryLedgerId(result?.summary[0]?.generalLedgerId ?? null);
+  }, [result]);
 
   useEffect(() => {
     p.setStatus({ mode: "view", count: result?.total ?? 0, shown: result?.rows.length ?? 0,
@@ -199,14 +205,6 @@ export default function LedgerReportScreen(p: {
   const clearDraftFilters = () => setDraft((old) => ({ ...old, subLedgerId: "", productId: "", voucherType: "ALL", status: "POSTED", search: "" }));
   useEffect(() => { if (filtersOpen) panelRef.current?.querySelector<HTMLInputElement>("input")?.focus(); }, [filtersOpen]);
 
-  keyHandler.current = (e) => {
-    if (e.ctrlKey || e.altKey || e.metaKey) return;
-    if (e.key === "Escape" && dateRangeOpen) { e.preventDefault(); setDateRangeOpen(false); setDateRangeError(""); }
-    if (e.key === "F2") { e.preventDefault(); if (filtersOpen) closeFilters(); else openFilters(); }
-    if (e.key === "F4" && !filtersOpen) { e.preventDefault(); barRef.current?.querySelector<HTMLInputElement>('[data-field="ledger-picker"]')?.focus(); }
-  };
-  useEffect(() => { const h = (e: KeyboardEvent) => keyHandler.current?.(e); window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, []);
-
   // ---- data to draw ----------------------------------------------------------------------------------------------------------
   const pageCount = result ? Math.max(1, Math.ceil(result.total / result.pageSize)) : 1;
   const blocks: LedgerBlock[] = useMemo(() => result ? buildBlocks({ rows: result.rows, summary: result.summary, page: result.page, pageCount, ledgerIds: query.ledgerIds }) : [], [result, pageCount, query.ledgerIds]);
@@ -224,12 +222,21 @@ export default function LedgerReportScreen(p: {
   }, { openingDebit: 0n, openingCredit: 0n, periodDebit: 0n, periodCredit: 0n, closingDebit: 0n, closingCredit: 0n }), [summaryRows]);
   const toggleRow = (key: string) => setExpanded((x) => x === key ? null : key);
   const onRowKey = (e: React.KeyboardEvent<HTMLElement>, key: string) => {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleRow(key); }
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedRowKey(key); toggleRow(key); }
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       const all = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>("[data-row]") ?? []), at = all.indexOf(e.currentTarget);
-      all[Math.max(0, Math.min(all.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)))]?.focus();
+      const next = all[Math.max(0, Math.min(all.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)))];
+      if (next) { if (next.dataset.rowKey) setSelectedRowKey(next.dataset.rowKey); next.focus(); }
     }
+  };
+  const onSummaryKey = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const visibleRows = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>("[data-summary-row]") ?? []).filter((el) => el.getClientRects().length > 0);
+    const row = e.currentTarget.closest<HTMLElement>("[data-summary-row]"), at = row ? visibleRows.indexOf(row) : -1;
+    const next = visibleRows[Math.max(0, Math.min(visibleRows.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)))];
+    if (next) { setSelectedSummaryLedgerId(Number(next.dataset.ledgerId)); next.querySelector<HTMLButtonElement>("button[data-summary-ledger]")?.focus(); }
   };
 
   // Every line of the query (all pages), with the date in both calendars.
@@ -284,11 +291,23 @@ export default function LedgerReportScreen(p: {
     setViewMode("summary");
   };
 
+  keyHandler.current = (e) => {
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.key === "Escape") {
+      if (dateRangeOpen) { e.preventDefault(); setDateRangeOpen(false); setDateRangeError(""); }
+      else if (drillOrigin.current && viewMode !== "summary") { e.preventDefault(); returnToSummary(); }
+      return;
+    }
+    if (e.key === "F2") { e.preventDefault(); if (filtersOpen) closeFilters(); else openFilters(); }
+    if (e.key === "F4" && !filtersOpen) { e.preventDefault(); barRef.current?.querySelector<HTMLInputElement>('[data-field="ledger-picker"]')?.focus(); }
+  };
+  useEffect(() => { const h = (e: KeyboardEvent) => keyHandler.current?.(e); window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, []);
+
   const lineRow = (r: LedgerReportRow) => {
-    const key = rowKey(r), tag = statusTag(r), open = viewMode === "details" || expanded === key, ref = voucherRef(r);
+    const key = rowKey(r), tag = statusTag(r), open = viewMode === "details" || expanded === key, selected = selectedRowKey === key, ref = voucherRef(r);
     return (
       <Fragment key={key}>
-        <tr data-row tabIndex={0} className={`cursor-pointer hover:bg-cobalt-50/70 focus:bg-cobalt-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cobalt-600 ${r.posted ? "" : "bg-amber-50/30"}`} onClick={() => toggleRow(key)} onKeyDown={(e) => onRowKey(e, key)} aria-expanded={open} aria-label={`${ref}, ${r.ledgerName}, ${r.posted ? "posted" : "draft"}; press Enter for details`}>
+        <tr data-row data-row-key={key} data-selected={selected} aria-selected={selected} tabIndex={0} className={`cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cobalt-600 ${selected ? "bg-cobalt-100/80 shadow-[inset_3px_0_0_#3154d4]" : `hover:bg-cobalt-50/70 focus:bg-cobalt-50 ${r.posted ? "" : "bg-amber-50/30"}`}`} onFocus={() => setSelectedRowKey(key)} onClick={() => { setSelectedRowKey(key); toggleRow(key); }} onKeyDown={(e) => onRowKey(e, key)} aria-expanded={open} aria-label={`${ref}, ${r.ledgerName}, ${r.posted ? "posted" : "draft"}; press Enter for details`}>
           <td className={`${td} w-6 pr-0 text-slate-400`}>{open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</td>
           <td className={`${td} whitespace-nowrap tabular-nums`}>{shownDate(r.d.slice(0, 10), p.calendar)}</td>
           <td className={`${td} w-full whitespace-nowrap`} title={particulars(r)}><span className="font-semibold text-cobalt-800">{ref}</span>{tag && <span className={`ml-1.5 rounded px-1 text-[10px] font-semibold ring-1 ring-inset ${tag.cls}`}>{tag.text}</span>}</td>
@@ -405,8 +424,8 @@ export default function LedgerReportScreen(p: {
                   <table className="lg-ledger w-full min-w-[900px] text-[12px]">
                     <thead><tr><th className={th}>Ledger</th><th className={`${th} text-right`}>Opening Dr</th><th className={`${th} text-right`}>Opening Cr</th><th className={`${th} text-right`}>Period Dr</th><th className={`${th} text-right`}>Period Cr</th><th className={`${th} text-right`}>Closing Dr</th><th className={`${th} text-right`}>Closing Cr</th></tr></thead>
                     <tbody>
-                      {summaryRows.map((s) => { const opening = balanceSides(s.opening), closing = balanceSides(s.closing); return <tr key={s.generalLedgerId}>
-                        <td className={`${td} whitespace-nowrap`}><button type="button" className="text-left hover:text-cobalt-800 hover:underline focus-visible:rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-600" onClick={() => drillIntoLedger(s.generalLedgerId)} aria-label={`View lines for ${s.code} ${s.name}`}><span className="mr-2 font-mono text-[11px] text-slate-500">{s.code}</span><span className="font-medium text-slate-800">{s.name}</span></button></td>
+                      {summaryRows.map((s) => { const opening = balanceSides(s.opening), closing = balanceSides(s.closing), selected = selectedSummaryLedgerId === s.generalLedgerId; return <tr key={s.generalLedgerId} data-summary-row data-ledger-id={s.generalLedgerId} data-selected={selected} aria-selected={selected} className={selected ? "bg-cobalt-100/80 shadow-[inset_3px_0_0_#3154d4]" : ""} onClick={() => setSelectedSummaryLedgerId(s.generalLedgerId)}>
+                        <td className={`${td} whitespace-nowrap`}><button data-summary-ledger type="button" className="text-left hover:text-cobalt-800 hover:underline focus-visible:rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-600" onFocus={() => setSelectedSummaryLedgerId(s.generalLedgerId)} onKeyDown={onSummaryKey} onClick={() => drillIntoLedger(s.generalLedgerId)} aria-label={`View lines for ${s.code} ${s.name}`}><span className="mr-2 font-mono text-[11px] text-slate-500">{s.code}</span><span className="font-medium text-slate-800">{s.name}</span></button></td>
                         {[opening.debit, opening.credit, minor(s.debit), minor(s.credit), closing.debit, closing.credit].map((v, i) => <td key={i} className={`${td} whitespace-nowrap text-right tabular-nums`}>{v ? fmtMinor(v) : "—"}</td>)}
                       </tr>; })}
                       <tr className="bg-slate-50 font-semibold text-slate-900"><td className="border-t border-slate-300 px-3 py-1.5">Total</td>{Object.values(summaryTotals).map((v, i) => <td key={i} className="border-t border-slate-300 px-3 py-1.5 text-right tabular-nums">{v ? fmtMinor(v) : "—"}</td>)}</tr>
@@ -415,8 +434,8 @@ export default function LedgerReportScreen(p: {
                   </table>
                 </div>
                 <div className="space-y-2 p-2 md:hidden">
-                  {summaryRows.map((s) => { const opening = balanceSides(s.opening), closing = balanceSides(s.closing); const values = [opening.debit, opening.credit, minor(s.debit), minor(s.credit), closing.debit, closing.credit]; return <article key={s.generalLedgerId} className="rounded-lg border border-slate-200 bg-white p-2.5">
-                    <h2 className="truncate text-[12px] font-semibold text-slate-800"><button type="button" className="text-left hover:text-cobalt-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-600" onClick={() => drillIntoLedger(s.generalLedgerId)} aria-label={`View lines for ${s.code} ${s.name}`}><span className="mr-1.5 font-mono text-[11px] font-normal text-slate-500">{s.code}</span>{s.name}</button></h2>
+                  {summaryRows.map((s) => { const opening = balanceSides(s.opening), closing = balanceSides(s.closing), values = [opening.debit, opening.credit, minor(s.debit), minor(s.credit), closing.debit, closing.credit], selected = selectedSummaryLedgerId === s.generalLedgerId; return <article key={s.generalLedgerId} data-summary-row data-ledger-id={s.generalLedgerId} data-selected={selected} aria-selected={selected} className={`rounded-lg border p-2.5 ${selected ? "border-cobalt-500 bg-cobalt-50 ring-1 ring-cobalt-300" : "border-slate-200 bg-white"}`}>
+                    <h2 className="truncate text-[12px] font-semibold text-slate-800"><button data-summary-ledger type="button" className="text-left hover:text-cobalt-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-600" onFocus={() => setSelectedSummaryLedgerId(s.generalLedgerId)} onKeyDown={onSummaryKey} onClick={() => drillIntoLedger(s.generalLedgerId)} aria-label={`View lines for ${s.code} ${s.name}`}><span className="mr-1.5 font-mono text-[11px] font-normal text-slate-500">{s.code}</span>{s.name}</button></h2>
                     <div className="mt-2 grid grid-cols-3 gap-x-2 gap-y-1.5 border-t border-slate-100 pt-2 text-[11px]">{["Opening Dr", "Opening Cr", "Period Dr", "Period Cr", "Closing Dr", "Closing Cr"].map((label, i) => <div key={label}><div className="text-slate-400">{label}</div><b className="tabular-nums">{values[i] ? fmtMinor(values[i]) : "—"}</b></div>)}</div>
                   </article>; })}
                   {summaryRows.length === 0 && <p className="px-2 py-6 text-center text-[12px] text-slate-500">No ledger balances in this selection.</p>}
@@ -443,9 +462,9 @@ export default function LedgerReportScreen(p: {
                     {!single && <h2 className="px-1 pt-1 text-[12px] font-semibold text-slate-700"><span className="mr-1.5 font-mono text-[11px] font-normal text-slate-500">{b.code}</span>{b.name}</h2>}
                     {b.start && <div className="flex justify-between px-1 text-[12px] italic text-slate-600"><span>{b.start.label}</span><span className="tabular-nums">{balanceOf(b.start.balance)}</span></div>}
                     {b.rows.length === 0 && <p className="px-1 py-2 text-[12px] text-slate-500">No transactions in this period.</p>}
-                    {b.rows.map((r) => { const key = rowKey(r), tag = statusTag(r), open = viewMode === "details" || expanded === key; return (
-                      <article key={key} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-                        <button type="button" className="block w-full p-2.5 text-left" onClick={() => toggleRow(key)} aria-expanded={open}>
+                    {b.rows.map((r) => { const key = rowKey(r), tag = statusTag(r), open = viewMode === "details" || expanded === key, selected = selectedRowKey === key; return (
+                      <article key={key} aria-selected={selected} className={`overflow-hidden rounded-lg border ${selected ? "border-cobalt-500 bg-cobalt-50 ring-1 ring-cobalt-300" : "border-slate-200 bg-white"}`}>
+                        <button type="button" className="block w-full p-2.5 text-left" onFocus={() => setSelectedRowKey(key)} onClick={() => { setSelectedRowKey(key); toggleRow(key); }} aria-expanded={open}>
                           <div className="flex items-center justify-between gap-2"><span className="text-[11px] tabular-nums text-slate-500">{shownDate(r.d.slice(0, 10), p.calendar)}</span><span className="text-[13px] font-semibold text-cobalt-800">{voucherRef(r)}{tag && <span className={`ml-1.5 rounded px-1 text-[10px] font-semibold ring-1 ring-inset ${tag.cls}`}>{tag.text}</span>}</span></div>
                           <div className="mt-0.5 truncate text-[12px] text-slate-700">{particulars(r)}{r.subLedgerName ? ` · ${r.subLedgerName}` : ""}</div>
                           <div className="mt-1.5 grid grid-cols-3 gap-2 border-t border-slate-100 pt-1.5 text-[11px]"><div><div className="text-slate-400">Debit</div><b className="tabular-nums">{Number(r.debit) ? amount(r.debit) : "—"}</b></div><div><div className="text-slate-400">Credit</div><b className="tabular-nums">{Number(r.credit) ? amount(r.credit) : "—"}</b></div><div className="text-right"><div className="text-slate-400">Balance</div><b className="tabular-nums">{balanceText(r.running)}</b></div></div>
