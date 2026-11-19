@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, Download, Filter, RefreshCw, Search, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Filter, RefreshCw, Search, X } from "lucide-react";
 import { ledgerReportApi, type LedgerReportLookups, type LedgerReportResult, type LedgerReportRow } from "../../api";
 import { Combobox, type ComboOption } from "../../components/Combobox";
 import { DateInput } from "../../components/DateInput";
@@ -90,8 +90,12 @@ export default function LedgerReportScreen(p: {
   const drillOrigin = useRef<Pick<Query, "ledgerIds" | "allLedgers" | "subLedgerId"> | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [ledgerFilter, setLedgerFilter] = useState("");
+  const [dateRangeOpen, setDateRangeOpen] = useState(false);
+  const [dateDraft, setDateDraft] = useState({ from: query.from, to: query.to });
+  const [dateRangeError, setDateRangeError] = useState("");
   const requestNo = useRef(0), resultScope = useRef(""), keyHandler = useRef<(e: KeyboardEvent) => void>();
   const barRef = useRef<HTMLDivElement>(null), scrollRef = useRef<HTMLDivElement>(null), filterButtonRef = useRef<HTMLButtonElement>(null), panelRef = useRef<HTMLDivElement>(null);
+  const presetPeriodRef = useRef({ from: query.from, to: query.to });
 
   const ready = query.allLedgers || query.ledgerIds.length > 0;
   const single = !query.allLedgers && query.ledgerIds.length === 1;
@@ -145,7 +149,18 @@ export default function LedgerReportScreen(p: {
   }, [result, loading, error, ready, p.setStatus]);
 
   // ---- toolbar ---------------------------------------------------------------------------------------------------------------
-  const setPeriod = (from: string, to: string) => { setQuery((q) => ({ ...q, from, to })); setPage(1); setExpanded(null); };
+  const setPeriod = (from: string, to: string) => { presetPeriodRef.current = { from, to }; setQuery((q) => ({ ...q, from, to })); setPage(1); setExpanded(null); };
+  const toggleDateRange = () => {
+    if (dateRangeOpen) { setDateRangeOpen(false); return; }
+    setDateDraft({ from: query.from, to: query.to }); setDateRangeError(""); setDateRangeOpen(true);
+  };
+  const applyDateRange = () => {
+    if (!dateDraft.from || !dateDraft.to || dateDraft.from.startsWith("?") || dateDraft.to.startsWith("?")) { setDateRangeError("Enter valid start and end dates."); return; }
+    if (dateDraft.from > dateDraft.to) { setDateRangeError("Start date must be on or before end date."); return; }
+    if (dateDraft.from < p.fyStart || dateDraft.to > p.fyEnd) { setDateRangeError(`Choose dates within fiscal year ${p.fyCode} (${p.fyStart} to ${p.fyEnd}).`); return; }
+    setQuery((q) => ({ ...q, from: dateDraft.from, to: dateDraft.to })); setPage(1); setExpanded(null); setDateRangeOpen(false);
+  };
+  const clearDateRange = () => { setPeriod(presetPeriodRef.current.from, presetPeriodRef.current.to); setDateRangeOpen(false); setDateRangeError(""); };
   const chooseLedger = (v: string) => {
     if (v === MULTI) return;
     drillOrigin.current = null;
@@ -172,13 +187,11 @@ export default function LedgerReportScreen(p: {
   const activeFilters = [query.subLedgerId !== "", query.productId !== "", query.voucherType !== "ALL", query.status !== "POSTED", query.search.trim() !== ""].filter(Boolean).length;
 
   // ---- filter dialog (the less common criteria; everything here is applied together) ----------------------------------------
-  const openFilters = () => { setDraft({ ...query, ledgerIds: [...query.ledgerIds] }); setDialogError(""); setLedgerFilter(""); setFiltersOpen(true); };
+  const openFilters = () => { setDateRangeOpen(false); setDateRangeError(""); setDraft({ ...query, ledgerIds: [...query.ledgerIds] }); setDialogError(""); setLedgerFilter(""); setFiltersOpen(true); };
   const closeFilters = () => { setFiltersOpen(false); filterButtonRef.current?.focus(); };
   const updateDraft = <K extends keyof Query>(key: K, value: Query[K]) => setDraft((old) => ({ ...old, [key]: value }));
   const applyDraft = (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (draft.from.startsWith("?") || draft.to.startsWith("?")) { setDialogError("Enter valid dates."); return; }
-    if (draft.from > draft.to) { setDialogError("Start date must be on or before end date."); return; }
     setQuery({ ...draft, ledgerIds: [...draft.ledgerIds] }); setPage(1); setExpanded(null);
     remember({ ledgerIds: draft.ledgerIds, allLedgers: draft.allLedgers });
     closeFilters();
@@ -188,6 +201,7 @@ export default function LedgerReportScreen(p: {
 
   keyHandler.current = (e) => {
     if (e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.key === "Escape" && dateRangeOpen) { e.preventDefault(); setDateRangeOpen(false); setDateRangeError(""); }
     if (e.key === "F2") { e.preventDefault(); if (filtersOpen) closeFilters(); else openFilters(); }
     if (e.key === "F4" && !filtersOpen) { e.preventDefault(); barRef.current?.querySelector<HTMLInputElement>('[data-field="ledger-picker"]')?.focus(); }
   };
@@ -298,6 +312,16 @@ export default function LedgerReportScreen(p: {
           <button type="button" className="btn px-1.5" onClick={() => stepMonth(-1)} disabled={monthIdx <= 0} aria-label="Previous month" title="Previous month"><ChevronLeft size={14} /></button>
           <div className="w-[9.5rem]" title={`${shownDate(query.from, p.calendar)} → ${shownDate(query.to, p.calendar)}`}>{combo(monthValue, monthOptions, "ledger-month", (v) => { if (v === "fy") setPeriod(p.fyStart, p.fyEnd); else if (v !== "custom") { const m = months[Number(v)]; if (m) setPeriod(m.from, m.to); } }, "Choose month", { required: true, onCommit: focusLines })}</div>
           <button type="button" className="btn px-1.5" onClick={() => stepMonth(1)} disabled={monthIdx < 0 || monthIdx >= months.length - 1} aria-label="Next month" title="Next month"><ChevronRight size={14} /></button>
+          <div className="relative flex items-center gap-1">
+            <button type="button" className={`btn px-2 ${dateRangeOpen ? "border-cobalt-500 text-cobalt-800" : ""}`} onClick={toggleDateRange} aria-haspopup="dialog" aria-expanded={dateRangeOpen} aria-label="Change date range" title="Choose a custom date range"><CalendarDays size={14} /></button>
+            {monthValue === "custom" && <button type="button" className="btn px-1.5 text-rose-600 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700" onClick={clearDateRange} aria-label="Clear custom date range" title="Clear custom date range and return to the previous period selection"><X size={14} /></button>}
+            {dateRangeOpen && <div role="dialog" aria-label="Custom date range" className="absolute left-0 top-full z-50 mt-1 w-[min(22rem,calc(100vw-1.5rem))] rounded-lg border border-slate-300 bg-white p-3 shadow-xl" onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); setDateRangeOpen(false); setDateRangeError(""); } if (e.key === "Enter" && e.target instanceof HTMLInputElement) { e.preventDefault(); applyDateRange(); } }}>
+              <div className="mb-2 flex items-center justify-between gap-2"><h2 className="text-[12px] font-semibold text-slate-800">Custom date range</h2><button type="button" className="rounded p-1 text-slate-500 hover:bg-slate-100" onClick={() => { setDateRangeOpen(false); setDateRangeError(""); }} aria-label="Close date range"><X size={14} /></button></div>
+              <div className="grid grid-cols-2 gap-2"><label className="block text-[11px] font-medium text-slate-500">From ({p.calendar})<DateInput fieldName="From date" value={dateDraft.from} onChange={(from) => { setDateDraft((d) => ({ ...d, from })); setDateRangeError(""); }} calendar={p.calendar} hasError={dateDraft.from.startsWith("?")} onBlurField={() => { if (!dateDraft.from || dateDraft.from.startsWith("?")) setDateRangeError("Enter a valid start date."); }} /></label><label className="block text-[11px] font-medium text-slate-500">To ({p.calendar})<DateInput fieldName="To date" value={dateDraft.to} onChange={(to) => { setDateDraft((d) => ({ ...d, to })); setDateRangeError(""); }} calendar={p.calendar} hasError={dateDraft.to.startsWith("?")} onBlurField={() => { if (!dateDraft.to || dateDraft.to.startsWith("?")) setDateRangeError("Enter a valid end date."); }} /></label></div>
+              {dateRangeError && <p role="alert" className="mt-2 text-[11px] text-rose-700">{dateRangeError}</p>}
+              <div className="mt-3 flex justify-end gap-2"><button type="button" className="btn" onClick={() => { setDateRangeOpen(false); setDateRangeError(""); }}>Cancel</button><button type="button" className="btn btn-primary" onClick={applyDateRange}>Apply</button></div>
+            </div>}
+          </div>
         </div>
         {periodNote && <span className="text-[11px] tabular-nums text-slate-500">{periodNote}</span>}
         <div className="inline-flex rounded-md border border-slate-300 bg-slate-50 p-0.5" role="group" aria-label="Ledger report view">
@@ -320,7 +344,7 @@ export default function LedgerReportScreen(p: {
             if (e.key === "Tab") { const focusable = Array.from(panelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])') ?? []); const first = focusable[0], last = focusable[focusable.length - 1]; if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); } }
             if (e.key === "Enter" && !(e.target instanceof HTMLButtonElement) && !(e.target instanceof HTMLInputElement && e.target.type === "checkbox")) { e.preventDefault(); applyDraft(); }
           }}>
-            <header className="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 py-2.5"><div className="min-w-0 flex-1"><h2 id="ledger-query-title" className="font-semibold text-slate-900">More filters</h2><p className="text-[11px] text-slate-500">Ledger and month are in the bar above. Use this for several ledgers, a custom date range or other criteria.</p></div><button type="button" className="btn px-2" onClick={closeFilters} aria-label="Close filters"><X size={15} /></button></header>
+            <header className="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 py-2.5"><div className="min-w-0 flex-1"><h2 id="ledger-query-title" className="font-semibold text-slate-900">More filters</h2><p className="text-[11px] text-slate-500">Ledger and period are in the bar above. Use this for several ledgers or other criteria.</p></div><button type="button" className="btn px-2" onClick={closeFilters} aria-label="Close filters"><X size={15} /></button></header>
             <form className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4" onSubmit={applyDraft}>
               {dialogError && <div role="alert" className="mb-3 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">{dialogError}</div>}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -333,11 +357,6 @@ export default function LedgerReportScreen(p: {
                     {draftLedgerList.map((x) => <label key={x.id} className={`flex items-center gap-2 rounded px-1 py-1 text-[12px] hover:bg-slate-50 ${x.isActive ? "" : "text-slate-400"}`}><input type="checkbox" checked={draft.ledgerIds.includes(x.id)} onChange={(e) => setDraft((old) => ({ ...old, allLedgers: false, subLedgerId: "", ledgerIds: e.target.checked ? [...old.ledgerIds, x.id] : old.ledgerIds.filter((id) => id !== x.id) }))} className="h-4 w-4 accent-cobalt-700" /><span className="font-mono text-[11px] text-slate-500">{x.code}</span><span className="truncate">{x.name}{x.isActive ? "" : " (inactive)"}</span></label>)}
                     {draftLedgerList.length === 0 && <p className="px-1 py-2 text-[12px] text-slate-500">No ledger matches “{ledgerFilter}”.</p>}
                   </div>
-                </fieldset>
-                <fieldset className="rounded-lg border border-slate-200 bg-white p-3">
-                  <legend className="sr-only">Date range</legend>
-                  <div className="mb-2 flex items-center gap-3 text-[12px]"><span className="font-semibold text-slate-800">Date range</span><button type="button" className="text-cobalt-700 hover:underline" onClick={() => setDraft((old) => ({ ...old, from: p.fyStart, to: p.fyEnd }))}>Full fiscal year</button></div>
-                  <div className="grid grid-cols-2 gap-2"><label className="block text-[11px] font-medium text-slate-500">From ({p.calendar})<DateInput fieldName="From date" value={draft.from} onChange={(v) => updateDraft("from", v)} calendar={p.calendar} hasError={draft.from.startsWith("?")} onBlurField={() => { if (draft.from.startsWith("?")) setDialogError("Enter a valid start date."); }} /></label><label className="block text-[11px] font-medium text-slate-500">To ({p.calendar})<DateInput fieldName="To date" value={draft.to} onChange={(v) => updateDraft("to", v)} calendar={p.calendar} hasError={draft.to.startsWith("?")} onBlurField={() => { if (draft.to.startsWith("?")) setDialogError("Enter a valid end date."); }} /></label></div>
                 </fieldset>
                 <fieldset className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
                   <legend className="sr-only">Other criteria</legend>
