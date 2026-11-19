@@ -60,7 +60,10 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
   const productId = q(req, "productId") ? whole(q(req, "productId"), "productId") : null;
   const search = (q(req, "search") || "").trim().slice(0, 120);
   const ledgerScope = idsFilter(ledgerIds, sql`g.id`);
-  const subScope = subLedgerId ? sql`AND x."subLedgerId" = ${subLedgerId}` : sql``;
+  // With a sub-ledger chosen, its statement carries its own opening balance, period totals and running balance (never the whole ledger's).
+  const subOnLine = subLedgerId ? sql`AND l."subLedgerId" = ${subLedgerId}` : sql``;
+  const subOnOpening = subLedgerId ? sql`AND o."subLedgerId" = ${subLedgerId}` : sql``;
+  const subOnOpeningRows = subLedgerId ? sql`AND ob."subLedgerId" = ${subLedgerId}` : sql``;
   const fromTs = `${start}`;
   const toTs = `${end}`;
 
@@ -72,19 +75,19 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
       SELECT o."generalLedgerId" AS gl, SUM(o."debit" - o."credit") AS net
       FROM "OpeningBalance" o JOIN "FiscalYear" fy ON fy.id = o."fiscalYearId"
       JOIN chosen c ON c.id = o."generalLedgerId"
-      WHERE o."companyId" = ${companyId} AND o."branchId" = ${branchId} AND fy.code = ${fiscalYear}
+      WHERE o."companyId" = ${companyId} AND o."branchId" = ${branchId} AND fy.code = ${fiscalYear} ${subOnOpening}
       GROUP BY o."generalLedgerId"
     ), tx AS (
       SELECT l."generalLedgerId" AS gl, v."voucherDate" AS d, l."debit" AS dr, l."credit" AS cr
       FROM "JournalVoucherLine" l JOIN "JournalVoucher" v ON v.id = l."journalVoucherId"
       JOIN chosen c ON c.id = l."generalLedgerId"
-      WHERE v."companyId" = ${companyId} AND v."branchId" = ${branchId} AND v."fiscalYear" = ${fiscalYear} AND v."isPosted" = true
+      WHERE v."companyId" = ${companyId} AND v."branchId" = ${branchId} AND v."fiscalYear" = ${fiscalYear} AND v."isPosted" = true ${subOnLine}
         AND (v."voucherDate" < ${start}::date OR v."voucherDate" BETWEEN ${start}::date AND ${end}::date)
       UNION ALL
       SELECT l."generalLedgerId", v."voucherDate", l."debit", l."credit"
       FROM "CashBankVoucherLine" l JOIN "CashBankVoucher" v ON v.id = l."cashBankVoucherId"
       JOIN chosen c ON c.id = l."generalLedgerId"
-      WHERE v."companyId" = ${companyId} AND v."branchId" = ${branchId} AND v."fiscalYear" = ${fiscalYear} AND v."isPosted" = true
+      WHERE v."companyId" = ${companyId} AND v."branchId" = ${branchId} AND v."fiscalYear" = ${fiscalYear} AND v."isPosted" = true ${subOnLine}
         AND (v."voucherDate" < ${start}::date OR v."voucherDate" BETWEEN ${start}::date AND ${end}::date)
     ), sums AS (
       SELECT c.id AS gl, c.code, c.name,
@@ -135,7 +138,7 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
         FROM "PurchaseBillLine" pl JOIN "Product" p ON p.id = pl."productId" JOIN "ProductUnit" pu ON pu.id = pl."unitId" LEFT JOIN "ProductUnit" au ON au.id = pl."altUnitId" LEFT JOIN "Location" loc ON loc.id = pl."locationId" WHERE pl."purchaseBillId" = pb.id
       ) pp ON true
       WHERE v."companyId" = ${companyId} AND v."branchId" = ${branchId} AND v."fiscalYear" = ${fiscalYear}
-        AND v."voucherDate" BETWEEN ${start}::date AND ${end}::date ${idsFilter(ledgerIds, sql`g.id`)}
+        AND v."voucherDate" BETWEEN ${start}::date AND ${end}::date ${idsFilter(ledgerIds, sql`g.id`)} ${subOnLine}
       UNION ALL
       SELECT l.id, v.id, l."generalLedgerId", l."subLedgerId", v."voucherDate", v."voucherNumber", 'CASH_BANK'::text,
         'Cash / bank voucher'::text, v."isPosted", v."postedAt", v."postedBy", u.name, v.remarks, l.narration,
@@ -145,16 +148,16 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
       JOIN "GeneralLedger" g ON g.id = l."generalLedgerId" LEFT JOIN "SubLedger" s ON s.id = l."subLedgerId"
       LEFT JOIN "User" u ON u.id = v."postedBy" LEFT JOIN "CashBankVoucher" rv ON rv."reversalOfId" = v.id AND rv."isPosted" = true
       WHERE v."companyId" = ${companyId} AND v."branchId" = ${branchId} AND v."fiscalYear" = ${fiscalYear}
-        AND v."voucherDate" BETWEEN ${start}::date AND ${end}::date ${idsFilter(ledgerIds, sql`g.id`)}
+        AND v."voucherDate" BETWEEN ${start}::date AND ${end}::date ${idsFilter(ledgerIds, sql`g.id`)} ${subOnLine}
     ), opening AS (
       SELECT c.id AS gl, COALESCE(o.net,0) + COALESCE(p.net,0) AS amount
       FROM (SELECT g.id FROM "GeneralLedger" g WHERE g."companyId" = ${companyId} ${idsFilter(ledgerIds, sql`g.id`)}) c
-      LEFT JOIN (SELECT "generalLedgerId" gl, SUM("debit" - "credit") net FROM "OpeningBalance" ob JOIN "FiscalYear" fy ON fy.id=ob."fiscalYearId" WHERE ob."companyId"=${companyId} AND ob."branchId"=${branchId} AND fy.code=${fiscalYear} GROUP BY "generalLedgerId") o ON o.gl=c.id
+      LEFT JOIN (SELECT "generalLedgerId" gl, SUM("debit" - "credit") net FROM "OpeningBalance" ob JOIN "FiscalYear" fy ON fy.id=ob."fiscalYearId" WHERE ob."companyId"=${companyId} AND ob."branchId"=${branchId} AND fy.code=${fiscalYear} ${subOnOpeningRows} GROUP BY "generalLedgerId") o ON o.gl=c.id
       LEFT JOIN (
         SELECT gl, SUM(dr-cr) net FROM (
-          SELECT l."generalLedgerId" gl, l.debit dr, l.credit cr FROM "JournalVoucherLine" l JOIN "JournalVoucher" v ON v.id=l."journalVoucherId" WHERE v."companyId"=${companyId} AND v."branchId"=${branchId} AND v."fiscalYear"=${fiscalYear} AND v."isPosted"=true AND v."voucherDate" < ${start}::date
+          SELECT l."generalLedgerId" gl, l.debit dr, l.credit cr FROM "JournalVoucherLine" l JOIN "JournalVoucher" v ON v.id=l."journalVoucherId" WHERE v."companyId"=${companyId} AND v."branchId"=${branchId} AND v."fiscalYear"=${fiscalYear} AND v."isPosted"=true AND v."voucherDate" < ${start}::date ${subOnLine}
           UNION ALL
-          SELECT l."generalLedgerId", l.debit, l.credit FROM "CashBankVoucherLine" l JOIN "CashBankVoucher" v ON v.id=l."cashBankVoucherId" WHERE v."companyId"=${companyId} AND v."branchId"=${branchId} AND v."fiscalYear"=${fiscalYear} AND v."isPosted"=true AND v."voucherDate" < ${start}::date
+          SELECT l."generalLedgerId", l.debit, l.credit FROM "CashBankVoucherLine" l JOIN "CashBankVoucher" v ON v.id=l."cashBankVoucherId" WHERE v."companyId"=${companyId} AND v."branchId"=${branchId} AND v."fiscalYear"=${fiscalYear} AND v."isPosted"=true AND v."voucherDate" < ${start}::date ${subOnLine}
         ) before_rows GROUP BY gl
       ) p ON p.gl=c.id
     ), numbered AS (

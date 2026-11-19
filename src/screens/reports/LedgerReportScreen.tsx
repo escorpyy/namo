@@ -1,213 +1,387 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { ChevronDown, ChevronRight, Download, Filter, RefreshCw, Search, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, RefreshCw, Search, X } from "lucide-react";
 import { ledgerReportApi, type LedgerReportLookups, type LedgerReportResult, type LedgerReportRow } from "../../api";
 import { Combobox, type ComboOption } from "../../components/Combobox";
 import { DateInput } from "../../components/DateInput";
-import { QueryFilterGroup } from "../../components/QueryFilterGroup";
-import { adToBs, bsToAd } from "../../lib/nepaliDate";
-import { groupIN } from "../../components/purchase/Bits";
+import { adToBs } from "../../lib/nepaliDate";
+import { amount, balanceOf, balanceText, buildBlocks, csvCell, fmtMinor, money, monthsOf, pickInitialMonth, todayLocal, type LedgerBlock } from "../../lib/ledgerReportLayout";
 import type { StatusInfo } from "../../types";
 
-type Month = { from: string; to: string; label: string };
-type FilterKey = "period" | "ledgers" | "subLedger" | "product" | "voucherType" | "status" | "search";
-type ReportQuery = {
-  from: string; to: string; ledgerIds: number[]; subLedgerId: number | ""; productId: number | "";
-  voucherType: string; status: string; search: string; enabled: Record<FilterKey, boolean>;
+type Ledger = LedgerReportLookups["ledgers"][number];
+type Query = {
+  from: string; to: string;
+  ledgerIds: number[]; allLedgers: boolean; // nothing chosen yet = neither: the screen waits for a ledger instead of querying everything
+  subLedgerId: number | ""; productId: number | ""; voucherType: string; status: string; search: string;
 };
-const pad = (n: number) => String(n).padStart(2, "0");
-const addDay = (s: string, days: number) => { const d = new Date(`${s}T12:00:00`); d.setDate(d.getDate() + days); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
-function monthsOf(fyStart: string, fyEnd: string): Month[] {
-  const bsStart = adToBs(fyStart), bsEnd = adToBs(fyEnd);
-  if (!bsStart || !bsEnd) {
-    const months: Month[] = []; const cursor = new Date(`${fyStart}T12:00:00`), end = new Date(`${fyEnd}T12:00:00`);
-    while (cursor <= end) { const y = cursor.getFullYear(), m = cursor.getMonth(), a = `${y}-${pad(m + 1)}-01`, b = `${y}-${pad(m + 1)}-${pad(new Date(y, m + 1, 0).getDate())}`, from = a < fyStart ? fyStart : a, to = b > fyEnd ? fyEnd : b; months.push({ from, to, label: `${new Intl.DateTimeFormat("en", { month: "short", year: "numeric" }).format(cursor)} · ${from}–${to}` }); cursor.setMonth(m + 1, 1); }
-    return months;
-  }
-  const [sy, sm] = bsStart.split("-").map(Number), [ey, em] = bsEnd.split("-").map(Number), months: Month[] = [];
-  let y = sy, m = sm;
-  while (y < ey || (y === ey && m <= em)) {
-    const nextY = m === 12 ? y + 1 : y, nextM = m === 12 ? 1 : m + 1, rawFrom = bsToAd(`${y}-${pad(m)}-01`), next = bsToAd(`${nextY}-${pad(nextM)}-01`);
-    if (rawFrom && next) { const rawTo = addDay(next, -1), from = rawFrom < fyStart ? fyStart : rawFrom, to = rawTo > fyEnd ? fyEnd : rawTo; if (from <= to) months.push({ from, to, label: `${y}-${pad(m)} BS · ${adToBs(from) ?? from}–${adToBs(to) ?? to}` }); }
-    y = nextY; m = nextM;
-  }
-  return months;
+type Remembered = { recent: number[]; all: boolean };
+
+const PAGE_SIZE = 200;
+const ALL = "__all", MULTI = "__multi";
+const STATUS_OPTIONS: ComboOption[] = [{ value: "POSTED", label: "Posted only" }, { value: "ALL", label: "Posted + drafts" }, { value: "DRAFT", label: "Drafts only" }];
+const TYPE_OPTIONS: ComboOption[] = [{ value: "ALL", label: "All types" }, { value: "JOURNAL", label: "Journal" }, { value: "CASH_BANK", label: "Cash / bank" }];
+
+const storeKey = (companyId: number) => `namo.ledgerReport.${companyId}`;
+function readRemembered(companyId: number): Remembered {
+  try {
+    const v = JSON.parse(localStorage.getItem(storeKey(companyId)) ?? "null");
+    if (v && Array.isArray(v.recent)) return { recent: v.recent.filter((x: unknown) => Number.isInteger(x)).slice(0, 8), all: v.all === true };
+  } catch { /* storage unavailable or corrupt: start fresh */ }
+  return { recent: [], all: false };
 }
+function writeRemembered(companyId: number, r: Remembered) { try { localStorage.setItem(storeKey(companyId), JSON.stringify(r)); } catch { /* ignore */ } }
+
 const shownDate = (v: string, calendar: "BS" | "AD") => calendar === "BS" ? adToBs(v) ?? v : v;
-const money = (v: string) => groupIN(v || "0");
-function minor(v: string): bigint { const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(v || "0"); if (!m) return 0n; const frac = (m[3] ?? "") + "00"; let n = BigInt(m[2]) * 100n + BigInt(frac.slice(0, 2)); if (frac.charCodeAt(2) >= 53) n += 1n; return m[1] ? -n : n; }
-function fmtMinor(v: bigint): string { const a = v < 0n ? -v : v, digits = (a / 100n).toString(), tail = String(a % 100n).padStart(2, "0"), grouped = digits.length > 3 ? `${digits.slice(0, -3).replace(/\B(?=(\d{2})+(?!\d))/g, ",")},${digits.slice(-3)}` : digits; return `${v < 0n ? "-" : ""}${grouped}.${tail}`; }
-const balanceText = (v: string) => `${money(fmtMinor(minor(v)))} ${minor(v) < 0n ? "Cr" : "Dr"}`;
-const th = "sticky top-0 z-[1] bg-slate-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500";
-const td = "border-b border-slate-100 px-3 py-2.5 align-top";
-const filterLabels: Record<FilterKey, string> = { period: "Period", ledgers: "Ledger(s)", subLedger: "Sub-ledger", product: "Product", voucherType: "Voucher type", status: "Status", search: "Search" };
+const statusTag = (r: LedgerReportRow) => !r.posted ? { text: "Draft", cls: "bg-amber-50 text-amber-700 ring-amber-200" }
+  : r.hasReversal ? { text: "Reversed", cls: "bg-rose-50 text-rose-700 ring-rose-200" }
+  : r.reversalOfId ? { text: "Reversal", cls: "bg-slate-100 text-slate-600 ring-slate-200" } : null;
+const rowKey = (r: LedgerReportRow) => `${r.kind}-${r.lineId}`; // journal and cash/bank lines have separate id sequences
+const particulars = (r: LedgerReportRow) => r.narration || r.remarks || `${r.sourceLabel} ${r.sourceNumber}`;
+const th = "lg-th whitespace-nowrap px-3 py-1.5 text-left";
+const td = "border-b border-slate-100 px-3 py-1 align-middle";
+
+function RowDetail({ r }: { r: LedgerReportRow }) {
+  const h = "mb-1 text-[12px] font-semibold text-slate-500";
+  return (
+    <div className="grid gap-4 text-[12px] md:grid-cols-3">
+      <div><h3 className={h}>Voucher detail</h3><p><b>{r.sourceLabel}:</b> {r.sourceNumber}</p><p><b>Ledger:</b> {r.ledgerCode} — {r.ledgerName}{r.subLedgerName ? ` · ${r.subLedgerName}` : ""}</p><p><b>Reference:</b> {r.reference || "—"}</p><p><b>Remarks:</b> {r.remarks || "—"}</p><p><b>Narration:</b> {r.narration || "—"}</p></div>
+      <div><h3 className={h}>Posting trail</h3><p><b>Status:</b> {r.posted ? "Posted" : "Draft"}</p><p><b>Posted at:</b> {r.postedAt ? new Date(r.postedAt).toLocaleString() : "—"}</p><p><b>Posted by:</b> {r.postedByName || "—"}</p><p><b>Voucher kind:</b> {r.voucherLabel}</p><p><b>Reversal link:</b> {r.reversalOfId ? `Reverses voucher ID ${r.reversalOfId}` : r.hasReversal ? "A posted reversal exists" : "—"}</p></div>
+      <div><h3 className={h}>Products / lines</h3>{r.products.length ? <div className="space-y-1">{r.products.map((x) => <div key={x.id} className="rounded border border-slate-200 bg-white px-2 py-1"><b>{x.code}</b> {x.description}<div className="text-[11px] text-slate-500">{x.qty} {x.unit}{x.altQty ? ` · ${x.altQty} ${x.altUnit}` : ""} × {money(x.rate)} · {money(x.amount)}</div>{(x.location || x.batch || x.expiry) && <div className="text-[10px] text-slate-400">{[x.location, x.batch && `Batch ${x.batch}`, x.expiry && `Expires ${x.expiry}`].filter(Boolean).join(" · ")}</div>}</div>)}</div> : <p className="text-slate-500">No product lines are linked to this voucher.</p>}</div>
+    </div>
+  );
+}
+
+/** Opening / brought-forward / carried-forward / closing line of one ledger. */
+function EdgeRow({ label, balance, debit, credit, cols, strong, title }: { label: string; balance: bigint; debit?: bigint; credit?: bigint; cols: number; strong?: boolean; title?: string }) {
+  const cell = `px-3 py-1 text-right tabular-nums ${strong ? "border-t border-slate-300 font-semibold text-slate-900" : "italic text-slate-600"}`;
+  return (
+    <tr className="bg-slate-50" title={title}>
+      <td colSpan={cols - 3} className={`px-3 py-1 ${strong ? "border-t border-slate-300 font-semibold text-slate-900" : "italic text-slate-600"}`}>{label}</td>
+      <td className={cell}>{debit !== undefined ? fmtMinor(debit) : ""}</td><td className={cell}>{credit !== undefined ? fmtMinor(credit) : ""}</td><td className={`${cell} whitespace-nowrap font-medium`}>{balanceOf(balance)}</td>
+    </tr>
+  );
+}
 
 export default function LedgerReportScreen(p: {
   companyId: number; branchId: number; branchName: string; fyCode: string; fyStart: string; fyEnd: string; calendar: "BS" | "AD";
   setStatus: (s: StatusInfo) => void; dirtyRef: MutableRefObject<boolean>;
 }) {
-  const months = useMemo(() => monthsOf(p.fyStart, p.fyEnd), [p.fyStart, p.fyEnd]);
-  const today = new Date().toISOString().slice(0, 10);
-  const initialMonth = useMemo(() => months.find((m) => m.from <= today && m.to >= today) ?? months[months.length - 1], [months, today]);
-  const makeDefaultQuery = (): ReportQuery => ({
-    from: initialMonth?.from ?? p.fyStart, to: initialMonth?.to ?? p.fyEnd, ledgerIds: [], subLedgerId: "", productId: "", voucherType: "ALL", status: "POSTED", search: "",
-    enabled: { period: true, ledgers: false, subLedger: false, product: false, voucherType: false, status: true, search: false },
-  });
-  const [draft, setDraft] = useState<ReportQuery>(makeDefaultQuery);
-  const [query, setQuery] = useState<ReportQuery>(makeDefaultQuery);
+  const months = useMemo(() => monthsOf(p.fyStart, p.fyEnd, p.calendar), [p.fyStart, p.fyEnd, p.calendar]);
+  const makeQuery = (): Query => {
+    const m = pickInitialMonth(months, todayLocal());
+    return { from: m?.from ?? p.fyStart, to: m?.to ?? p.fyEnd, ledgerIds: [], allLedgers: false, subLedgerId: "", productId: "", voucherType: "ALL", status: "POSTED", search: "" };
+  };
+  const [query, setQuery] = useState<Query>(makeQuery);
+  const [draft, setDraft] = useState<Query>(query);
   const [lookups, setLookups] = useState<LedgerReportLookups | null>(null);
+  const [remembered, setRemembered] = useState<Remembered>({ recent: [], all: false });
   const [page, setPage] = useState(1);
   const [result, setResult] = useState<LedgerReportResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
-  const [expanded, setExpanded] = useState<number | null>(null);
+  const [dialogError, setDialogError] = useState("");
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const requestNo = useRef(0), filterButtonRef = useRef<HTMLButtonElement>(null), panelRef = useRef<HTMLDivElement>(null), searchRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { p.dirtyRef.current = false; }, [p.dirtyRef]);
-  useEffect(() => { ledgerReportApi.lookups(p.companyId).then(setLookups).catch((e: Error) => setError(e.message)); }, [p.companyId]);
-  useEffect(() => {
-    if (!filtersOpen) return;
-    panelRef.current?.querySelector<HTMLInputElement>('input[type="checkbox"]')?.focus();
-  }, [filtersOpen]);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "F2" && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); setFiltersOpen((v) => !v); }
-      if (e.key === "F4" && !e.ctrlKey && !e.altKey && !e.metaKey) {
-        e.preventDefault(); setFiltersOpen(true); setDraft((old) => ({ ...old, enabled: { ...old.enabled, search: true } }));
-        window.setTimeout(() => searchRef.current?.focus(), 0);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-  const activeLedgerIds = query.enabled.ledgers ? query.ledgerIds : [];
-  const load = useCallback(() => {
-    if (!query.from || !query.to || query.from.startsWith("?") || query.to.startsWith("?") || query.from > query.to) { setError("Choose a valid date range."); return; }
-    const current = ++requestNo.current;
-    setLoading(true); setError(""); setResult(null);
-    ledgerReportApi.get({ companyId: p.companyId, branchId: p.branchId, fiscalYear: p.fyCode, from: query.from, to: query.to,
-      ledgerIds: activeLedgerIds.length ? activeLedgerIds.join(",") : undefined,
-      subLedgerId: query.enabled.subLedger ? query.subLedgerId : "", page, pageSize: 100,
-      status: query.enabled.status ? query.status : "ALL", voucherType: query.enabled.voucherType ? query.voucherType : "ALL",
-      productId: query.enabled.product ? query.productId : "", search: query.enabled.search ? query.search.trim() : "" })
-      .then((data) => { if (current === requestNo.current) setResult(data); })
-      .catch((e: Error) => { if (current === requestNo.current) setError(e.message || "Could not load ledger report."); })
-      .finally(() => { if (current === requestNo.current) setLoading(false); });
-  }, [p.companyId, p.branchId, p.fyCode, query, activeLedgerIds, page]);
-  useEffect(() => { if (lookups) load(); }, [lookups, load]);
-  useEffect(() => () => { requestNo.current += 1; }, []);
-  useEffect(() => { p.setStatus({ mode: "view", count: result?.total ?? 0, shown: result?.rows.length ?? 0, message: error || (loading ? "Running ledger query…" : result ? "Ledger query ready" : "Loading…"), kind: error ? "err" : "info", hints: ["F2: open query filters", "Enter: run query · click a transaction to inspect its full detail", "Balances include posted entries only"] }); }, [result, loading, error, p.setStatus]);
-  const setFilterEnabled = (key: FilterKey, enabled: boolean) => setDraft((old) => {
-    const next = { ...old, enabled: { ...old.enabled, [key]: enabled } };
-    if (!enabled) {
-      if (key === "period") { next.from = p.fyStart; next.to = p.fyEnd; }
-      if (key === "ledgers") next.ledgerIds = [];
-      if (key === "subLedger") next.subLedgerId = "";
-      if (key === "product") next.productId = "";
-      if (key === "voucherType") next.voucherType = "ALL";
-      if (key === "status") next.status = "ALL";
-      if (key === "search") next.search = "";
-    }
-    return next;
-  });
-  const updateDraft = <K extends keyof ReportQuery>(key: K, value: ReportQuery[K]) => setDraft((old) => ({ ...old, [key]: value }));
-  const applyQuery = (e?: React.FormEvent) => { e?.preventDefault(); if (draft.from > draft.to) { setError("Start date must be on or before end date."); return; } setQuery({ ...draft, ledgerIds: [...draft.ledgerIds], enabled: { ...draft.enabled } }); setPage(1); setFiltersOpen(false); filterButtonRef.current?.focus(); };
-  const resetQuery = () => { const reset = makeDefaultQuery(); setDraft(reset); setQuery(reset); setPage(1); };
-  const selectedMonth = months.findIndex((m) => m.from === draft.from && m.to === draft.to);
+  const [ledgerFilter, setLedgerFilter] = useState("");
+  const requestNo = useRef(0), resultScope = useRef(""), keyHandler = useRef<(e: KeyboardEvent) => void>();
+  const barRef = useRef<HTMLDivElement>(null), scrollRef = useRef<HTMLDivElement>(null), filterButtonRef = useRef<HTMLButtonElement>(null), panelRef = useRef<HTMLDivElement>(null);
+
+  const ready = query.allLedgers || query.ledgerIds.length > 0;
+  const single = !query.allLedgers && query.ledgerIds.length === 1;
   const ledgers = lookups?.ledgers ?? [];
-  const subs = (lookups?.subLedgers ?? []).filter((s) => !draft.enabled.ledgers || !draft.ledgerIds.length || draft.ledgerIds.includes(s.generalLedgerId));
-  const rows = result?.rows ?? [];
-  const summaries = (result?.summary ?? []).filter((x) => !activeLedgerIds.length || activeLedgerIds.includes(x.generalLedgerId));
-  const summaryCards = [
-    ["Opening balance", balanceText(fmtMinor(summaries.reduce((a, x) => a + minor(x.opening), 0n)))],
-    ["Period debits", money(fmtMinor(summaries.reduce((a, x) => a + minor(x.debit), 0n)))],
-    ["Period credits", money(fmtMinor(summaries.reduce((a, x) => a + minor(x.credit), 0n)))],
-    ["Closing balance", balanceText(fmtMinor(summaries.reduce((a, x) => a + minor(x.closing), 0n)))],
-  ];
-  const activeFilters = Object.keys(filterLabels).filter((key) => query.enabled[key as FilterKey]).length;
-  const exportCsv = () => {
-    if (!result) return;
-    const lines: string[][] = [["Date", "Ledger", "Sub-ledger", "Voucher type", "Voucher number", "Source", "Narration", "Remarks", "Debit", "Credit", "Running balance", "Status", "Posted at", "Posted by", "Products"]];
-    for (const r of rows) lines.push([r.d, `${r.ledgerCode} ${r.ledgerName}`, r.subLedgerName ?? "", r.voucherLabel, r.voucherNumber, `${r.sourceLabel} ${r.sourceNumber}`, r.narration ?? "", r.remarks ?? "", r.debit, r.credit, r.running, r.posted ? "Posted" : "Draft", r.postedAt ?? "", r.postedByName ?? "", r.products.map((x) => `${x.code} ${x.description} ${x.qty} ${x.unit}${x.altQty ? `; alt ${x.altQty} ${x.altUnit}` : ""}${x.location ? `; ${x.location}` : ""}${x.batch ? `; batch ${x.batch}` : ""}${x.expiry ? `; expiry ${x.expiry}` : ""}`).join("; ")]);
-    const csv = lines.map((line) => line.map((v) => `"${String(v).replaceAll('"', '""')}"`).join(",")).join("\r\n"), blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }), a = document.createElement("a");
-    a.href = URL.createObjectURL(blob); a.download = `ledger-${query.from}-${query.to}-page-${page}.csv`; a.click(); URL.revokeObjectURL(a.href);
+  const ledgerById = useMemo(() => new Map(ledgers.map((l) => [l.id, l])), [ledgers]);
+  const scopeKey = `${query.allLedgers ? "all" : query.ledgerIds.join(",")}|${query.subLedgerId}|${query.productId}|${query.voucherType}|${query.status}|${query.search}`;
+
+  useEffect(() => { p.dirtyRef.current = false; }, [p.dirtyRef]);
+
+  // Ledgers, sub-ledgers and products; then reopen the ledger (or "all ledgers") used last time on this company.
+  useEffect(() => {
+    let alive = true;
+    ledgerReportApi.lookups(p.companyId).then((data) => {
+      if (!alive) return;
+      setLookups(data);
+      const known = new Set(data.ledgers.map((l) => l.id)), mem = readRemembered(p.companyId), recent = mem.recent.filter((id) => known.has(id));
+      setRemembered({ recent, all: mem.all });
+      if (mem.all) setQuery((q) => ({ ...q, allLedgers: true }));
+      else if (recent[0]) setQuery((q) => ({ ...q, ledgerIds: [recent[0]] }));
+    }).catch((e: Error) => { if (alive) setError(e.message); });
+    return () => { alive = false; };
+  }, [p.companyId]);
+
+  const remember = (scope: Pick<Query, "ledgerIds" | "allLedgers">) => {
+    const one = scope.ledgerIds.length === 1 ? scope.ledgerIds[0] : undefined;
+    const next: Remembered = { recent: one === undefined ? remembered.recent : [one, ...remembered.recent.filter((id) => id !== one)].slice(0, 8), all: scope.allLedgers };
+    setRemembered(next);
+    writeRemembered(p.companyId, next);
   };
-  const toggleRow = (lineId: number) => setExpanded((x) => x === lineId ? null : lineId);
-  const queryDateLabel = `${shownDate(query.from, p.calendar)}–${shownDate(query.to, p.calendar)}`;
-  const combo = (value: string, options: ComboOption[], fieldName: string, onChange: (value: string) => void, placeholder: string) => <Combobox value={value} options={options} onChange={onChange} fieldName={fieldName} placeholder={placeholder} />;
+
+  const load = useCallback(() => {
+    if (!ready) return;
+    if (!query.from || !query.to || query.from > query.to) { setError("Choose a valid date range."); return; }
+    const current = ++requestNo.current;
+    setLoading(true); setError("");
+    if (resultScope.current !== scopeKey) setResult(null); // another ledger or filter: do not show the old rows; a new period or page keeps them, dimmed, until the new ones arrive
+    ledgerReportApi.get({ companyId: p.companyId, branchId: p.branchId, fiscalYear: p.fyCode, from: query.from, to: query.to,
+      ledgerIds: query.ledgerIds.length ? query.ledgerIds.join(",") : undefined, subLedgerId: query.subLedgerId, productId: query.productId,
+      voucherType: query.voucherType, status: query.status, search: query.search.trim(), page, pageSize: PAGE_SIZE })
+      .then((data) => { if (current === requestNo.current) { resultScope.current = scopeKey; setResult(data); } })
+      .catch((e: Error) => { if (current === requestNo.current) setError(e.message || "Could not load the ledger."); })
+      .finally(() => { if (current === requestNo.current) setLoading(false); });
+  }, [p.companyId, p.branchId, p.fyCode, query, page, ready, scopeKey]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => () => { requestNo.current += 1; }, []);
+
+  useEffect(() => {
+    p.setStatus({ mode: "view", count: result?.total ?? 0, shown: result?.rows.length ?? 0,
+      message: error || (loading ? "Running ledger query…" : result ? "Ledger ready" : ready ? "Loading…" : "Choose a ledger"), kind: error ? "err" : "info",
+      hints: ["F4 ledger · F2 filters", "↑ ↓ move between lines · Enter opens detail", "Balances count posted entries only"] });
+  }, [result, loading, error, ready, p.setStatus]);
+
+  // ---- toolbar ---------------------------------------------------------------------------------------------------------------
+  const setPeriod = (from: string, to: string) => { setQuery((q) => ({ ...q, from, to })); setPage(1); setExpanded(null); };
+  const chooseLedger = (v: string) => {
+    if (v === MULTI) return;
+    const scope = v === "" ? { ledgerIds: [], allLedgers: false } : v === ALL ? { ledgerIds: [], allLedgers: true } : { ledgerIds: [Number(v)], allLedgers: false };
+    setQuery((q) => ({ ...q, ...scope, subLedgerId: "" })); setPage(1); setExpanded(null);
+    remember(scope);
+  };
+  const monthIdx = months.findIndex((m) => m.from === query.from && m.to === query.to);
+  const monthValue = monthIdx >= 0 ? String(monthIdx) : query.from === p.fyStart && query.to === p.fyEnd ? "fy" : "custom";
+  const monthOptions: ComboOption[] = [...months.map((m, i) => ({ value: String(i), label: m.label })), { value: "fy", label: "Full fiscal year" }, ...(monthValue === "custom" ? [{ value: "custom", label: "Custom range" }] : [])];
+  const stepMonth = (d: number) => { const m = months[monthIdx + d]; if (m) setPeriod(m.from, m.to); };
+  const focusLines = () => scrollRef.current?.focus();
+
+  const ledgerOptions = useMemo<ComboOption[]>(() => {
+    const label = (l: Ledger) => `${l.code} — ${l.name}${l.isActive ? "" : " (inactive)"}`;
+    const recent = remembered.recent.map((id) => ledgerById.get(id)).filter((l): l is Ledger => !!l);
+    const rest = ledgers.filter((l) => !remembered.recent.includes(l.id));
+    const ordered = [...recent, ...rest.filter((l) => l.isActive), ...rest.filter((l) => !l.isActive)]; // recent first, inactive last
+    return [{ value: ALL, label: "All ledgers" }, ...(query.ledgerIds.length > 1 ? [{ value: MULTI, label: `${query.ledgerIds.length} ledgers selected` }] : []), ...ordered.map((l) => ({ value: String(l.id), label: label(l) }))];
+  }, [ledgers, ledgerById, remembered.recent, query.ledgerIds.length]);
+  const ledgerValue = query.allLedgers ? ALL : query.ledgerIds.length > 1 ? MULTI : query.ledgerIds.length === 1 ? String(query.ledgerIds[0]) : "";
+  const subsOfLedger = useMemo(() => single ? (lookups?.subLedgers ?? []).filter((s) => s.generalLedgerId === query.ledgerIds[0]) : [], [single, lookups, query.ledgerIds]);
+
+  const activeFilters = [query.subLedgerId !== "", query.productId !== "", query.voucherType !== "ALL", query.status !== "POSTED", query.search.trim() !== ""].filter(Boolean).length;
+
+  // ---- filter dialog (the less common criteria; everything here is applied together) ----------------------------------------
+  const openFilters = () => { setDraft({ ...query, ledgerIds: [...query.ledgerIds] }); setDialogError(""); setLedgerFilter(""); setFiltersOpen(true); };
   const closeFilters = () => { setFiltersOpen(false); filterButtonRef.current?.focus(); };
+  const updateDraft = <K extends keyof Query>(key: K, value: Query[K]) => setDraft((old) => ({ ...old, [key]: value }));
+  const applyDraft = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (draft.from.startsWith("?") || draft.to.startsWith("?")) { setDialogError("Enter valid dates."); return; }
+    if (draft.from > draft.to) { setDialogError("Start date must be on or before end date."); return; }
+    setQuery({ ...draft, ledgerIds: [...draft.ledgerIds] }); setPage(1); setExpanded(null);
+    remember({ ledgerIds: draft.ledgerIds, allLedgers: draft.allLedgers });
+    closeFilters();
+  };
+  const clearDraftFilters = () => setDraft((old) => ({ ...old, subLedgerId: "", productId: "", voucherType: "ALL", status: "POSTED", search: "" }));
+  useEffect(() => { if (filtersOpen) panelRef.current?.querySelector<HTMLInputElement>("input")?.focus(); }, [filtersOpen]);
+
+  keyHandler.current = (e) => {
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.key === "F2") { e.preventDefault(); if (filtersOpen) closeFilters(); else openFilters(); }
+    if (e.key === "F4" && !filtersOpen) { e.preventDefault(); barRef.current?.querySelector<HTMLInputElement>('[data-field="ledger-picker"]')?.focus(); }
+  };
+  useEffect(() => { const h = (e: KeyboardEvent) => keyHandler.current?.(e); window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, []);
+
+  // ---- data to draw ----------------------------------------------------------------------------------------------------------
+  const pageCount = result ? Math.max(1, Math.ceil(result.total / result.pageSize)) : 1;
+  const blocks: LedgerBlock[] = useMemo(() => result ? buildBlocks({ rows: result.rows, summary: result.summary, page: result.page, pageCount, ledgerIds: query.ledgerIds }) : [], [result, pageCount, query.ledgerIds]);
+  const rows = result?.rows ?? [];
+  const showSub = rows.some((r) => r.subLedgerName);
+  const cols = showSub ? 8 : 7;
+  const summary = single && !query.subLedgerId ? result?.summary.find((s) => s.generalLedgerId === query.ledgerIds[0]) : undefined;
+  const toggleRow = (key: string) => setExpanded((x) => x === key ? null : key);
+  const onRowKey = (e: React.KeyboardEvent<HTMLElement>, key: string) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleRow(key); }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const all = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>("[data-row]") ?? []), at = all.indexOf(e.currentTarget);
+      all[Math.max(0, Math.min(all.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)))]?.focus();
+    }
+  };
+
+  // Every line of the query (all pages), with the date in both calendars.
+  const exportCsv = async () => {
+    if (!ready || exporting) return;
+    setExporting(true); setError("");
+    try {
+      const all: LedgerReportRow[] = [];
+      for (let pg = 1; pg <= 100; pg++) {
+        const r = await ledgerReportApi.get({ companyId: p.companyId, branchId: p.branchId, fiscalYear: p.fyCode, from: query.from, to: query.to,
+          ledgerIds: query.ledgerIds.length ? query.ledgerIds.join(",") : undefined, subLedgerId: query.subLedgerId, productId: query.productId,
+          voucherType: query.voucherType, status: query.status, search: query.search.trim(), page: pg, pageSize: 200 });
+        all.push(...r.rows);
+        if (!r.rows.length || all.length >= r.total) break;
+      }
+      const head = ["Date (AD)", "Date (BS)", "Ledger", "Sub-ledger", "Voucher type", "Voucher number", "Source", "Narration", "Remarks", "Debit", "Credit", "Running balance", "Status", "Posted at", "Posted by", "Products"];
+      const body = all.map((r) => {
+        const d = r.d.slice(0, 10);
+        const prods = r.products.map((x) => `${x.code} ${x.description} ${x.qty} ${x.unit}${x.altQty ? `; alt ${x.altQty} ${x.altUnit}` : ""}${x.location ? `; ${x.location}` : ""}${x.batch ? `; batch ${x.batch}` : ""}${x.expiry ? `; expiry ${x.expiry}` : ""}`).join("; ");
+        return [csvCell(d), csvCell(adToBs(d) ?? ""), csvCell(`${r.ledgerCode} ${r.ledgerName}`), csvCell(r.subLedgerName), csvCell(r.voucherLabel), csvCell(r.voucherNumber), csvCell(`${r.sourceLabel} ${r.sourceNumber}`), csvCell(r.narration), csvCell(r.remarks),
+          csvCell(r.debit, "number"), csvCell(r.credit, "number"), csvCell(r.running, "number"), csvCell(r.posted ? "Posted" : "Draft"), csvCell(r.postedAt), csvCell(r.postedByName), csvCell(prods)].join(",");
+      });
+      const csv = [head.map((h) => csvCell(h)).join(","), ...body].join("\r\n");
+      const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }), a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `ledger-${single ? ledgerById.get(query.ledgerIds[0])?.code ?? "ledger" : "all"}-${query.from}-${query.to}.csv`;
+      a.click(); URL.revokeObjectURL(a.href);
+    } catch (e) { setError((e as Error).message || "Could not export the ledger."); }
+    finally { setExporting(false); }
+  };
+
+  // ---- pieces ----------------------------------------------------------------------------------------------------------------
+  const combo = (value: string, options: ComboOption[], fieldName: string, onChange: (v: string) => void, placeholder: string, extra?: { required?: boolean; onCommit?: () => void; disabled?: boolean }) =>
+    <Combobox value={value} options={options} onChange={onChange} fieldName={fieldName} placeholder={placeholder} required={extra?.required} disabled={extra?.disabled} onCommit={extra?.onCommit} />;
+  const quickPicks = (remembered.recent.length ? remembered.recent.map((id) => ledgerById.get(id)).filter((l): l is Ledger => !!l) : ledgers.filter((l) => l.isActive)).slice(0, 8);
+  const draftSubs = (lookups?.subLedgers ?? []).filter((s) => draft.allLedgers || !draft.ledgerIds.length || draft.ledgerIds.includes(s.generalLedgerId));
+  const lf = ledgerFilter.trim().toLowerCase(), draftLedgerList = ledgers.filter((x) => !lf || `${x.code} ${x.name}`.toLowerCase().includes(lf));
+  const periodNote = monthValue === "custom" ? `${shownDate(query.from, p.calendar)} → ${shownDate(query.to, p.calendar)}` : "";
+
+  const lineRow = (r: LedgerReportRow) => {
+    const key = rowKey(r), tag = statusTag(r), open = expanded === key, source = r.sourceLabel !== r.voucherLabel ? `${r.sourceLabel} ${r.sourceNumber}` : "";
+    return (
+      <Fragment key={key}>
+        <tr data-row tabIndex={0} className={`cursor-pointer hover:bg-cobalt-50/70 focus:bg-cobalt-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cobalt-600 ${r.posted ? "" : "bg-amber-50/30"}`} onClick={() => toggleRow(key)} onKeyDown={(e) => onRowKey(e, key)} aria-expanded={open} aria-label={`${r.voucherNumber}, ${r.ledgerName}, ${r.posted ? "posted" : "draft"}; press Enter for details`}>
+          <td className={`${td} w-6 pr-0 text-slate-400`}>{open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</td>
+          <td className={`${td} whitespace-nowrap tabular-nums`}>{shownDate(r.d.slice(0, 10), p.calendar)}</td>
+          <td className={`${td} whitespace-nowrap`}><span className="font-mono font-semibold text-cobalt-800">{r.voucherNumber}</span>{tag && <span className={`ml-1.5 rounded px-1 text-[10px] font-semibold ring-1 ring-inset ${tag.cls}`}>{tag.text}</span>}</td>
+          <td className={`${td} max-w-0 w-full`}><div className="truncate text-slate-800" title={[particulars(r), source, r.reference].filter(Boolean).join(" · ")}>{particulars(r)}{(source || r.reference) && <span className="text-slate-400"> · {[source, r.reference].filter(Boolean).join(" · ")}</span>}{r.products.length > 0 && <span className="text-slate-400"> · {r.products.length} product line{r.products.length === 1 ? "" : "s"}</span>}</div></td>
+          {showSub && <td className={`${td} whitespace-nowrap text-slate-600`}>{r.subLedgerName ?? ""}</td>}
+          <td className={`${td} whitespace-nowrap text-right tabular-nums ${Number(r.debit) ? "text-slate-900" : "text-slate-300"}`}>{Number(r.debit) ? amount(r.debit) : "—"}</td>
+          <td className={`${td} whitespace-nowrap text-right tabular-nums ${Number(r.credit) ? "text-slate-900" : "text-slate-300"}`}>{Number(r.credit) ? amount(r.credit) : "—"}</td>
+          <td className={`${td} whitespace-nowrap text-right font-medium tabular-nums`}>{balanceText(r.running)}</td>
+        </tr>
+        {open && <tr className="border-b border-slate-200 bg-slate-50"><td colSpan={cols} className="px-10 py-3"><RowDetail r={r} /></td></tr>}
+      </Fragment>
+    );
+  };
+  const edgeTitle = "Posted entries of this ledger for the whole period, whatever filters are set";
 
   return (
     <section className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-white">
-      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-200 px-5 py-3">
-        <div><h1 className="text-[18px] font-semibold text-slate-900">General ledger</h1><p className="mt-0.5 text-[12px] text-slate-500">{p.branchName} · FY {p.fyCode} · Ledger query and balances</p></div>
-        <div className="ml-auto flex gap-2"><button className="btn" type="button" onClick={load} disabled={loading}><RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Refresh</button><button className="btn" type="button" onClick={exportCsv} disabled={!rows.length}><Download size={13} /> Export page CSV</button></div>
+      <div ref={barRef} className="lr-bar flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-200 bg-white px-3 py-1" role="toolbar" aria-label="Ledger report controls">
+        <div className="w-full min-w-[12rem] sm:w-[17rem]">{combo(ledgerValue, ledgerOptions, "ledger-picker", chooseLedger, lookups ? "Select ledger — type code or name" : "Loading ledgers…", { onCommit: focusLines, disabled: !lookups })}</div>
+        {subsOfLedger.length > 0 && <div className="w-full sm:w-[12rem]">{combo(String(query.subLedgerId), [{ value: "", label: "All sub-ledgers" }, ...subsOfLedger.map((s) => ({ value: String(s.id), label: `${s.code} — ${s.name}` }))], "ledger-sub-ledger", (v) => { setQuery((q) => ({ ...q, subLedgerId: v ? Number(v) : "" })); setPage(1); setExpanded(null); }, "All sub-ledgers", { onCommit: focusLines })}</div>}
+        <div className="flex items-center gap-1">
+          <button type="button" className="btn px-1.5" onClick={() => stepMonth(-1)} disabled={monthIdx <= 0} aria-label="Previous month" title="Previous month"><ChevronLeft size={14} /></button>
+          <div className="w-[9.5rem]" title={`${shownDate(query.from, p.calendar)} → ${shownDate(query.to, p.calendar)}`}>{combo(monthValue, monthOptions, "ledger-month", (v) => { if (v === "fy") setPeriod(p.fyStart, p.fyEnd); else if (v !== "custom") { const m = months[Number(v)]; if (m) setPeriod(m.from, m.to); } }, "Choose month", { required: true, onCommit: focusLines })}</div>
+          <button type="button" className="btn px-1.5" onClick={() => stepMonth(1)} disabled={monthIdx < 0 || monthIdx >= months.length - 1} aria-label="Next month" title="Next month"><ChevronRight size={14} /></button>
+        </div>
+        {periodNote && <span className="text-[11px] tabular-nums text-slate-500">{periodNote}</span>}
+        <button ref={filterButtonRef} type="button" className="btn" onClick={openFilters} aria-haspopup="dialog" aria-expanded={filtersOpen}><Filter size={13} /> Filters{activeFilters > 0 && <span className="lg-count">{activeFilters}</span>}<kbd className="kbd hidden 2xl:inline">F2</kbd></button>
+        <div className="ml-auto flex items-center gap-1.5">
+          {summary && <span className="lg-chip" title={`Opening ${balanceText(summary.opening)} · Debit ${amount(summary.debit)} · Credit ${amount(summary.credit)}`}>Closing <b className="tabular-nums">{balanceText(summary.closing)}</b></span>}
+          {pageCount > 1 && <div className="flex items-center gap-1 text-[12px] text-slate-600"><button type="button" className="btn px-1.5" disabled={page <= 1 || loading} onClick={() => setPage((x) => Math.max(1, x - 1))} aria-label="Previous page"><ChevronLeft size={14} /></button><span className="tabular-nums" title={`${result?.total.toLocaleString()} lines`}>{page} / {pageCount}</span><button type="button" className="btn px-1.5" disabled={page >= pageCount || loading} onClick={() => setPage((x) => x + 1)} aria-label="Next page"><ChevronRight size={14} /></button></div>}
+          <button type="button" className="btn px-1.5" onClick={load} disabled={loading || !ready} aria-label="Refresh" title="Refresh"><RefreshCw size={13} className={loading ? "animate-spin" : ""} /></button>
+          <button type="button" className="btn" onClick={exportCsv} disabled={!ready || exporting || !result?.total} title="Download every line of this query as CSV"><Download size={13} /> {exporting ? "Exporting…" : "CSV"}</button>
+        </div>
       </div>
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50 px-5 py-2">
-        <button ref={filterButtonRef} type="button" className="btn" onClick={() => setFiltersOpen(true)} aria-haspopup="dialog" aria-expanded={filtersOpen}><Filter size={14} /> Filters <span className="rounded-full bg-cobalt-100 px-1.5 text-[10px] text-cobalt-800">{activeFilters}</span><kbd className="kbd">F2</kbd></button>
-        <div className="flex min-w-0 flex-1 items-center gap-2 text-[12px]"><span className="font-semibold uppercase tracking-wide text-slate-400">Query</span><span className="truncate text-slate-700">{queryDateLabel} · {activeLedgerIds.length ? `${activeLedgerIds.length} ledgers` : "All ledgers"}{query.enabled.subLedger && query.subLedgerId ? " · sub-ledger" : ""}{query.enabled.product && query.productId ? " · product" : ""}{query.enabled.voucherType && query.voucherType !== "ALL" ? ` · ${query.voucherType}` : ""}{query.enabled.status ? ` · ${query.status}` : ""}{query.enabled.search && query.search ? ` · “${query.search}”` : ""}</span></div>
-      </div>
+
       {filtersOpen && (
         <div className="fixed inset-0 z-[100] bg-slate-950/25 p-2 sm:p-6" onMouseDown={(e) => { if (e.target === e.currentTarget) closeFilters(); }}>
-          <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="ledger-query-title" className="mx-auto flex max-h-[calc(100vh-1rem)] w-full max-w-[980px] flex-col overflow-hidden rounded-xl border border-slate-300 bg-slate-50 shadow-2xl sm:mt-6 sm:max-h-[calc(100vh-3rem)]" onKeyDown={(e) => {
+          <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="ledger-query-title" className="mx-auto flex max-h-[calc(100vh-1rem)] w-full max-w-[920px] flex-col overflow-hidden rounded-xl border border-slate-300 bg-slate-50 shadow-2xl sm:mt-6 sm:max-h-[calc(100vh-3rem)]" onKeyDown={(e) => {
             if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeFilters(); }
             if (e.key === "Tab") { const focusable = Array.from(panelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])') ?? []); const first = focusable[0], last = focusable[focusable.length - 1]; if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); } }
-            if (e.key === "Enter" && !(e.target instanceof HTMLButtonElement) && !(e.target instanceof HTMLInputElement && e.target.type === "checkbox")) { e.preventDefault(); applyQuery(); }
+            if (e.key === "Enter" && !(e.target instanceof HTMLButtonElement) && !(e.target instanceof HTMLInputElement && e.target.type === "checkbox")) { e.preventDefault(); applyDraft(); }
           }}>
-            <header className="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 py-3"><div className="min-w-0 flex-1"><h2 id="ledger-query-title" className="font-semibold text-slate-900">Build ledger query</h2><p className="text-[11px] text-slate-500">Check a filter to enable it, choose its options, then run the query.</p></div><button type="button" className="btn px-2" onClick={closeFilters} aria-label="Close filters"><X size={15} /></button></header>
-            <form className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4" onSubmit={applyQuery}>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                <QueryFilterGroup label="Period" checked={draft.enabled.period} onCheckedChange={(v) => setFilterEnabled("period", v)}>
-                  <div className="space-y-2"><label className="block text-[11px] font-medium text-slate-500">Fiscal month</label>{combo(String(selectedMonth), [{ value: "-1", label: "Custom range" }, ...months.map((m, i) => ({ value: String(i), label: m.label }))], "ledger-month", (v) => { const m = months[Number(v)]; if (m) setDraft((old) => ({ ...old, from: m.from, to: m.to })); }, "Choose month")}
-                    <div className="grid grid-cols-2 gap-2"><label className="block text-[11px] font-medium text-slate-500">From ({p.calendar})<DateInput fieldName="From date" value={draft.from} onChange={(v) => updateDraft("from", v)} calendar={p.calendar} hasError={draft.from.startsWith("?")} onBlurField={() => { if (draft.from.startsWith("?")) setError("Enter a valid start date."); }} /></label><label className="block text-[11px] font-medium text-slate-500">To ({p.calendar})<DateInput fieldName="To date" value={draft.to} onChange={(v) => updateDraft("to", v)} calendar={p.calendar} hasError={draft.to.startsWith("?")} onBlurField={() => { if (draft.to.startsWith("?")) setError("Enter a valid end date."); }} /></label></div>
-                    <div className="flex gap-2"><button type="button" className="btn" disabled={selectedMonth <= 0} onClick={() => { const m = months[selectedMonth - 1]; if (m) setDraft((old) => ({ ...old, from: m.from, to: m.to })); }}>‹ Previous month</button><button type="button" className="btn" disabled={selectedMonth < 0 || selectedMonth >= months.length - 1} onClick={() => { const m = months[selectedMonth + 1]; if (m) setDraft((old) => ({ ...old, from: m.from, to: m.to })); }}>Next month ›</button></div>
+            <header className="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 py-2.5"><div className="min-w-0 flex-1"><h2 id="ledger-query-title" className="font-semibold text-slate-900">More filters</h2><p className="text-[11px] text-slate-500">Ledger and month are in the bar above. Use this for several ledgers, a custom date range or other criteria.</p></div><button type="button" className="btn px-2" onClick={closeFilters} aria-label="Close filters"><X size={15} /></button></header>
+            <form className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4" onSubmit={applyDraft}>
+              {dialogError && <div role="alert" className="mb-3 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">{dialogError}</div>}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <fieldset className="rounded-lg border border-slate-200 bg-white p-3 sm:row-span-2">
+                  <legend className="sr-only">Ledgers</legend>
+                  <div className="mb-2 flex items-center gap-3 text-[12px]"><span className="font-semibold text-slate-800">Ledgers</span><button type="button" className="text-cobalt-700 hover:underline" onClick={() => setDraft((old) => ({ ...old, allLedgers: false, ledgerIds: ledgers.filter((x) => x.isActive).map((x) => x.id) }))}>All active</button><button type="button" className="text-cobalt-700 hover:underline" onClick={() => setDraft((old) => ({ ...old, allLedgers: false, ledgerIds: [], subLedgerId: "" }))}>Clear</button><span className="ml-auto text-slate-400">{draft.allLedgers ? "All ledgers" : draft.ledgerIds.length ? `${draft.ledgerIds.length} selected` : "None selected"}</span></div>
+                  <label className="mb-2 flex items-center gap-2 rounded border border-slate-300 bg-white px-2 py-1"><Search size={13} className="text-slate-400" /><input value={ledgerFilter} onChange={(e) => setLedgerFilter(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); const hit = draftLedgerList[0]; if (hit) { setDraft((old) => old.ledgerIds.includes(hit.id) ? old : { ...old, allLedgers: false, subLedgerId: "", ledgerIds: [...old.ledgerIds, hit.id] }); setLedgerFilter(""); } } }} placeholder="Find a ledger by code or name, Enter to tick the first match…" className="w-full bg-transparent text-[12px] outline-none" /></label>
+                  <div className="max-h-64 space-y-0.5 overflow-y-auto">
+                    <label className="flex items-center gap-2 rounded px-1 py-1 text-[12px] font-medium hover:bg-slate-50"><input type="checkbox" checked={draft.allLedgers} onChange={(e) => setDraft((old) => ({ ...old, allLedgers: e.target.checked, ledgerIds: e.target.checked ? [] : old.ledgerIds, subLedgerId: "" }))} className="h-4 w-4 accent-cobalt-700" /> All ledgers</label>
+                    {draftLedgerList.map((x) => <label key={x.id} className={`flex items-center gap-2 rounded px-1 py-1 text-[12px] hover:bg-slate-50 ${x.isActive ? "" : "text-slate-400"}`}><input type="checkbox" checked={draft.ledgerIds.includes(x.id)} onChange={(e) => setDraft((old) => ({ ...old, allLedgers: false, subLedgerId: "", ledgerIds: e.target.checked ? [...old.ledgerIds, x.id] : old.ledgerIds.filter((id) => id !== x.id) }))} className="h-4 w-4 accent-cobalt-700" /><span className="font-mono text-[11px] text-slate-500">{x.code}</span><span className="truncate">{x.name}{x.isActive ? "" : " (inactive)"}</span></label>)}
+                    {draftLedgerList.length === 0 && <p className="px-1 py-2 text-[12px] text-slate-500">No ledger matches “{ledgerFilter}”.</p>}
                   </div>
-                </QueryFilterGroup>
-                <QueryFilterGroup label="Ledger(s)" checked={draft.enabled.ledgers} onCheckedChange={(v) => setFilterEnabled("ledgers", v)}>
-                  <div className="mb-2 flex gap-3 text-[11px]"><button type="button" className="text-cobalt-700 hover:underline" onClick={() => updateDraft("ledgerIds", ledgers.filter((x) => x.isActive).map((x) => x.id))}>Select active</button><button type="button" className="text-cobalt-700 hover:underline" onClick={() => updateDraft("ledgerIds", [])}>Clear</button><span className="text-slate-400">{draft.ledgerIds.length ? `${draft.ledgerIds.length} selected` : "All ledgers"}</span></div>
-                  <div className="max-h-44 space-y-1 overflow-y-auto">{ledgers.map((x) => <label key={x.id} className="flex items-center gap-2 rounded px-1 py-1 text-[12px] hover:bg-slate-50"><input type="checkbox" checked={draft.ledgerIds.includes(x.id)} onChange={(e) => setDraft((old) => ({ ...old, ledgerIds: e.target.checked ? [...old.ledgerIds, x.id] : old.ledgerIds.filter((id) => id !== x.id) }))} className="h-4 w-4 accent-cobalt-700" /><span className="font-mono text-[11px] text-slate-500">{x.code}</span><span className="truncate">{x.name}</span></label>)}</div>
-                </QueryFilterGroup>
-                <QueryFilterGroup label="Sub-ledger" checked={draft.enabled.subLedger} onCheckedChange={(v) => setFilterEnabled("subLedger", v)}>
-                  {combo(String(draft.subLedgerId), subs.map((x) => ({ value: String(x.id), label: `${x.code} — ${x.name}` })), "ledger-sub-ledger", (v) => updateDraft("subLedgerId", v ? Number(v) : ""), "All sub-ledgers")}
-                </QueryFilterGroup>
-                <QueryFilterGroup label="Product" checked={draft.enabled.product} onCheckedChange={(v) => setFilterEnabled("product", v)}>
-                  {combo(String(draft.productId), (lookups?.products ?? []).map((x) => ({ value: String(x.id), label: `${x.code} — ${x.description}` })), "ledger-product", (v) => updateDraft("productId", v ? Number(v) : ""), "All products")}
-                </QueryFilterGroup>
-                <QueryFilterGroup label="Voucher type" checked={draft.enabled.voucherType} onCheckedChange={(v) => setFilterEnabled("voucherType", v)}>
-                  {combo(draft.voucherType, [{ value: "ALL", label: "All types" }, { value: "JOURNAL", label: "Journal" }, { value: "CASH_BANK", label: "Cash / bank" }], "ledger-voucher-type", (v) => updateDraft("voucherType", v), "All types")}
-                </QueryFilterGroup>
-                <QueryFilterGroup label="Status" checked={draft.enabled.status} onCheckedChange={(v) => setFilterEnabled("status", v)}>
-                  {combo(draft.status, [{ value: "POSTED", label: "Posted only" }, { value: "ALL", label: "Posted + drafts" }, { value: "DRAFT", label: "Drafts only" }], "ledger-status", (v) => updateDraft("status", v), "Choose status")}
-                </QueryFilterGroup>
-                <QueryFilterGroup label="Search" checked={draft.enabled.search} onCheckedChange={(v) => setFilterEnabled("search", v)} className="sm:col-span-2 xl:col-span-3">
-                  <label className="flex items-center gap-2 rounded border border-slate-300 bg-white px-2 py-1.5"><Search size={14} className="text-slate-400" /><input ref={searchRef} value={draft.search} onChange={(e) => updateDraft("search", e.target.value)} placeholder="Voucher, narration, remarks, ledger or product…" className="w-full bg-transparent text-[12px] outline-none" /></label>
-                </QueryFilterGroup>
+                </fieldset>
+                <fieldset className="rounded-lg border border-slate-200 bg-white p-3">
+                  <legend className="sr-only">Date range</legend>
+                  <div className="mb-2 flex items-center gap-3 text-[12px]"><span className="font-semibold text-slate-800">Date range</span><button type="button" className="text-cobalt-700 hover:underline" onClick={() => setDraft((old) => ({ ...old, from: p.fyStart, to: p.fyEnd }))}>Full fiscal year</button></div>
+                  <div className="grid grid-cols-2 gap-2"><label className="block text-[11px] font-medium text-slate-500">From ({p.calendar})<DateInput fieldName="From date" value={draft.from} onChange={(v) => updateDraft("from", v)} calendar={p.calendar} hasError={draft.from.startsWith("?")} onBlurField={() => { if (draft.from.startsWith("?")) setDialogError("Enter a valid start date."); }} /></label><label className="block text-[11px] font-medium text-slate-500">To ({p.calendar})<DateInput fieldName="To date" value={draft.to} onChange={(v) => updateDraft("to", v)} calendar={p.calendar} hasError={draft.to.startsWith("?")} onBlurField={() => { if (draft.to.startsWith("?")) setDialogError("Enter a valid end date."); }} /></label></div>
+                </fieldset>
+                <fieldset className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+                  <legend className="sr-only">Other criteria</legend>
+                  <div className="flex items-center text-[12px]"><span className="font-semibold text-slate-800">Other criteria</span><button type="button" className="ml-auto text-cobalt-700 hover:underline" onClick={clearDraftFilters}>Clear these</button></div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="block text-[11px] font-medium text-slate-500">Sub-ledger{combo(String(draft.subLedgerId), [{ value: "", label: "All sub-ledgers" }, ...draftSubs.map((x) => ({ value: String(x.id), label: `${x.code} — ${x.name}` }))], "ledger-sub-ledger-filter", (v) => updateDraft("subLedgerId", v ? Number(v) : ""), "All sub-ledgers")}</label>
+                    <label className="block text-[11px] font-medium text-slate-500">Product{combo(String(draft.productId), [{ value: "", label: "All products" }, ...(lookups?.products ?? []).map((x) => ({ value: String(x.id), label: `${x.code} — ${x.description}` }))], "ledger-product", (v) => updateDraft("productId", v ? Number(v) : ""), "All products")}</label>
+                    <label className="block text-[11px] font-medium text-slate-500">Voucher type{combo(draft.voucherType, TYPE_OPTIONS, "ledger-voucher-type", (v) => updateDraft("voucherType", v || "ALL"), "All types", { required: true })}</label>
+                    <label className="block text-[11px] font-medium text-slate-500">Status{combo(draft.status, STATUS_OPTIONS, "ledger-status", (v) => updateDraft("status", v || "POSTED"), "Choose status", { required: true })}</label>
+                  </div>
+                  <label className="block text-[11px] font-medium text-slate-500">Search<span className="mt-0.5 flex items-center gap-2 rounded border border-slate-300 bg-white px-2 py-1.5"><Search size={14} className="text-slate-400" /><input value={draft.search} onChange={(e) => updateDraft("search", e.target.value)} placeholder="Voucher, narration, remarks, ledger or product…" className="w-full bg-transparent text-[12px] outline-none" /></span></label>
+                </fieldset>
               </div>
             </form>
-            <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-slate-200 bg-white px-3 py-3 sm:px-4"><span className="mr-auto text-[11px] text-slate-500">Tab to move · Enter to run · Esc to close</span><button type="button" className="btn" onClick={resetQuery}>Reset</button><button type="button" className="btn" onClick={closeFilters}>Cancel</button><button type="button" className="btn btn-primary" onClick={() => applyQuery()}>Run query <kbd className="kbd ml-1">Enter</kbd></button></footer>
+            <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-slate-200 bg-white px-3 py-3 sm:px-4"><span className="mr-auto text-[11px] text-slate-500">Tab to move · Enter to apply · Esc to close</span><button type="button" className="btn" onClick={closeFilters}>Cancel</button><button type="button" className="btn btn-primary" onClick={() => applyDraft()}>Apply <kbd className="kbd ml-1">Enter</kbd></button></footer>
           </div>
         </div>
       )}
-      <div className="grid shrink-0 grid-cols-2 gap-2 border-b border-slate-200 bg-slate-50 px-5 py-2 md:grid-cols-4">{summaryCards.map(([label, value]) => <div key={label} className="rounded border border-slate-200 bg-white px-3 py-2"><div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</div><div className="mt-0.5 truncate text-[14px] font-semibold tabular-nums text-slate-800">{value}</div></div>)}</div>
-      <div className="min-h-0 flex-1 overflow-auto">
-        {error ? <div role="alert" className="m-5 rounded border border-rose-200 bg-rose-50 p-3 text-[13px] text-rose-700">{error}</div> : null}
-        {summaries.length > 0 && <div className="border-b border-slate-200 bg-white px-5 py-2"><div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Balance by ledger · {queryDateLabel}</div><div className="flex gap-2 overflow-x-auto pb-1">{summaries.map((s) => <div key={s.generalLedgerId} className="min-w-[220px] rounded border border-slate-200 px-3 py-2 text-[12px]"><div className="truncate font-medium text-slate-800">{s.code} · {s.name}</div><div className="mt-1 grid grid-cols-2 gap-x-2 gap-y-0.5 text-slate-500"><span>Opening</span><b className="text-right text-slate-700">{balanceText(s.opening)}</b><span>Dr</span><b className="text-right text-slate-700">{money(s.debit)}</b><span>Cr</span><b className="text-right text-slate-700">{money(s.credit)}</b><span>Closing</span><b className="text-right text-slate-900">{balanceText(s.closing)}</b></div></div>)}</div></div>}
-        {loading && !result ? <p className="px-5 py-8 text-[13px] text-slate-500">Running ledger query…</p> : rows.length === 0 ? <div className="px-5 py-12 text-center"><p className="text-[14px] font-medium text-slate-700">No transactions match this query</p><p className="mt-1 text-[12px] text-slate-500">Open Filters to adjust the period, ledger or criteria.</p><button type="button" className="btn mt-3" onClick={() => setFiltersOpen(true)}><Filter size={13} /> Edit query</button></div> : (
-          <>
-            <div className="hidden md:block"><table className="w-full min-w-[1020px] border-collapse text-[12px]"><thead><tr className="border-b border-slate-200 text-left"><th className={`${th} w-7`}></th><th className={th}>Date</th>{activeLedgerIds.length !== 1 && <th className={th}>Ledger</th>}<th className={th}>Voucher / reference</th><th className={th}>Particulars</th><th className={`${th} text-right`}>Debit</th><th className={`${th} text-right`}>Credit</th><th className={`${th} text-right`}>Running balance</th><th className={th}>Status</th></tr></thead>
-              <tbody>{rows.map((r: LedgerReportRow, index) => <Fragment key={`${r.kind}-${r.voucherId}-${r.lineId}`}>
-                {activeLedgerIds.length !== 1 && (index === 0 || rows[index - 1].generalLedgerId !== r.generalLedgerId) && <tr className="bg-slate-100"><td colSpan={9} className="px-3 py-1.5 text-[11px] font-semibold text-slate-600">{r.ledgerCode} · {r.ledgerName}</td></tr>}
-                <tr tabIndex={0} className="cursor-pointer hover:bg-blue-50/60 focus:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cobalt-600" onClick={() => toggleRow(r.lineId)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleRow(r.lineId); } }} aria-expanded={expanded === r.lineId} aria-label={`${r.voucherNumber}, ${r.ledgerName}, ${r.posted ? "posted" : "draft"}; press Enter for details`}>
-                  <td className={td}>{expanded === r.lineId ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</td><td className={`${td} whitespace-nowrap tabular-nums`}>{shownDate(r.d.slice(0, 10), p.calendar)}</td>{activeLedgerIds.length !== 1 && <td className={td}><div className="font-medium text-slate-800">{r.ledgerName}</div><div className="font-mono text-[10px] text-slate-400">{r.ledgerCode}{r.subLedgerName ? ` · ${r.subLedgerName}` : ""}</div></td>}
-                  <td className={td}><div className="font-mono font-semibold text-cobalt-800">{r.voucherNumber}</div><div className="mt-0.5 text-[10px] text-slate-500">{r.voucherLabel}{r.reference ? ` · ${r.reference}` : ""}</div></td><td className={`${td} max-w-[280px]`}><div className="truncate text-slate-700">{r.narration || r.remarks || `${r.sourceLabel} ${r.sourceNumber}`}</div>{r.products.length > 0 && <div className="mt-0.5 truncate text-[10px] text-slate-500">{r.products.length} product line{r.products.length === 1 ? "" : "s"}</div>}</td>
-                  <td className={`${td} text-right tabular-nums text-slate-800`}>{Number(r.debit) ? money(r.debit) : "—"}</td><td className={`${td} text-right tabular-nums text-slate-800`}>{Number(r.credit) ? money(r.credit) : "—"}</td><td className={`${td} whitespace-nowrap text-right font-medium tabular-nums`}>{balanceText(r.running)}</td><td className={td}><span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${r.posted ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{r.posted ? (r.hasReversal ? "REVERSED" : r.reversalOfId ? "REVERSAL" : "POSTED") : "DRAFT"}</span></td>
-                </tr>
-                {expanded === r.lineId && <tr className="border-b border-slate-200 bg-slate-50"><td colSpan={activeLedgerIds.length !== 1 ? 9 : 8} className="px-10 py-3"><div className="grid gap-4 md:grid-cols-3"><div><h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Voucher detail</h3><p><b>{r.sourceLabel}:</b> {r.sourceNumber}</p><p><b>Ledger:</b> {r.ledgerCode} — {r.ledgerName}{r.subLedgerName ? ` · ${r.subLedgerName}` : ""}</p><p><b>Reference:</b> {r.reference || "—"}</p><p><b>Remarks:</b> {r.remarks || "—"}</p><p><b>Narration:</b> {r.narration || "—"}</p></div><div><h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Posting trail</h3><p><b>Status:</b> {r.posted ? "Posted" : "Draft"}</p><p><b>Posted at:</b> {r.postedAt ? new Date(r.postedAt).toLocaleString() : "—"}</p><p><b>Posted by:</b> {r.postedByName || "—"}</p><p><b>Voucher kind:</b> {r.voucherLabel}</p><p><b>Reversal link:</b> {r.reversalOfId ? `Reverses voucher ID ${r.reversalOfId}` : r.hasReversal ? "A posted reversal exists" : "—"}</p></div><div><h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Products / lines</h3>{r.products.length ? <div className="space-y-1">{r.products.map((x) => <div key={x.id} className="rounded border border-slate-200 bg-white px-2 py-1"><b>{x.code}</b> {x.description}<div className="text-[11px] text-slate-500">{x.qty} {x.unit}{x.altQty ? ` · ${x.altQty} ${x.altUnit}` : ""} × {money(x.rate)} · {money(x.amount)}</div>{(x.location || x.batch || x.expiry) && <div className="text-[10px] text-slate-400">{[x.location, x.batch && `Batch ${x.batch}`, x.expiry && `Expires ${x.expiry}`].filter(Boolean).join(" · ")}</div>}</div>)}</div> : <p className="text-slate-500">No product lines are linked to this voucher.</p>}</div></div></td></tr>}
-              </Fragment>)}</tbody></table></div>
-            <div className="space-y-2 p-3 md:hidden">{rows.map((r) => <article key={`${r.kind}-${r.voucherId}-${r.lineId}`} className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"><button type="button" className="block w-full p-3 text-left" onClick={() => toggleRow(r.lineId)} aria-expanded={expanded === r.lineId}><div className="flex items-start justify-between gap-2"><div><div className="text-[11px] tabular-nums text-slate-500">{shownDate(r.d.slice(0, 10), p.calendar)} · {r.voucherLabel}</div><div className="mt-0.5 font-mono text-[14px] font-semibold text-cobalt-800">{r.voucherNumber}</div></div><span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold ${r.posted ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{r.posted ? (r.hasReversal ? "REVERSED" : r.reversalOfId ? "REVERSAL" : "POSTED") : "DRAFT"}</span></div><div className="mt-1 text-[12px] font-medium text-slate-700">{r.ledgerCode} · {r.ledgerName}{r.subLedgerName ? ` · ${r.subLedgerName}` : ""}</div><div className="mt-1 truncate text-[12px] text-slate-500">{r.narration || r.remarks || `${r.sourceLabel} ${r.sourceNumber}`}</div><div className="mt-2 grid grid-cols-3 gap-2 border-t border-slate-100 pt-2 text-[11px]"><div><div className="text-slate-400">Debit</div><b className="tabular-nums text-slate-800">{Number(r.debit) ? money(r.debit) : "—"}</b></div><div><div className="text-slate-400">Credit</div><b className="tabular-nums text-slate-800">{Number(r.credit) ? money(r.credit) : "—"}</b></div><div className="text-right"><div className="text-slate-400">Balance</div><b className="tabular-nums text-slate-800">{balanceText(r.running)}</b></div></div></button>{expanded === r.lineId && <div className="space-y-2 border-t border-slate-200 bg-slate-50 p-3 text-[12px]"><div><b>{r.sourceLabel}:</b> {r.sourceNumber}</div><div><b>Remarks:</b> {r.remarks || "—"}</div><div><b>Narration:</b> {r.narration || "—"}</div><div><b>Posting:</b> {r.posted ? "Posted" : "Draft"}{r.postedAt ? ` · ${new Date(r.postedAt).toLocaleString()}` : ""}{r.postedByName ? ` · by ${r.postedByName}` : ""}</div><div><b>Reversal:</b> {r.reversalOfId ? `Reverses voucher ID ${r.reversalOfId}` : r.hasReversal ? "Posted reversal exists" : "—"}</div><div><b>Products:</b>{r.products.length ? <div className="mt-1 space-y-1">{r.products.map((x) => <div key={x.id} className="rounded border border-slate-200 bg-white p-2">{x.code} · {x.description}<div className="text-[11px] text-slate-500">{x.qty} {x.unit}{x.altQty ? ` · ${x.altQty} ${x.altUnit}` : ""} × {money(x.rate)} = {money(x.amount)}{x.location ? ` · ${x.location}` : ""}{x.batch ? ` · Batch ${x.batch}` : ""}</div></div>)}</div> : " — none linked"}</div></div>}</article>)}</div>
-          </>
-        )}
+
+      <div className="relative min-h-0 flex-1">
+        {loading && <div className="absolute inset-x-0 top-0 z-20 h-0.5 animate-pulse bg-cobalt-600" role="progressbar" aria-label="Loading ledger" />}
+        <div ref={scrollRef} tabIndex={-1} className="lg-scroll h-full overflow-auto focus:outline-none" aria-busy={loading}>
+          {error && <div role="alert" className="m-4 flex items-center gap-3 rounded border border-rose-200 bg-rose-50 p-3 text-[13px] text-rose-700"><span className="min-w-0 flex-1">{error}</span>{ready && <button type="button" className="btn shrink-0" onClick={load}>Try again</button>}</div>}
+          {!lookups && !error ? <p className="px-5 py-10 text-[13px] text-slate-500">Loading ledgers…</p>
+            : lookups && ledgers.length === 0 ? <div className="px-5 py-14 text-center"><p className="text-[14px] font-medium text-slate-700">No ledgers yet</p><p className="mt-1 text-[12px] text-slate-500">Create a general ledger under Masters, then come back to see its statement.</p></div>
+            : lookups && !ready ? (
+              <div className="mx-auto max-w-[640px] px-5 py-12 text-center">
+                <p className="text-[15px] font-semibold text-slate-800">Choose a ledger to open its statement</p>
+                <p className="mt-1 text-[12px] text-slate-500">Type a code or name in the box above (<kbd className="kbd">F4</kbd>), or start from one of these.</p>
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  {quickPicks.map((l) => <button key={l.id} type="button" className="btn max-w-full min-w-0" onClick={() => chooseLedger(String(l.id))}><span className="shrink-0 font-mono text-[11px] text-slate-500">{l.code}</span><span className="truncate">{l.name}</span></button>)}
+                  <button type="button" className="btn" onClick={() => chooseLedger(ALL)}>All ledgers</button>
+                </div>
+              </div>
+            ) : ready && !result && !error ? <p className="px-5 py-10 text-[13px] text-slate-500">Running ledger query…</p>
+            : ready && result && blocks.length === 0 ? (
+              <div className="px-5 py-14 text-center">
+                <p className="text-[14px] font-medium text-slate-700">No transactions match</p>
+                <p className="mt-1 text-[12px] text-slate-500">{monthValue === "fy" ? "Nothing in this fiscal year for the chosen ledger and filters." : "Nothing in this period for the chosen ledger and filters."}</p>
+                <div className="mt-3 flex justify-center gap-2">{monthValue !== "fy" && <button type="button" className="btn" onClick={() => setPeriod(p.fyStart, p.fyEnd)}>Show full fiscal year</button>}<button type="button" className="btn" onClick={openFilters}><Filter size={13} /> More filters</button></div>
+              </div>
+            ) : result ? (
+              <div className={loading ? "opacity-60 transition-opacity" : "transition-opacity"}>
+                <div className="hidden md:block">
+                  <table className="w-full min-w-[860px] border-collapse text-[12px]">
+                    <thead><tr><th className={`${th} w-6 pr-0`} /><th className={`${th} w-[92px]`}>Date</th><th className={`${th} w-[130px]`}>Voucher</th><th className={th}>Particulars</th>{showSub && <th className={th}>Sub-ledger</th>}<th className={`${th} w-[120px] text-right`}>Debit</th><th className={`${th} w-[120px] text-right`}>Credit</th><th className={`${th} w-[150px] text-right`}>Balance</th></tr></thead>
+                    <tbody>
+                      {blocks.map((b) => <Fragment key={b.key}>
+                        {!single && <tr><td colSpan={cols} className="border-b border-slate-200 bg-slate-100 px-3 py-1 text-[12px] font-semibold text-slate-700"><span className="mr-2 font-mono text-[11px] font-normal text-slate-500">{b.code}</span>{b.name}</td></tr>}
+                        {b.start && <EdgeRow label={b.start.label} balance={b.start.balance} cols={cols} />}
+                        {b.rows.length === 0 && <tr><td colSpan={cols} className="px-3 py-4 text-center text-slate-500">No transactions in this period.</td></tr>}
+                        {b.rows.map(lineRow)}
+                        {b.end && <EdgeRow label={b.end.label} balance={b.end.balance} debit={b.end.kind === "closing" ? b.end.debit : undefined} credit={b.end.kind === "closing" ? b.end.credit : undefined} cols={cols} strong={b.end.kind === "closing"} title={b.end.kind === "closing" ? edgeTitle : undefined} />}
+                      </Fragment>)}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="space-y-2 p-2 md:hidden">
+                  {blocks.map((b) => <section key={b.key} className="space-y-1.5">
+                    {!single && <h2 className="px-1 pt-1 text-[12px] font-semibold text-slate-700"><span className="mr-1.5 font-mono text-[11px] font-normal text-slate-500">{b.code}</span>{b.name}</h2>}
+                    {b.start && <div className="flex justify-between px-1 text-[12px] italic text-slate-600"><span>{b.start.label}</span><span className="tabular-nums">{balanceOf(b.start.balance)}</span></div>}
+                    {b.rows.length === 0 && <p className="px-1 py-2 text-[12px] text-slate-500">No transactions in this period.</p>}
+                    {b.rows.map((r) => { const key = rowKey(r), tag = statusTag(r); return (
+                      <article key={key} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                        <button type="button" className="block w-full p-2.5 text-left" onClick={() => toggleRow(key)} aria-expanded={expanded === key}>
+                          <div className="flex items-center justify-between gap-2"><span className="text-[11px] tabular-nums text-slate-500">{shownDate(r.d.slice(0, 10), p.calendar)}</span><span className="font-mono text-[13px] font-semibold text-cobalt-800">{r.voucherNumber}{tag && <span className={`ml-1.5 rounded px-1 text-[10px] font-semibold ring-1 ring-inset ${tag.cls}`}>{tag.text}</span>}</span></div>
+                          <div className="mt-0.5 truncate text-[12px] text-slate-700">{particulars(r)}{r.subLedgerName ? ` · ${r.subLedgerName}` : ""}</div>
+                          <div className="mt-1.5 grid grid-cols-3 gap-2 border-t border-slate-100 pt-1.5 text-[11px]"><div><div className="text-slate-400">Debit</div><b className="tabular-nums">{Number(r.debit) ? amount(r.debit) : "—"}</b></div><div><div className="text-slate-400">Credit</div><b className="tabular-nums">{Number(r.credit) ? amount(r.credit) : "—"}</b></div><div className="text-right"><div className="text-slate-400">Balance</div><b className="tabular-nums">{balanceText(r.running)}</b></div></div>
+                        </button>
+                        {expanded === key && <div className="border-t border-slate-200 bg-slate-50 p-3"><RowDetail r={r} /></div>}
+                      </article>); })}
+                    {b.end && <div className="flex justify-between px-1 pb-1 text-[12px] font-semibold text-slate-800"><span>{b.end.label}</span><span className="tabular-nums">{balanceOf(b.end.balance)}</span></div>}
+                  </section>)}
+                </div>
+              </div>
+            ) : null}
+        </div>
       </div>
-      <footer className="flex shrink-0 items-center justify-between border-t border-slate-200 bg-white px-5 py-2 text-[12px] text-slate-600"><span>{result ? `${result.total.toLocaleString()} transaction lines · page ${page} of ${Math.max(1, Math.ceil(result.total / result.pageSize))}` : ""}</span><div className="flex gap-2"><button className="btn" disabled={page <= 1 || loading} onClick={() => setPage((x) => Math.max(1, x - 1))}>Previous</button><button className="btn" disabled={!result || page * result.pageSize >= result.total || loading} onClick={() => setPage((x) => x + 1)}>Next</button></div></footer>
     </section>
   );
 }

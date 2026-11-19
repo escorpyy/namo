@@ -26,6 +26,8 @@
   .btn-danger { @apply bg-red-700 border-red-800 text-white hover:bg-red-800; }
   .kbd { @apply text-[10px] px-1 border border-slate-300 rounded-sm bg-slate-50 text-slate-600 font-mono; }
   .btn-primary .kbd, .btn-danger .kbd { @apply bg-white/15 border-white/30 text-white; }
+  /* Ledger report: one slim control bar, so the lines of the ledger get the screen */
+  .lr-bar .fld, .lr-bar .btn { height: 1.75rem; font-size: 12px; }
   .double-rule { border-bottom: 3px double #94a3b8; }
   .purchase-tabs { @apply grid grid-cols-3 gap-1 rounded-t-2xl border border-slate-200 bg-slate-100/80 p-1.5; }
   .purchase-tab { @apply relative flex min-w-0 items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 text-left transition duration-150 ease-out hover:bg-white/80 focus-visible:outline-2 focus-visible:outline-blue-600; }
