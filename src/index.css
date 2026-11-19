@@ -82,6 +82,12 @@
 
   /* lists */
   .lg-th { @apply sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-[12px] font-semibold text-slate-500; }
+  /* Ledger report table: a spreadsheet-style grid with black borders and centered headers.
+     border-separate keeps the borders on the sticky header while the lines scroll beneath it. */
+  .lg-ledger { border-collapse: separate; border-spacing: 0; }
+  .lg-ledger th, .lg-ledger td { border-right: 1px solid #000; border-bottom: 1px solid #000; }
+  .lg-ledger tr > :first-child { border-left: 1px solid #000; }
+  .lg-ledger thead th { border-top: 1px solid #000; text-align: center; vertical-align: middle; }
   .lg-row { @apply relative w-full border-b border-slate-100 text-left transition-colors duration-100 last:border-b-0 hover:bg-cobalt-50/70 focus:bg-cobalt-50 focus:outline-none; }
   .lg-row:focus { box-shadow: inset 3px 0 0 0 theme("colors.cobalt.700"); }
   .lg-row[aria-selected="true"] { @apply bg-cobalt-50; box-shadow: inset 3px 0 0 0 theme("colors.cobalt.700"); }

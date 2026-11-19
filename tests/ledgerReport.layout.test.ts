@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDay, amount, balanceOf, buildBlocks, csvCell, fmtMinor, minor, monthsOf, pickInitialMonth, todayLocal } from "../src/lib/ledgerReportLayout";
+import { addDay, amount, balanceOf, buildBlocks, csvCell, fmtMinor, minor, monthsOf, pickInitialMonth, todayLocal, voucherRef } from "../src/lib/ledgerReportLayout";
 import type { LedgerReportRow, LedgerReportSummary } from "../src/api";
 
 const FY_START = "2025-07-17", FY_END = "2026-07-16"; // FY 2082/083: Shrawan 1, 2082 to Ashadh 32, 2083
@@ -119,5 +119,17 @@ describe("ledger report CSV", () => {
   });
   it("leaves numbers alone, negative ones included", () => {
     expect(csvCell("-1500.00", "number")).toBe('"-1500.00"');
+  });
+});
+
+describe("ledger report voucher label", () => {
+  it("joins the module name and the voucher number", () => {
+    expect(voucherRef({ sourceLabel: "Sales invoice", sourceNumber: "001", voucherNumber: "JV-9" })).toBe("Sales Bill ## 001");
+    expect(voucherRef({ sourceLabel: "Purchase bill", sourceNumber: "PB-12", voucherNumber: "JV-3" })).toBe("Purchase Bill ## PB-12");
+    expect(voucherRef({ sourceLabel: "Cash / bank voucher", sourceNumber: "CB-5", voucherNumber: "CB-5" })).toBe("Cash/Bank ## CB-5");
+  });
+  it("falls back to the voucher number and to the raw label for an unknown module", () => {
+    expect(voucherRef({ sourceLabel: "Journal voucher", sourceNumber: "", voucherNumber: "JV-7" })).toBe("Journal ## JV-7");
+    expect(voucherRef({ sourceLabel: "Stock transfer", sourceNumber: "ST-1", voucherNumber: "x" })).toBe("Stock transfer ## ST-1");
   });
 });

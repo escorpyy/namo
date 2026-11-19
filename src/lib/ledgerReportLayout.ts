@@ -32,6 +32,16 @@ export const amount = (v: string) => fmtMinor(minor(v));
 export const balanceOf = (v: bigint) => `${fmtMinor(v < 0n ? -v : v)} ${v < 0n ? "Cr" : "Dr"}`;
 export const balanceText = (v: string) => balanceOf(minor(v));
 
+// ---- the one "module + number" label of a line ("Sales Bill ## 001") ----------------------------------------------------------
+
+const MODULE_NAMES: Record<string, string> = {
+  "Sales invoice": "Sales Bill", "Purchase bill": "Purchase Bill", "Import cost assessment": "Import Cost Assessment",
+  "Journal voucher": "Journal", "Cash / bank voucher": "Cash/Bank",
+};
+/** Module name and voucher number in one label, e.g. "Sales Bill ## 001". */
+export const voucherRef = (r: Pick<LedgerReportRow, "sourceLabel" | "sourceNumber" | "voucherNumber">) =>
+  `${MODULE_NAMES[r.sourceLabel] ?? r.sourceLabel} ## ${r.sourceNumber || r.voucherNumber}`;
+
 // ---- periods, shown by month name --------------------------------------------------------------------------------------------
 
 export type Month = { from: string; to: string; label: string };

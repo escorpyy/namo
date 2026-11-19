@@ -1,10 +1,10 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, RefreshCw, Search, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Download, Filter, RefreshCw, Search, X } from "lucide-react";
 import { ledgerReportApi, type LedgerReportLookups, type LedgerReportResult, type LedgerReportRow } from "../../api";
 import { Combobox, type ComboOption } from "../../components/Combobox";
 import { DateInput } from "../../components/DateInput";
 import { adToBs } from "../../lib/nepaliDate";
-import { amount, balanceOf, balanceText, buildBlocks, csvCell, fmtMinor, money, monthsOf, pickInitialMonth, todayLocal, type LedgerBlock } from "../../lib/ledgerReportLayout";
+import { amount, balanceOf, balanceText, buildBlocks, csvCell, fmtMinor, money, monthsOf, pickInitialMonth, todayLocal, voucherRef, type LedgerBlock } from "../../lib/ledgerReportLayout";
 import type { StatusInfo } from "../../types";
 
 type Ledger = LedgerReportLookups["ledgers"][number];
@@ -41,11 +41,12 @@ const td = "border-b border-slate-100 px-3 py-1 align-middle";
 
 function RowDetail({ r }: { r: LedgerReportRow }) {
   const h = "mb-1 text-[12px] font-semibold text-slate-500";
+  const hasProducts = r.products.length > 0; // only vouchers recorded with products have product lines; cash, bank and journal vouchers do not
   return (
-    <div className="grid gap-4 text-[12px] md:grid-cols-3">
+    <div className={`grid gap-4 text-[12px] ${hasProducts ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
       <div><h3 className={h}>Voucher detail</h3><p><b>{r.sourceLabel}:</b> {r.sourceNumber}</p><p><b>Ledger:</b> {r.ledgerCode} — {r.ledgerName}{r.subLedgerName ? ` · ${r.subLedgerName}` : ""}</p><p><b>Reference:</b> {r.reference || "—"}</p><p><b>Remarks:</b> {r.remarks || "—"}</p><p><b>Narration:</b> {r.narration || "—"}</p></div>
       <div><h3 className={h}>Posting trail</h3><p><b>Status:</b> {r.posted ? "Posted" : "Draft"}</p><p><b>Posted at:</b> {r.postedAt ? new Date(r.postedAt).toLocaleString() : "—"}</p><p><b>Posted by:</b> {r.postedByName || "—"}</p><p><b>Voucher kind:</b> {r.voucherLabel}</p><p><b>Reversal link:</b> {r.reversalOfId ? `Reverses voucher ID ${r.reversalOfId}` : r.hasReversal ? "A posted reversal exists" : "—"}</p></div>
-      <div><h3 className={h}>Products / lines</h3>{r.products.length ? <div className="space-y-1">{r.products.map((x) => <div key={x.id} className="rounded border border-slate-200 bg-white px-2 py-1"><b>{x.code}</b> {x.description}<div className="text-[11px] text-slate-500">{x.qty} {x.unit}{x.altQty ? ` · ${x.altQty} ${x.altUnit}` : ""} × {money(x.rate)} · {money(x.amount)}</div>{(x.location || x.batch || x.expiry) && <div className="text-[10px] text-slate-400">{[x.location, x.batch && `Batch ${x.batch}`, x.expiry && `Expires ${x.expiry}`].filter(Boolean).join(" · ")}</div>}</div>)}</div> : <p className="text-slate-500">No product lines are linked to this voucher.</p>}</div>
+      {hasProducts && <div><h3 className={h}>Products / lines</h3><div className="space-y-1">{r.products.map((x) => <div key={x.id} className="rounded border border-slate-200 bg-white px-2 py-1"><b>{x.code}</b> {x.description}<div className="text-[11px] text-slate-500">{x.qty} {x.unit}{x.altQty ? ` · ${x.altQty} ${x.altUnit}` : ""} × {money(x.rate)} · {money(x.amount)}</div>{(x.location || x.batch || x.expiry) && <div className="text-[10px] text-slate-400">{[x.location, x.batch && `Batch ${x.batch}`, x.expiry && `Expires ${x.expiry}`].filter(Boolean).join(" · ")}</div>}</div>)}</div></div>}
     </div>
   );
 }
@@ -81,6 +82,7 @@ export default function LedgerReportScreen(p: {
   const [error, setError] = useState("");
   const [dialogError, setDialogError] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [detailed, setDetailed] = useState(false); // false = Summary (one line per entry, the default); true = Details (every line opened)
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [ledgerFilter, setLedgerFilter] = useState("");
   const requestNo = useRef(0), resultScope = useRef(""), keyHandler = useRef<(e: KeyboardEvent) => void>();
@@ -190,7 +192,7 @@ export default function LedgerReportScreen(p: {
   const blocks: LedgerBlock[] = useMemo(() => result ? buildBlocks({ rows: result.rows, summary: result.summary, page: result.page, pageCount, ledgerIds: query.ledgerIds }) : [], [result, pageCount, query.ledgerIds]);
   const rows = result?.rows ?? [];
   const showSub = rows.some((r) => r.subLedgerName);
-  const cols = showSub ? 8 : 7;
+  const cols = showSub ? 7 : 6;
   const summary = single && !query.subLedgerId ? result?.summary.find((s) => s.generalLedgerId === query.ledgerIds[0]) : undefined;
   const toggleRow = (key: string) => setExpanded((x) => x === key ? null : key);
   const onRowKey = (e: React.KeyboardEvent<HTMLElement>, key: string) => {
@@ -240,14 +242,13 @@ export default function LedgerReportScreen(p: {
   const periodNote = monthValue === "custom" ? `${shownDate(query.from, p.calendar)} → ${shownDate(query.to, p.calendar)}` : "";
 
   const lineRow = (r: LedgerReportRow) => {
-    const key = rowKey(r), tag = statusTag(r), open = expanded === key, source = r.sourceLabel !== r.voucherLabel ? `${r.sourceLabel} ${r.sourceNumber}` : "";
+    const key = rowKey(r), tag = statusTag(r), open = detailed || expanded === key, ref = voucherRef(r);
     return (
       <Fragment key={key}>
-        <tr data-row tabIndex={0} className={`cursor-pointer hover:bg-cobalt-50/70 focus:bg-cobalt-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cobalt-600 ${r.posted ? "" : "bg-amber-50/30"}`} onClick={() => toggleRow(key)} onKeyDown={(e) => onRowKey(e, key)} aria-expanded={open} aria-label={`${r.voucherNumber}, ${r.ledgerName}, ${r.posted ? "posted" : "draft"}; press Enter for details`}>
+        <tr data-row tabIndex={0} className={`cursor-pointer hover:bg-cobalt-50/70 focus:bg-cobalt-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cobalt-600 ${r.posted ? "" : "bg-amber-50/30"}`} onClick={() => toggleRow(key)} onKeyDown={(e) => onRowKey(e, key)} aria-expanded={open} aria-label={`${ref}, ${r.ledgerName}, ${r.posted ? "posted" : "draft"}; press Enter for details`}>
           <td className={`${td} w-6 pr-0 text-slate-400`}>{open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</td>
           <td className={`${td} whitespace-nowrap tabular-nums`}>{shownDate(r.d.slice(0, 10), p.calendar)}</td>
-          <td className={`${td} whitespace-nowrap`}><span className="font-mono font-semibold text-cobalt-800">{r.voucherNumber}</span>{tag && <span className={`ml-1.5 rounded px-1 text-[10px] font-semibold ring-1 ring-inset ${tag.cls}`}>{tag.text}</span>}</td>
-          <td className={`${td} max-w-0 w-full`}><div className="truncate text-slate-800" title={[particulars(r), source, r.reference].filter(Boolean).join(" · ")}>{particulars(r)}{(source || r.reference) && <span className="text-slate-400"> · {[source, r.reference].filter(Boolean).join(" · ")}</span>}{r.products.length > 0 && <span className="text-slate-400"> · {r.products.length} product line{r.products.length === 1 ? "" : "s"}</span>}</div></td>
+          <td className={`${td} w-full whitespace-nowrap`} title={particulars(r)}><span className="font-semibold text-cobalt-800">{ref}</span>{tag && <span className={`ml-1.5 rounded px-1 text-[10px] font-semibold ring-1 ring-inset ${tag.cls}`}>{tag.text}</span>}</td>
           {showSub && <td className={`${td} whitespace-nowrap text-slate-600`}>{r.subLedgerName ?? ""}</td>}
           <td className={`${td} whitespace-nowrap text-right tabular-nums ${Number(r.debit) ? "text-slate-900" : "text-slate-300"}`}>{Number(r.debit) ? amount(r.debit) : "—"}</td>
           <td className={`${td} whitespace-nowrap text-right tabular-nums ${Number(r.credit) ? "text-slate-900" : "text-slate-300"}`}>{Number(r.credit) ? amount(r.credit) : "—"}</td>
@@ -270,6 +271,7 @@ export default function LedgerReportScreen(p: {
           <button type="button" className="btn px-1.5" onClick={() => stepMonth(1)} disabled={monthIdx < 0 || monthIdx >= months.length - 1} aria-label="Next month" title="Next month"><ChevronRight size={14} /></button>
         </div>
         {periodNote && <span className="text-[11px] tabular-nums text-slate-500">{periodNote}</span>}
+        <button type="button" className="btn" onClick={() => { setDetailed((d) => !d); setExpanded(null); }} aria-pressed={detailed} title={detailed ? "Showing details: every line opened. Click for the summary." : "Showing the summary: one line per entry. Click for details."}>{detailed ? <ChevronsDownUp size={13} /> : <ChevronsUpDown size={13} />} {detailed ? "Details" : "Summary"}</button>
         <button ref={filterButtonRef} type="button" className="btn" onClick={openFilters} aria-haspopup="dialog" aria-expanded={filtersOpen}><Filter size={13} /> Filters{activeFilters > 0 && <span className="lg-count">{activeFilters}</span>}<kbd className="kbd hidden 2xl:inline">F2</kbd></button>
         <div className="ml-auto flex items-center gap-1.5">
           {summary && <span className="lg-chip" title={`Opening ${balanceText(summary.opening)} · Debit ${amount(summary.debit)} · Credit ${amount(summary.credit)}`}>Closing <b className="tabular-nums">{balanceText(summary.closing)}</b></span>}
@@ -348,8 +350,8 @@ export default function LedgerReportScreen(p: {
             ) : result ? (
               <div className={loading ? "opacity-60 transition-opacity" : "transition-opacity"}>
                 <div className="hidden md:block">
-                  <table className="w-full min-w-[860px] border-collapse text-[12px]">
-                    <thead><tr><th className={`${th} w-6 pr-0`} /><th className={`${th} w-[92px]`}>Date</th><th className={`${th} w-[130px]`}>Voucher</th><th className={th}>Particulars</th>{showSub && <th className={th}>Sub-ledger</th>}<th className={`${th} w-[120px] text-right`}>Debit</th><th className={`${th} w-[120px] text-right`}>Credit</th><th className={`${th} w-[150px] text-right`}>Balance</th></tr></thead>
+                  <table className="lg-ledger w-full min-w-[760px] text-[12px]">
+                    <thead><tr><th className={`${th} w-6 pr-0`} /><th className={`${th} w-[92px]`}>Date</th><th className={th}>Particulars</th>{showSub && <th className={th}>Sub-ledger</th>}<th className={`${th} w-[120px] text-right`}>Debit</th><th className={`${th} w-[120px] text-right`}>Credit</th><th className={`${th} w-[150px] text-right`}>Balance</th></tr></thead>
                     <tbody>
                       {blocks.map((b) => <Fragment key={b.key}>
                         {!single && <tr><td colSpan={cols} className="border-b border-slate-200 bg-slate-100 px-3 py-1 text-[12px] font-semibold text-slate-700"><span className="mr-2 font-mono text-[11px] font-normal text-slate-500">{b.code}</span>{b.name}</td></tr>}
@@ -366,14 +368,14 @@ export default function LedgerReportScreen(p: {
                     {!single && <h2 className="px-1 pt-1 text-[12px] font-semibold text-slate-700"><span className="mr-1.5 font-mono text-[11px] font-normal text-slate-500">{b.code}</span>{b.name}</h2>}
                     {b.start && <div className="flex justify-between px-1 text-[12px] italic text-slate-600"><span>{b.start.label}</span><span className="tabular-nums">{balanceOf(b.start.balance)}</span></div>}
                     {b.rows.length === 0 && <p className="px-1 py-2 text-[12px] text-slate-500">No transactions in this period.</p>}
-                    {b.rows.map((r) => { const key = rowKey(r), tag = statusTag(r); return (
+                    {b.rows.map((r) => { const key = rowKey(r), tag = statusTag(r), open = detailed || expanded === key; return (
                       <article key={key} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-                        <button type="button" className="block w-full p-2.5 text-left" onClick={() => toggleRow(key)} aria-expanded={expanded === key}>
-                          <div className="flex items-center justify-between gap-2"><span className="text-[11px] tabular-nums text-slate-500">{shownDate(r.d.slice(0, 10), p.calendar)}</span><span className="font-mono text-[13px] font-semibold text-cobalt-800">{r.voucherNumber}{tag && <span className={`ml-1.5 rounded px-1 text-[10px] font-semibold ring-1 ring-inset ${tag.cls}`}>{tag.text}</span>}</span></div>
+                        <button type="button" className="block w-full p-2.5 text-left" onClick={() => toggleRow(key)} aria-expanded={open}>
+                          <div className="flex items-center justify-between gap-2"><span className="text-[11px] tabular-nums text-slate-500">{shownDate(r.d.slice(0, 10), p.calendar)}</span><span className="text-[13px] font-semibold text-cobalt-800">{voucherRef(r)}{tag && <span className={`ml-1.5 rounded px-1 text-[10px] font-semibold ring-1 ring-inset ${tag.cls}`}>{tag.text}</span>}</span></div>
                           <div className="mt-0.5 truncate text-[12px] text-slate-700">{particulars(r)}{r.subLedgerName ? ` · ${r.subLedgerName}` : ""}</div>
                           <div className="mt-1.5 grid grid-cols-3 gap-2 border-t border-slate-100 pt-1.5 text-[11px]"><div><div className="text-slate-400">Debit</div><b className="tabular-nums">{Number(r.debit) ? amount(r.debit) : "—"}</b></div><div><div className="text-slate-400">Credit</div><b className="tabular-nums">{Number(r.credit) ? amount(r.credit) : "—"}</b></div><div className="text-right"><div className="text-slate-400">Balance</div><b className="tabular-nums">{balanceText(r.running)}</b></div></div>
                         </button>
-                        {expanded === key && <div className="border-t border-slate-200 bg-slate-50 p-3"><RowDetail r={r} /></div>}
+                        {open && <div className="border-t border-slate-200 bg-slate-50 p-3"><RowDetail r={r} /></div>}
                       </article>); })}
                     {b.end && <div className="flex justify-between px-1 pb-1 text-[12px] font-semibold text-slate-800"><span>{b.end.label}</span><span className="tabular-nums">{balanceOf(b.end.balance)}</span></div>}
                   </section>)}
