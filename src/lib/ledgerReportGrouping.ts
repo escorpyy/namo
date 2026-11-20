@@ -7,6 +7,7 @@ export type LedgerGroupFieldId =
   | "generalLedger"
   | "subLedger"
   | "agent"
+  | "invoiceAgent"
   | "area"
   | "subArea"
   | "month"
@@ -23,6 +24,7 @@ export const LEDGER_GROUP_FIELDS: LedgerGroupField[] = [
   { id: "generalLedger", label: "General Ledger", summary: true },
   { id: "subLedger", label: "Sub-ledger", summary: false },
   { id: "agent", label: "Agent", summary: true },
+  { id: "invoiceAgent", label: "Invoice Agent", summary: false },
   { id: "area", label: "Area", summary: true },
   { id: "subArea", label: "Sub-area", summary: true },
   { id: "month", label: "Month", summary: false },
@@ -61,6 +63,7 @@ function dimension(item: LedgerGroupItem, field: LedgerGroupFieldId, months: Mon
     case "generalLedger": return row ? pair(row.generalLedgerId, row.ledgerCode, row.ledgerName) : pair(item.generalLedgerId, "code" in item ? item.code : null, "name" in item ? item.name : null);
     case "subLedger": return row ? pair(row.subLedgerId, row.subLedgerCode, row.subLedgerName) : unassigned;
     case "agent": return pair(item.agentId, item.agentCode, item.agentName);
+    case "invoiceAgent": return row ? pair(row.invoiceAgentId, row.invoiceAgentCode, row.invoiceAgentName) : unassigned;
     case "area": return pair(item.areaId, item.areaCode, item.areaName);
     case "subArea": return pair(item.subAreaId, item.subAreaCode, item.subAreaName);
     case "month": {

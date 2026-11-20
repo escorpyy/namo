@@ -61,6 +61,7 @@ const line = (n: number, gl: number, debit: string, credit: string, running: str
   accountSubGroupId: gl, accountSubGroupCode: gl === 1 ? "10" : "20", accountSubGroupName: gl === 1 ? "Current assets" : "Payables",
   accountGroupId: gl, accountGroupCode: gl === 1 ? "1" : "2", accountGroupName: gl === 1 ? "Assets" : "Liabilities",
   agentId: null, agentCode: null, agentName: null, areaId: null, areaCode: null, areaName: null, subAreaId: null, subAreaCode: null, subAreaName: null,
+  invoiceAgentId: null, invoiceAgentCode: null, invoiceAgentName: null,
   subLedgerCode: null, subLedgerName: null, debit, credit,
   sourceNumber: `JV-${n}`, sourceLabel: "Journal voucher", products: [], productIds: [], running, total: 0,
 });
@@ -90,6 +91,12 @@ describe("ledger report grouping", () => {
   it("places missing dimensions in a visible Unassigned group", () => {
     const tree = buildLedgerGroupTree([line(1, 1, "1", "0", "1")], ["agent"], monthsOf(FY_START, FY_END, "BS"));
     expect(tree[0].label).toBe("Unassigned");
+  });
+
+  it("groups invoice agents separately from the shared Agent dimension", () => {
+    const row = { ...line(1, 1, "1", "0", "1"), invoiceAgentId: 7, invoiceAgentCode: "AG7", invoiceAgentName: "Sales Agent" };
+    const tree = buildLedgerGroupTree([row], ["invoiceAgent"], monthsOf(FY_START, FY_END, "BS"));
+    expect(tree[0].label).toBe("AG7 — Sales Agent");
   });
 
   it("uses fiscal-calendar month labels for transaction grouping", () => {

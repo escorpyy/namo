@@ -6,7 +6,7 @@ import { companyOf, q, whole } from "./_input";
 import { parseDate } from "../services/purchase/common";
 
 export const ledgerReportRouter = Router();
-const GROUP_FIELDS = ["accountGroup", "accountSubGroup", "generalLedger", "subLedger", "agent", "area", "subArea", "month", "source", "postingStatus", "postedBy"];
+const GROUP_FIELDS = ["accountGroup", "accountSubGroup", "generalLedger", "subLedger", "agent", "invoiceAgent", "area", "subArea", "month", "source", "postingStatus", "postedBy"];
 const idsFilter = (ids: number[], column: SQL) => ids.length ? sql`AND ${column} IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})` : sql``;
 function selectedIds(raw: string | undefined): number[] {
   if (!raw) return [];
@@ -148,6 +148,7 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
       case "generalLedger": return pair("generalLedgerId", "ledgerCode", "ledgerName");
       case "subLedger": return pair("subLedgerId", "subLedgerCode", "subLedgerName");
       case "agent": return pair("agentId", "agentCode", "agentName");
+      case "invoiceAgent": return pair("invoiceAgentId", "invoiceAgentCode", "invoiceAgentName");
       case "area": return pair("areaId", "areaCode", "areaName");
       case "subArea": return pair("subAreaId", "subAreaCode", "subAreaName");
       case "source": return { key: sql`${col("sourceLabel")}`, label: sql`${col("sourceLabel")}` };
@@ -159,12 +160,12 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
       }
     }
   };
-  const attrTypes = ["int", "text", "text", "int", "text", "text", "int", "text", "text", "int", "text", "text", "int", "text", "text"];
-  const attrNames = ["accountSubGroupId", "accountSubGroupCode", "accountSubGroupName", "accountGroupId", "accountGroupCode", "accountGroupName", "agentId", "agentCode", "agentName", "subAreaId", "subAreaCode", "subAreaName", "areaId", "areaCode", "areaName"];
+  const attrTypes = ["int", "text", "text", "int", "text", "text", "int", "text", "text", "int", "text", "text", "int", "text", "text", "int", "text", "text"];
+  const attrNames = ["accountSubGroupId", "accountSubGroupCode", "accountSubGroupName", "accountGroupId", "accountGroupCode", "accountGroupName", "agentId", "agentCode", "agentName", "subAreaId", "subAreaCode", "subAreaName", "areaId", "areaCode", "areaName", "invoiceAgentId", "invoiceAgentCode", "invoiceAgentName"];
   const attrNone = sql.raw(attrTypes.map((t, i) => `NULL::${t} AS "${attrNames[i]}"`).join(", "));
   const attrNoneCb = sql.raw(attrTypes.map((t) => `NULL::${t}`).join(", "));
 
-  // Transaction-level Agent prefers the originating sale/purchase document, then party master, then the ledger default.
+  // Agent is the same party/ledger-master assignment in Summary and Lines; invoice-header agents have their own Lines-only dimension.
   const cte = sql`
     WITH raw AS (
       SELECT l.id AS "lineId", v.id AS "voucherId", l."generalLedgerId", l."subLedgerId", v."voucherDate" AS d,
@@ -173,7 +174,8 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
         v."reversalOfId", (rv.id IS NOT NULL) AS "hasReversal", g.code AS "ledgerCode", g.name AS "ledgerName",
         ${grouped ? sql`sg.id AS "accountSubGroupId", sg.code AS "accountSubGroupCode", sg.description AS "accountSubGroupName",
         ag.id AS "accountGroupId", ag.code AS "accountGroupCode", ag.description AS "accountGroupName",
-        COALESCE(si."agentId", pb."agentId", pt."agentId", g."agentId") AS "agentId", a.code AS "agentCode", a.name AS "agentName", COALESCE(pt."subAreaId", g."subAreaId") AS "subAreaId", sa.code AS "subAreaCode", sa.name AS "subAreaName", ar.id AS "areaId", ar.code AS "areaCode", ar.name AS "areaName"` : attrNone},
+        COALESCE(ledgerParty."agentId", g."agentId") AS "agentId", a.code AS "agentCode", a.name AS "agentName", COALESCE(pt."subAreaId", g."subAreaId") AS "subAreaId", sa.code AS "subAreaCode", sa.name AS "subAreaName", ar.id AS "areaId", ar.code AS "areaCode", ar.name AS "areaName",
+        COALESCE(si."agentId", pb."agentId") AS "invoiceAgentId", invoiceAgent.code AS "invoiceAgentCode", invoiceAgent.name AS "invoiceAgentName"` : attrNone},
         s.code AS "subLedgerCode", s.name AS "subLedgerName", l.debit::text AS debit, l.credit::text AS credit,
         COALESCE(si."invoiceNumber", ia."assessmentNumber", pb."invoiceNumber", v."voucherNumber") AS "sourceNumber",
         CASE WHEN si.id IS NOT NULL THEN 'Sales invoice' WHEN ia.id IS NOT NULL THEN 'Import cost assessment' WHEN pb.id IS NOT NULL THEN 'Purchase bill' ELSE 'Journal voucher' END AS "sourceLabel",
@@ -186,8 +188,10 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
       LEFT JOIN "PurchaseImportAssessment" ia ON ia."journalVoucherId" = v.id OR ia."reversalVoucherId" = v.id
       LEFT JOIN "PurchaseBill" pb ON pb."journalVoucherId" = v.id OR pb.id = ia."importBillId"
       ${grouped ? sql`JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId" JOIN "AccountGroup" ag ON ag.id = sg."accountGroupId"
+      LEFT JOIN "Party" ledgerParty ON ledgerParty."generalLedgerId" = g.id
       LEFT JOIN "Party" pt ON pt.id = COALESCE(s."partyId", (SELECT p0.id FROM "Party" p0 WHERE p0."generalLedgerId" = g.id))
-      LEFT JOIN "Agent" a ON a.id = COALESCE(si."agentId", pb."agentId", pt."agentId", g."agentId")
+      LEFT JOIN "Agent" a ON a.id = COALESCE(ledgerParty."agentId", g."agentId")
+      LEFT JOIN "Agent" invoiceAgent ON invoiceAgent.id = COALESCE(si."agentId", pb."agentId")
       LEFT JOIN "SubArea" sa ON sa.id = COALESCE(pt."subAreaId", g."subAreaId") LEFT JOIN "Area" ar ON ar.id = sa."areaId"` : sql``}
       LEFT JOIN LATERAL (
         SELECT jsonb_agg(jsonb_build_object('id', p.id, 'code', p.code, 'description', p.description, 'qty', sl.qty::text, 'unit', pu.code, 'altQty', sl."altQty"::text, 'altUnit', au.code, 'rate', sl.rate::text, 'amount', sl."basicAmount"::text) ORDER BY sl."lineNumber") AS products,
@@ -205,14 +209,15 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
       SELECT l.id, v.id, l."generalLedgerId", l."subLedgerId", v."voucherDate", v."voucherNumber", 'CASH_BANK'::text,
         'Cash / bank voucher'::text, v."isPosted", v."postedAt", v."postedBy", u.name, v.remarks, l.narration,
         v."payeeReference", v."reversalOfId", (rv.id IS NOT NULL), g.code, g.name,
-        ${grouped ? sql`sg.id, sg.code, sg.description, ag.id, ag.code, ag.description, COALESCE(pt."agentId", g."agentId"), a.code, a.name, COALESCE(pt."subAreaId", g."subAreaId"), sa.code, sa.name, ar.id, ar.code, ar.name` : attrNoneCb},
+        ${grouped ? sql`sg.id, sg.code, sg.description, ag.id, ag.code, ag.description, COALESCE(ledgerParty."agentId", g."agentId"), a.code, a.name, COALESCE(pt."subAreaId", g."subAreaId"), sa.code, sa.name, ar.id, ar.code, ar.name, NULL::int, NULL::text, NULL::text` : attrNoneCb},
         s.code, s.name,
         l.debit::text, l.credit::text, v."voucherNumber", 'Cash / bank voucher', '[]'::jsonb, '[]'::jsonb
       FROM "CashBankVoucherLine" l JOIN "CashBankVoucher" v ON v.id = l."cashBankVoucherId"
       JOIN "GeneralLedger" g ON g.id = l."generalLedgerId" LEFT JOIN "SubLedger" s ON s.id = l."subLedgerId"
       ${grouped ? sql`JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId" JOIN "AccountGroup" ag ON ag.id = sg."accountGroupId"
+      LEFT JOIN "Party" ledgerParty ON ledgerParty."generalLedgerId" = g.id
       LEFT JOIN "Party" pt ON pt.id = COALESCE(s."partyId", (SELECT p0.id FROM "Party" p0 WHERE p0."generalLedgerId" = g.id))
-      LEFT JOIN "Agent" a ON a.id = COALESCE(pt."agentId", g."agentId")
+      LEFT JOIN "Agent" a ON a.id = COALESCE(ledgerParty."agentId", g."agentId")
       LEFT JOIN "SubArea" sa ON sa.id = COALESCE(pt."subAreaId", g."subAreaId") LEFT JOIN "Area" ar ON ar.id = sa."areaId"` : sql``}
       LEFT JOIN "User" u ON u.id = v."postedBy" LEFT JOIN "CashBankVoucher" rv ON rv."reversalOfId" = v.id AND rv."isPosted" = true
       WHERE v."companyId" = ${companyId} AND v."branchId" = ${branchId} AND v."fiscalYear" = ${fiscalYear}

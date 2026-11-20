@@ -10,10 +10,12 @@ describe("ledger report SQL identifiers", () => {
     expect(route).not.toMatch(/\b(?:si|pb)\.invoiceNumber\b/);
   });
 
-  it("keeps summary dimensions stable while using source-document agents on transaction rows", () => {
+  it("uses the same party/ledger Agent in both views and exposes invoice agents separately", () => {
     expect(route).toContain('LEFT JOIN "Party" p ON p."generalLedgerId" = g.id');
     expect(route).toContain('COALESCE(p."agentId", g."agentId") AS "agentId"');
-    expect(route).toContain('COALESCE(si."agentId", pb."agentId", pt."agentId", g."agentId") AS "agentId"');
+    expect(route).toContain('COALESCE(ledgerParty."agentId", g."agentId") AS "agentId"');
+    expect(route).toContain('COALESCE(si."agentId", pb."agentId") AS "invoiceAgentId"');
+    expect(route).toContain('invoiceAgent.code AS "invoiceAgentCode"');
     expect(route).toContain('COALESCE(pt."subAreaId", g."subAreaId") AS "subAreaId"');
     // The party is found by one indexed lookup; an OR inside the join condition would force a scan of Party for every line.
     expect(route).toContain('pt.id = COALESCE(s."partyId", (SELECT p0.id FROM "Party" p0 WHERE p0."generalLedgerId" = g.id))');

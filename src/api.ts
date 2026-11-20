@@ -148,6 +148,7 @@ export interface LedgerReportRow {
   accountSubGroupId: number; accountSubGroupCode: string; accountSubGroupName: string;
   accountGroupId: number; accountGroupCode: string; accountGroupName: string;
   agentId: number | null; agentCode: string | null; agentName: string | null; subAreaId: number | null; subAreaCode: string | null; subAreaName: string | null; areaId: number | null; areaCode: string | null; areaName: string | null;
+  invoiceAgentId: number | null; invoiceAgentCode: string | null; invoiceAgentName: string | null;
   subLedgerCode: string | null; subLedgerName: string | null; debit: string; credit: string;
   sourceNumber: string; sourceLabel: string; products: LedgerReportProduct[]; productIds: number[]; running: string; total: number;
   /** Present only when the request asked for groupBy: the server's group key and label for each level, in the order asked. A null key is "Unassigned". */

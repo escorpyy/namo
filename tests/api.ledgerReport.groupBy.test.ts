@@ -93,6 +93,14 @@ describe.skipIf(!DB_READY)("Ledger report — Group By (API)", () => {
     expect(b.rows[0].groupLabels[1]).toBe("Unassigned");
   });
 
+  it("groups invoice-header agents separately and leaves ordinary journals Unassigned", async () => {
+    const b = await report({ groupBy: "invoiceAgent" });
+    expect(b.groupTotals).toHaveLength(1);
+    expect(b.groupTotals[0].keys).toEqual([null]);
+    expect(b.rows[0].invoiceAgentId).toBeNull();
+    expect(b.rows[0].groupLabels[0]).toBe("Unassigned");
+  });
+
   it("groups by month from the client's month starts", async () => {
     const b = await report({ groupBy: "month", monthBounds: `${from},${to}` });
     expect(b.groupTotals).toHaveLength(1);
