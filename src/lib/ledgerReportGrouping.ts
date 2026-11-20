@@ -1,5 +1,5 @@
-import type { LedgerReportRow, LedgerReportSummary } from "../api";
-import type { Month } from "./ledgerReportLayout";
+import type { LedgerReportGroupTotal, LedgerReportRow, LedgerReportSummary } from "../api";
+import { minor, type Month } from "./ledgerReportLayout";
 
 export type LedgerGroupFieldId =
   | "accountGroup"
@@ -38,6 +38,8 @@ export type LedgerGroupNode<T> = {
   depth: number;
   rows: T[];
   children: LedgerGroupNode<T>[];
+  /** Server group keys from the root down to this node (server-grouped Lines view only). */
+  path?: (string | null)[];
 };
 
 export function firstLedgerGroupRow<T>(nodes: LedgerGroupNode<T>[]): T | undefined {
@@ -97,4 +99,39 @@ export function buildLedgerGroupTree<T extends LedgerGroupItem>(items: T[], fiel
       }));
   };
   return build(items, 0);
+}
+
+/**
+ * Lines view: the server already ordered the rows by group path (so a group is contiguous across pages) and gave every row its
+ * group keys and labels. Keep that order; never re-sort here, or a group could jump around between pages.
+ */
+export function buildServerGroupTree(rows: LedgerReportRow[], fields: LedgerGroupFieldId[], monthLabel: (key: string) => string | undefined): LedgerGroupNode<LedgerReportRow>[] {
+  if (!fields.length) return [];
+  const build = (items: LedgerReportRow[], depth: number, path: (string | null)[]): LedgerGroupNode<LedgerReportRow>[] => {
+    const buckets = new Map<string, { key: string | null; label: string; rows: LedgerReportRow[] }>();
+    for (const r of items) {
+      const key = r.groupKeys?.[depth] ?? null, id = key ?? "\u0000unassigned";
+      let b = buckets.get(id);
+      if (!b) {
+        const label = key === null ? "Unassigned" : fields[depth] === "month" ? monthLabel(key) ?? key : r.groupLabels?.[depth] ?? key;
+        b = { key, label, rows: [] };
+        buckets.set(id, b);
+      }
+      b.rows.push(r);
+    }
+    return [...buckets.values()].map((b) => {
+      const here = [...path, b.key];
+      return { field: fields[depth], label: b.label, depth, rows: b.rows, path: here, children: depth + 1 < fields.length ? build(b.rows, depth + 1, here) : [] };
+    });
+  };
+  return build(rows, 0, []);
+}
+
+/** Exact debit, credit and line count of a node over the whole report: the sum of every server total at or below its path. Null when the server sent none. */
+export function groupTotalOf(node: LedgerGroupNode<LedgerReportRow>, totals: LedgerReportGroupTotal[] | undefined): { debit: bigint; credit: bigint; count: number } | null {
+  if (!totals || !node.path) return null;
+  const path = node.path;
+  const hit = totals.filter((t) => path.every((k, i) => t.keys[i] === k));
+  if (!hit.length) return null;
+  return hit.reduce((t, g) => ({ debit: t.debit + minor(g.debit), credit: t.credit + minor(g.credit), count: t.count + g.count }), { debit: 0n, credit: 0n, count: 0 });
 }

@@ -6,6 +6,7 @@ import { companyOf, q, whole } from "./_input";
 import { parseDate } from "../services/purchase/common";
 
 export const ledgerReportRouter = Router();
+const GROUP_FIELDS = ["accountGroup", "accountSubGroup", "generalLedger", "subLedger", "agent", "area", "subArea", "month", "source", "postingStatus", "postedBy"];
 const idsFilter = (ids: number[], column: SQL) => ids.length ? sql`AND ${column} IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})` : sql``;
 function selectedIds(raw: string | undefined): number[] {
   if (!raw) return [];
@@ -130,16 +131,49 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
   const where = sql.join(filters, sql` AND `);
   const rowOrder = ledgerIds.length !== 1 ? sql`"ledgerCode", d, "voucherNumber", "voucherId", "lineId"` : sql`d, "voucherNumber", "voucherId", "lineId"`;
 
+  // ---- Group By (Lines view): whitelisted dimensions only; the client never sends SQL ----
+  const groupBy = [...new Set((q(req, "groupBy") || "").split(",").map((v) => v.trim()).filter(Boolean))];
+  if (groupBy.length > 3) throw new HttpError(400, "Group by at most 3 fields.", "groupBy");
+  for (const f of groupBy) if (!GROUP_FIELDS.includes(f)) throw new HttpError(400, `Unknown group field "${f}".`, "groupBy");
+  const monthBounds = (q(req, "monthBounds") || "").split(",").map((v) => v.trim()).filter(Boolean);
+  if (monthBounds.length > 40 || monthBounds.some((v) => !/^\d{4}-\d{2}-\d{2}$/.test(v))) throw new HttpError(400, "monthBounds must be up to 40 YYYY-MM-DD dates.", "monthBounds");
+  if (groupBy.includes("month") && !monthBounds.length) throw new HttpError(400, "Grouping by month needs monthBounds.", "monthBounds");
+  const grouped = groupBy.length > 0;
+  const col = (c: string) => sql.raw(`x."${c}"`);
+  const pair = (id: string, code: string, name: string) => ({ key: sql`${col(id)}::text`, label: sql`COALESCE(NULLIF(${col(code)}, '') || ' — ' || ${col(name)}, ${col(name)}, 'Unassigned')` });
+  const dim = (f: string): { key: SQL; label: SQL } => {
+    switch (f) {
+      case "accountGroup": return pair("accountGroupId", "accountGroupCode", "accountGroupName");
+      case "accountSubGroup": return pair("accountSubGroupId", "accountSubGroupCode", "accountSubGroupName");
+      case "generalLedger": return pair("generalLedgerId", "ledgerCode", "ledgerName");
+      case "subLedger": return pair("subLedgerId", "subLedgerCode", "subLedgerName");
+      case "agent": return pair("agentId", "agentCode", "agentName");
+      case "area": return pair("areaId", "areaCode", "areaName");
+      case "subArea": return pair("subAreaId", "subAreaCode", "subAreaName");
+      case "source": return { key: sql`${col("sourceLabel")}`, label: sql`${col("sourceLabel")}` };
+      case "postingStatus": return { key: sql`CASE WHEN x.posted THEN 'posted' ELSE 'draft' END`, label: sql`CASE WHEN x.posted THEN 'Posted' ELSE 'Draft' END` };
+      case "postedBy": return { key: sql`${col("postedBy")}::text`, label: sql`COALESCE(${col("postedByName")}, 'Unassigned')` };
+      default: { // month: the client sends the first day of each (BS or AD) month; a line belongs to the latest start on or before its date
+        const m = sql`(SELECT max(b)::text FROM unnest(ARRAY[${sql.join(monthBounds.map((d) => sql`${d}::date`), sql`, `)}]) AS b WHERE b <= x.d)`;
+        return { key: m, label: m };
+      }
+    }
+  };
+  const attrTypes = ["int", "text", "text", "int", "text", "text", "int", "text", "text", "int", "text", "text", "int", "text", "text"];
+  const attrNames = ["accountSubGroupId", "accountSubGroupCode", "accountSubGroupName", "accountGroupId", "accountGroupCode", "accountGroupName", "agentId", "agentCode", "agentName", "subAreaId", "subAreaCode", "subAreaName", "areaId", "areaCode", "areaName"];
+  const attrNone = sql.raw(attrTypes.map((t, i) => `NULL::${t} AS "${attrNames[i]}"`).join(", "));
+  const attrNoneCb = sql.raw(attrTypes.map((t) => `NULL::${t}`).join(", "));
+
   // Transaction-level Agent prefers the originating sale/purchase document, then party master, then the ledger default.
-  const rows = await db.execute(sql`
+  const cte = sql`
     WITH raw AS (
       SELECT l.id AS "lineId", v.id AS "voucherId", l."generalLedgerId", l."subLedgerId", v."voucherDate" AS d,
         v."voucherNumber", 'JOURNAL'::text AS kind, 'Journal voucher'::text AS "voucherLabel", v."isPosted" AS posted,
         v."postedAt", v."postedBy", u.name AS "postedByName", COALESCE(ia.remarks, v.remarks) AS remarks, l.narration, ia."referenceNo" AS reference,
         v."reversalOfId", (rv.id IS NOT NULL) AS "hasReversal", g.code AS "ledgerCode", g.name AS "ledgerName",
-        sg.id AS "accountSubGroupId", sg.code AS "accountSubGroupCode", sg.description AS "accountSubGroupName",
+        ${grouped ? sql`sg.id AS "accountSubGroupId", sg.code AS "accountSubGroupCode", sg.description AS "accountSubGroupName",
         ag.id AS "accountGroupId", ag.code AS "accountGroupCode", ag.description AS "accountGroupName",
-        COALESCE(si."agentId", pb."agentId", pt."agentId", g."agentId") AS "agentId", a.code AS "agentCode", a.name AS "agentName", COALESCE(pt."subAreaId", g."subAreaId") AS "subAreaId", sa.code AS "subAreaCode", sa.name AS "subAreaName", ar.id AS "areaId", ar.code AS "areaCode", ar.name AS "areaName",
+        COALESCE(si."agentId", pb."agentId", pt."agentId", g."agentId") AS "agentId", a.code AS "agentCode", a.name AS "agentName", COALESCE(pt."subAreaId", g."subAreaId") AS "subAreaId", sa.code AS "subAreaCode", sa.name AS "subAreaName", ar.id AS "areaId", ar.code AS "areaCode", ar.name AS "areaName"` : attrNone},
         s.code AS "subLedgerCode", s.name AS "subLedgerName", l.debit::text AS debit, l.credit::text AS credit,
         COALESCE(si."invoiceNumber", ia."assessmentNumber", pb."invoiceNumber", v."voucherNumber") AS "sourceNumber",
         CASE WHEN si.id IS NOT NULL THEN 'Sales invoice' WHEN ia.id IS NOT NULL THEN 'Import cost assessment' WHEN pb.id IS NOT NULL THEN 'Purchase bill' ELSE 'Journal voucher' END AS "sourceLabel",
@@ -147,14 +181,14 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
         COALESCE(sp.ids, pp.ids, '[]'::jsonb) AS "productIds"
       FROM "JournalVoucherLine" l JOIN "JournalVoucher" v ON v.id = l."journalVoucherId"
       JOIN "GeneralLedger" g ON g.id = l."generalLedgerId" LEFT JOIN "SubLedger" s ON s.id = l."subLedgerId"
-      JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId" JOIN "AccountGroup" ag ON ag.id = sg."accountGroupId"
       LEFT JOIN "User" u ON u.id = v."postedBy" LEFT JOIN "JournalVoucher" rv ON rv."reversalOfId" = v.id AND rv."isPosted" = true
       LEFT JOIN "SalesInvoice" si ON si."journalVoucherId" = v.id
       LEFT JOIN "PurchaseImportAssessment" ia ON ia."journalVoucherId" = v.id OR ia."reversalVoucherId" = v.id
       LEFT JOIN "PurchaseBill" pb ON pb."journalVoucherId" = v.id OR pb.id = ia."importBillId"
-      LEFT JOIN "Party" pt ON pt.id = s."partyId" OR (s."partyId" IS NULL AND pt."generalLedgerId" = g.id)
+      ${grouped ? sql`JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId" JOIN "AccountGroup" ag ON ag.id = sg."accountGroupId"
+      LEFT JOIN "Party" pt ON pt.id = COALESCE(s."partyId", (SELECT p0.id FROM "Party" p0 WHERE p0."generalLedgerId" = g.id))
       LEFT JOIN "Agent" a ON a.id = COALESCE(si."agentId", pb."agentId", pt."agentId", g."agentId")
-      LEFT JOIN "SubArea" sa ON sa.id = COALESCE(pt."subAreaId", g."subAreaId") LEFT JOIN "Area" ar ON ar.id = sa."areaId"
+      LEFT JOIN "SubArea" sa ON sa.id = COALESCE(pt."subAreaId", g."subAreaId") LEFT JOIN "Area" ar ON ar.id = sa."areaId"` : sql``}
       LEFT JOIN LATERAL (
         SELECT jsonb_agg(jsonb_build_object('id', p.id, 'code', p.code, 'description', p.description, 'qty', sl.qty::text, 'unit', pu.code, 'altQty', sl."altQty"::text, 'altUnit', au.code, 'rate', sl.rate::text, 'amount', sl."basicAmount"::text) ORDER BY sl."lineNumber") AS products,
           jsonb_agg(p.id) AS ids
@@ -171,15 +205,15 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
       SELECT l.id, v.id, l."generalLedgerId", l."subLedgerId", v."voucherDate", v."voucherNumber", 'CASH_BANK'::text,
         'Cash / bank voucher'::text, v."isPosted", v."postedAt", v."postedBy", u.name, v.remarks, l.narration,
         v."payeeReference", v."reversalOfId", (rv.id IS NOT NULL), g.code, g.name,
-        sg.id, sg.code, sg.description, ag.id, ag.code, ag.description, COALESCE(pt."agentId", g."agentId"), a.code, a.name, COALESCE(pt."subAreaId", g."subAreaId"), sa.code, sa.name, ar.id, ar.code, ar.name,
+        ${grouped ? sql`sg.id, sg.code, sg.description, ag.id, ag.code, ag.description, COALESCE(pt."agentId", g."agentId"), a.code, a.name, COALESCE(pt."subAreaId", g."subAreaId"), sa.code, sa.name, ar.id, ar.code, ar.name` : attrNoneCb},
         s.code, s.name,
         l.debit::text, l.credit::text, v."voucherNumber", 'Cash / bank voucher', '[]'::jsonb, '[]'::jsonb
       FROM "CashBankVoucherLine" l JOIN "CashBankVoucher" v ON v.id = l."cashBankVoucherId"
       JOIN "GeneralLedger" g ON g.id = l."generalLedgerId" LEFT JOIN "SubLedger" s ON s.id = l."subLedgerId"
-      JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId" JOIN "AccountGroup" ag ON ag.id = sg."accountGroupId"
-      LEFT JOIN "Party" pt ON pt.id = s."partyId" OR (s."partyId" IS NULL AND pt."generalLedgerId" = g.id)
+      ${grouped ? sql`JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId" JOIN "AccountGroup" ag ON ag.id = sg."accountGroupId"
+      LEFT JOIN "Party" pt ON pt.id = COALESCE(s."partyId", (SELECT p0.id FROM "Party" p0 WHERE p0."generalLedgerId" = g.id))
       LEFT JOIN "Agent" a ON a.id = COALESCE(pt."agentId", g."agentId")
-      LEFT JOIN "SubArea" sa ON sa.id = COALESCE(pt."subAreaId", g."subAreaId") LEFT JOIN "Area" ar ON ar.id = sa."areaId"
+      LEFT JOIN "SubArea" sa ON sa.id = COALESCE(pt."subAreaId", g."subAreaId") LEFT JOIN "Area" ar ON ar.id = sa."areaId"` : sql``}
       LEFT JOIN "User" u ON u.id = v."postedBy" LEFT JOIN "CashBankVoucher" rv ON rv."reversalOfId" = v.id AND rv."isPosted" = true
       WHERE v."companyId" = ${companyId} AND v."branchId" = ${branchId} AND v."fiscalYear" = ${fiscalYear}
         AND v."voucherDate" BETWEEN ${start}::date AND ${end}::date ${idsFilter(ledgerIds, sql`g.id`)} ${subOnLine}
@@ -198,8 +232,27 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
       SELECT x.*, COALESCE(o.amount,0) + SUM(CASE WHEN x.posted THEN x.debit::numeric - x.credit::numeric ELSE 0 END)
         OVER (PARTITION BY x."generalLedgerId" ORDER BY x.d, x."voucherNumber", x."voucherId", x."lineId" ROWS UNBOUNDED PRECEDING) AS running
       FROM raw x LEFT JOIN opening o ON o.gl=x."generalLedgerId"
-    ), filtered AS (SELECT * FROM numbered x WHERE ${where})
-    SELECT *, COUNT(*) OVER()::int AS total FROM filtered ORDER BY ${rowOrder} LIMIT ${pageSize} OFFSET ${offset}
-  `) as any[];
-  res.json({ rows, summary, total: rows.length ? Number(rows[0].total) : 0, page, pageSize, fiscalYear, from: start, to: end });
+    ), filtered AS (SELECT * FROM numbered x WHERE ${where})`;
+
+  let rows: any[];
+  let groupTotals: { keys: (string | null)[]; debit: string; credit: string; count: number }[] | undefined;
+  if (!grouped) {
+    rows = await db.execute(sql`${cte} SELECT *, COUNT(*) OVER()::int AS total FROM filtered ORDER BY ${rowOrder} LIMIT ${pageSize} OFFSET ${offset}`) as any[];
+  } else {
+    // Rows are ordered by the group path first, so a group is contiguous across pages; subtotals are summed in SQL over every filtered line, never over the one page on screen.
+    const withGroups = sql`${cte}, grouped AS (SELECT x.* ${sql.join(groupBy.map((f, i) => sql`, ${dim(f).key} AS ${sql.raw(`gk${i + 1}`)}, ${dim(f).label} AS ${sql.raw(`gl${i + 1}`)}`), sql``)} FROM filtered x)`;
+    const groupOrder = sql.join(groupBy.map((_, i) => sql`${sql.raw(`gk${i + 1}`)} IS NULL, ${sql.raw(`gl${i + 1}`)}, ${sql.raw(`gk${i + 1}`)}`), sql`, `);
+    const keyCols = sql.join(groupBy.map((_, i) => sql.raw(`gk${i + 1}`)), sql`, `);
+    const [paged, totals] = await Promise.all([
+      db.execute(sql`${withGroups} SELECT *, COUNT(*) OVER()::int AS total FROM grouped ORDER BY ${groupOrder}, ${rowOrder} LIMIT ${pageSize} OFFSET ${offset}`) as Promise<any[]>,
+      db.execute(sql`${withGroups} SELECT ${keyCols}, SUM(debit::numeric)::text AS debit, SUM(credit::numeric)::text AS credit, COUNT(*)::int AS count FROM grouped GROUP BY ${keyCols}`) as Promise<any[]>,
+    ]);
+    rows = paged.map((r) => {
+      const groupKeys: (string | null)[] = [], groupLabels: string[] = [];
+      groupBy.forEach((_, i) => { groupKeys.push(r[`gk${i + 1}`] ?? null); groupLabels.push(r[`gl${i + 1}`]); delete r[`gk${i + 1}`]; delete r[`gl${i + 1}`]; });
+      return { ...r, groupKeys, groupLabels };
+    });
+    groupTotals = totals.map((t) => ({ keys: groupBy.map((_, i) => t[`gk${i + 1}`] ?? null), debit: t.debit, credit: t.credit, count: t.count }));
+  }
+  res.json({ rows, summary, total: rows.length ? Number(rows[0].total) : 0, page, pageSize, fiscalYear, from: start, to: end, groupBy, groupTotals });
 }));

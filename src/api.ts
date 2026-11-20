@@ -150,6 +150,8 @@ export interface LedgerReportRow {
   agentId: number | null; agentCode: string | null; agentName: string | null; subAreaId: number | null; subAreaCode: string | null; subAreaName: string | null; areaId: number | null; areaCode: string | null; areaName: string | null;
   subLedgerCode: string | null; subLedgerName: string | null; debit: string; credit: string;
   sourceNumber: string; sourceLabel: string; products: LedgerReportProduct[]; productIds: number[]; running: string; total: number;
+  /** Present only when the request asked for groupBy: the server's group key and label for each level, in the order asked. A null key is "Unassigned". */
+  groupKeys?: (string | null)[]; groupLabels?: string[];
 }
 export interface LedgerReportSummary {
   generalLedgerId: number; code: string; name: string;
@@ -164,10 +166,12 @@ export interface LedgerReportLookups {
   subLedgers: { id: number; code: string; name: string; generalLedgerId: number }[];
   products: { id: number; code: string; description: string }[];
 }
-export interface LedgerReportResult { rows: LedgerReportRow[]; summary: LedgerReportSummary[]; total: number; page: number; pageSize: number; fiscalYear: string; from: string; to: string }
+/** Debit/credit/line count of one deepest group over the WHOLE filtered report (all pages). Parent groups are the sum of the entries under them. */
+export interface LedgerReportGroupTotal { keys: (string | null)[]; debit: string; credit: string; count: number }
+export interface LedgerReportResult { rows: LedgerReportRow[]; summary: LedgerReportSummary[]; total: number; page: number; pageSize: number; fiscalYear: string; from: string; to: string; groupBy?: string[]; groupTotals?: LedgerReportGroupTotal[] }
 export const ledgerReportApi = {
   lookups: (companyId: number) => req<LedgerReportLookups>(`/api/ledger-report/lookups?companyId=${companyId}`),
-  get: (p: { companyId: number; branchId: number; fiscalYear: string; from: string; to: string; ledgerIds?: string; subLedgerId?: number | ""; page?: number; pageSize?: number; status?: string; voucherType?: string; productId?: number | ""; search?: string }) =>
+  get: (p: { companyId: number; branchId: number; fiscalYear: string; from: string; to: string; ledgerIds?: string; subLedgerId?: number | ""; page?: number; pageSize?: number; status?: string; voucherType?: string; productId?: number | ""; search?: string; groupBy?: string; monthBounds?: string }) =>
     req<LedgerReportResult>(`/api/ledger-report?${qstr(p)}`),
 };
 

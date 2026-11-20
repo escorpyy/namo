@@ -15,6 +15,8 @@ describe("ledger report SQL identifiers", () => {
     expect(route).toContain('COALESCE(p."agentId", g."agentId") AS "agentId"');
     expect(route).toContain('COALESCE(si."agentId", pb."agentId", pt."agentId", g."agentId") AS "agentId"');
     expect(route).toContain('COALESCE(pt."subAreaId", g."subAreaId") AS "subAreaId"');
-    expect(route).toContain('s."partyId" IS NULL AND pt."generalLedgerId" = g.id');
+    // The party is found by one indexed lookup; an OR inside the join condition would force a scan of Party for every line.
+    expect(route).toContain('pt.id = COALESCE(s."partyId", (SELECT p0.id FROM "Party" p0 WHERE p0."generalLedgerId" = g.id))');
+    expect(route).not.toContain('OR (s."partyId" IS NULL');
   });
 });

@@ -5,7 +5,7 @@ import { Combobox, type ComboOption } from "../../components/Combobox";
 import { DateInput } from "../../components/DateInput";
 import { adToBs } from "../../lib/nepaliDate";
 import { amount, balanceOf, balanceText, buildBlocks, csvCell, fmtMinor, minor, money, monthsOf, pickInitialMonth, todayLocal, voucherRef, type LedgerBlock } from "../../lib/ledgerReportLayout";
-import { buildLedgerGroupTree, firstLedgerGroupRow, LEDGER_GROUP_FIELDS, type LedgerGroupFieldId, type LedgerGroupNode } from "../../lib/ledgerReportGrouping";
+import { buildLedgerGroupTree, buildServerGroupTree, firstLedgerGroupRow, groupTotalOf, LEDGER_GROUP_FIELDS, type LedgerGroupFieldId, type LedgerGroupNode } from "../../lib/ledgerReportGrouping";
 import type { StatusInfo } from "../../types";
 
 type Ledger = LedgerReportLookups["ledgers"][number];
@@ -131,6 +131,10 @@ export default function LedgerReportScreen(p: {
     writeRemembered(p.companyId, next);
   };
 
+  // Group By is computed by the server (exact subtotals over every page); the choice is sent with each request and a change restarts at page 1.
+  const groupParams = useMemo(() => groupByFields.length ? { groupBy: groupByFields.join(","), monthBounds: groupByFields.includes("month") ? months.map((m) => m.from).join(",") : undefined } : {}, [groupByFields, months]);
+  useEffect(() => { setPage(1); setExpanded(null); }, [groupByFields]);
+  const monthLabel = useCallback((key: string) => months.find((m) => m.from === key)?.label, [months]);
   const load = useCallback(() => {
     if (!ready) return;
     if (!query.from || !query.to || query.from > query.to) { setError("Choose a valid date range."); return; }
@@ -139,11 +143,11 @@ export default function LedgerReportScreen(p: {
     if (resultScope.current !== scopeKey) setResult(null); // another ledger or filter: do not show the old rows; a new period or page keeps them, dimmed, until the new ones arrive
     ledgerReportApi.get({ companyId: p.companyId, branchId: p.branchId, fiscalYear: p.fyCode, from: query.from, to: query.to,
       ledgerIds: query.ledgerIds.length ? query.ledgerIds.join(",") : undefined, subLedgerId: query.subLedgerId, productId: query.productId,
-      voucherType: query.voucherType, status: query.status, search: query.search.trim(), page, pageSize: PAGE_SIZE })
+      voucherType: query.voucherType, status: query.status, search: query.search.trim(), page, pageSize: PAGE_SIZE, ...groupParams })
       .then((data) => { if (current === requestNo.current) { resultScope.current = scopeKey; setResult(data); } })
       .catch((e: Error) => { if (current === requestNo.current) setError(e.message || "Could not load the ledger."); })
       .finally(() => { if (current === requestNo.current) setLoading(false); });
-  }, [p.companyId, p.branchId, p.fyCode, query, page, ready, scopeKey]);
+  }, [p.companyId, p.branchId, p.fyCode, query, page, ready, scopeKey, groupParams]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => () => { requestNo.current += 1; }, []);
   useEffect(() => {
@@ -214,13 +218,15 @@ export default function LedgerReportScreen(p: {
   const availableGroupFields = useMemo(() => viewMode === "summary" ? LEDGER_GROUP_FIELDS.filter((f) => f.summary) : LEDGER_GROUP_FIELDS, [viewMode]);
   const activeGroupByFields = useMemo(() => groupByFields.filter((field) => availableGroupFields.some((f) => f.id === field)), [groupByFields, availableGroupFields]);
   const summaryGroupTree = useMemo(() => buildLedgerGroupTree(summaryRows, activeGroupByFields, months), [summaryRows, activeGroupByFields, months]);
-  const lineGroupTree = useMemo(() => buildLedgerGroupTree(rows, activeGroupByFields, months), [rows, activeGroupByFields, months]);
+  // Old rows stay on screen (dimmed) while a new request loads; only treat the rows as grouped once they match the chosen fields.
+  const lineGrouped = groupByFields.length > 0 && (result?.groupBy ?? []).join(",") === groupByFields.join(",");
+  const lineGroupTree = useMemo(() => lineGrouped ? buildServerGroupTree(rows, groupByFields, monthLabel) : [], [lineGrouped, rows, groupByFields, monthLabel]);
   useEffect(() => {
-    const firstRow = activeGroupByFields.length ? firstLedgerGroupRow(lineGroupTree) : rows[0];
+    const firstRow = lineGrouped ? firstLedgerGroupRow(lineGroupTree) : rows[0];
     setSelectedRowKey(firstRow ? rowKey(firstRow) : null);
     const firstSummaryRow = activeGroupByFields.length ? firstLedgerGroupRow(summaryGroupTree) : summaryRows[0];
     setSelectedSummaryLedgerId(firstSummaryRow?.generalLedgerId ?? null);
-  }, [result, activeGroupByFields, lineGroupTree, summaryGroupTree, rows, summaryRows]);
+  }, [result, activeGroupByFields, lineGrouped, lineGroupTree, summaryGroupTree, rows, summaryRows]);
   const setGroupField = (field: LedgerGroupFieldId, checked: boolean) => setGroupByFields((old) => {
     if (checked) return old.includes(field) || old.length >= 3 ? old : [...old, field];
     return old.filter((x) => x !== field);
@@ -233,6 +239,7 @@ export default function LedgerReportScreen(p: {
   const rowSubtotal = (groupRows: LedgerReportRow[]) => groupRows.reduce((total, row) => {
     total.debit += minor(row.debit); total.credit += minor(row.credit); return total;
   }, { debit: 0n, credit: 0n });
+  const lineSubtotal = (node: LedgerGroupNode<LedgerReportRow>) => groupTotalOf(node, result?.groupTotals) ?? { ...rowSubtotal(node.rows), count: node.rows.length };
   const summarySubtotal = (groupRows: LedgerReportResult["summary"]) => groupRows.reduce((total, row) => {
     const opening = balanceSides(row.opening), closing = balanceSides(row.closing);
     total.openingDebit += opening.debit; total.openingCredit += opening.credit;
@@ -275,16 +282,16 @@ export default function LedgerReportScreen(p: {
       for (let pg = 1; pg <= 100; pg++) {
         const r = await ledgerReportApi.get({ companyId: p.companyId, branchId: p.branchId, fiscalYear: p.fyCode, from: query.from, to: query.to,
           ledgerIds: query.ledgerIds.length ? query.ledgerIds.join(",") : undefined, subLedgerId: query.subLedgerId, productId: query.productId,
-          voucherType: query.voucherType, status: query.status, search: query.search.trim(), page: pg, pageSize: 200 });
+          voucherType: query.voucherType, status: query.status, search: query.search.trim(), page: pg, pageSize: 200, ...groupParams });
         all.push(...r.rows);
         if (!r.rows.length || all.length >= r.total) break;
       }
-      const head = ["Date (AD)", "Date (BS)", "Ledger", "Sub-ledger", "Voucher type", "Voucher number", "Source", "Narration", "Remarks", "Debit", "Credit", "Running balance", "Status", "Posted at", "Posted by", "Products"];
+      const head = ["Date (AD)", "Date (BS)", "Ledger", "Sub-ledger", "Voucher type", "Voucher number", "Source", "Narration", "Remarks", "Debit", "Credit", "Running balance", "Status", "Posted at", "Posted by", "Products", ...(groupByFields.length ? ["Group"] : [])];
       const body = all.map((r) => {
         const d = r.d.slice(0, 10);
         const prods = r.products.map((x) => `${x.code} ${x.description} ${x.qty} ${x.unit}${x.altQty ? `; alt ${x.altQty} ${x.altUnit}` : ""}${x.location ? `; ${x.location}` : ""}${x.batch ? `; batch ${x.batch}` : ""}${x.expiry ? `; expiry ${x.expiry}` : ""}`).join("; ");
         return [csvCell(d), csvCell(adToBs(d) ?? ""), csvCell(`${r.ledgerCode} ${r.ledgerName}`), csvCell(r.subLedgerName), csvCell(r.voucherLabel), csvCell(r.voucherNumber), csvCell(`${r.sourceLabel} ${r.sourceNumber}`), csvCell(r.narration), csvCell(r.remarks),
-          csvCell(r.debit, "number"), csvCell(r.credit, "number"), csvCell(r.running, "number"), csvCell(r.posted ? "Posted" : "Draft"), csvCell(r.postedAt), csvCell(r.postedByName), csvCell(prods)].join(",");
+          csvCell(r.debit, "number"), csvCell(r.credit, "number"), csvCell(r.running, "number"), csvCell(r.posted ? "Posted" : "Draft"), csvCell(r.postedAt), csvCell(r.postedByName), csvCell(prods), ...(groupByFields.length ? [csvCell((r.groupLabels ?? []).map((l, i) => (groupByFields[i] === "month" ? monthLabel(r.groupKeys?.[i] ?? "") : undefined) ?? l).join(" / "))] : [])].join(",");
       });
       const csv = [head.map((h) => csvCell(h)).join(","), ...body].join("\r\n");
       const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }), a = document.createElement("a");
@@ -375,14 +382,14 @@ export default function LedgerReportScreen(p: {
     return [<section key={key} className="space-y-2 rounded-lg border border-cobalt-100 bg-cobalt-50/40 p-2"><h3 className="text-[12px] font-semibold text-slate-700">{LEDGER_GROUP_FIELDS.find((f) => f.id === node.field)?.label}: {node.label}</h3>{body}<div className="grid grid-cols-3 gap-1 border-t border-slate-200 pt-1 text-[9px] text-slate-500">{["Opening Dr", "Opening Cr", "Period Dr", "Period Cr", "Closing Dr", "Closing Cr"].map((label, at) => <div key={label}>{label}: <b className="text-slate-700">{values[at] ? fmtMinor(values[at]) : "—"}</b></div>)}</div></section>];
   });
   const renderLineGroupRows = (nodes: LedgerGroupNode<LedgerReportRow>[], prefix = ""): React.ReactNode[] => nodes.flatMap((node, i) => {
-    const key = `${prefix}${node.field}-${i}-${node.label}`, totals = rowSubtotal(node.rows);
+    const key = `${prefix}${node.field}-${i}-${node.label}`, totals = lineSubtotal(node);
     const header = <tr key={`${key}-header`} className="bg-cobalt-50/70"><td colSpan={cols} className={`${td} font-semibold text-slate-700`} style={{ paddingLeft: `${12 + node.depth * 16}px` }}>{LEDGER_GROUP_FIELDS.find((f) => f.id === node.field)?.label}: {node.label}<span className="ml-2 text-[10px] font-normal text-slate-500">{node.rows.length} rows on this page</span></td></tr>;
     const body = node.children.length ? renderLineGroupRows(node.children, `${key}/`) : node.rows.map(lineRow);
-    const subtotal = <tr key={`${key}-subtotal`} className="bg-slate-50 font-semibold text-slate-800"><td colSpan={cols - 3} className={`${td} border-t border-slate-200`} style={{ paddingLeft: `${18 + node.depth * 16}px` }}>Page subtotal · {node.rows.length} rows</td><td className={`${td} border-t border-slate-200 text-right tabular-nums`}>{fmtMinor(totals.debit)}</td><td className={`${td} border-t border-slate-200 text-right tabular-nums`}>{fmtMinor(totals.credit)}</td><td className={`${td} border-t border-slate-200 text-right tabular-nums`}>{balanceOf(totals.debit - totals.credit)}</td></tr>;
+    const subtotal = <tr key={`${key}-subtotal`} className="bg-slate-50 font-semibold text-slate-800"><td colSpan={cols - 3} className={`${td} border-t border-slate-200`} style={{ paddingLeft: `${18 + node.depth * 16}px` }}>Subtotal · {totals.count} rows{totals.count > node.rows.length ? ` (${node.rows.length} on this page)` : ""}</td><td className={`${td} border-t border-slate-200 text-right tabular-nums`}>{fmtMinor(totals.debit)}</td><td className={`${td} border-t border-slate-200 text-right tabular-nums`}>{fmtMinor(totals.credit)}</td><td className={`${td} border-t border-slate-200 text-right tabular-nums`}>{balanceOf(totals.debit - totals.credit)}</td></tr>;
     return [header, ...body, subtotal];
   });
   const renderLineMobileGroups = (nodes: LedgerGroupNode<LedgerReportRow>[], prefix = ""): React.ReactNode[] => nodes.flatMap((node, i) => {
-    const key = `${prefix}${node.field}-${i}-${node.label}`, totals = rowSubtotal(node.rows), body = node.children.length ? renderLineMobileGroups(node.children, `${key}/`) : node.rows.map((r) => {
+    const key = `${prefix}${node.field}-${i}-${node.label}`, totals = lineSubtotal(node), body = node.children.length ? renderLineMobileGroups(node.children, `${key}/`) : node.rows.map((r) => {
       const rowKeyValue = rowKey(r), tag = statusTag(r), open = viewMode === "details" || expanded === rowKeyValue, selected = selectedRowKey === rowKeyValue;
       return <article key={rowKeyValue} aria-selected={selected} className={`overflow-hidden rounded-lg border ${selected ? "border-cobalt-500 bg-cobalt-50 ring-1 ring-cobalt-300" : "border-slate-200 bg-white"}`}>
         <button data-row data-row-key={rowKeyValue} type="button" className="block w-full p-2.5 text-left" onFocus={() => setSelectedRowKey(rowKeyValue)} onClick={() => { setSelectedRowKey(rowKeyValue); toggleRow(rowKeyValue); }} onKeyDown={(e) => onRowKey(e, rowKeyValue)} aria-expanded={open}>
@@ -393,7 +400,7 @@ export default function LedgerReportScreen(p: {
         {open && <div className="border-t border-slate-200 bg-slate-50 p-3"><RowDetail r={r} /></div>}
       </article>;
     });
-    return [<section key={key} className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-2"><h3 className="text-[12px] font-semibold text-slate-700">{LEDGER_GROUP_FIELDS.find((f) => f.id === node.field)?.label}: {node.label}<span className="ml-2 text-[10px] font-normal text-slate-500">{node.rows.length} rows on this page</span></h3>{body}<div className="flex justify-between border-t border-slate-200 pt-1 text-[10px] text-slate-500"><span>Page subtotal</span><span className="tabular-nums">Dr {amount(fmtMinor(totals.debit))} · Cr {amount(fmtMinor(totals.credit))} · Net {balanceOf(totals.debit - totals.credit)}</span></div></section>];
+    return [<section key={key} className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-2"><h3 className="text-[12px] font-semibold text-slate-700">{LEDGER_GROUP_FIELDS.find((f) => f.id === node.field)?.label}: {node.label}<span className="ml-2 text-[10px] font-normal text-slate-500">{totals.count} rows{totals.count > node.rows.length ? ` · ${node.rows.length} on this page` : ""}</span></h3>{body}<div className="flex justify-between border-t border-slate-200 pt-1 text-[10px] text-slate-500"><span>Subtotal</span><span className="tabular-nums">Dr {amount(fmtMinor(totals.debit))} · Cr {amount(fmtMinor(totals.credit))} · Net {balanceOf(totals.debit - totals.credit)}</span></div></section>];
   });
   const edgeTitle = "Posted entries of this ledger for the whole period, whatever filters are set";
 
@@ -528,12 +535,12 @@ export default function LedgerReportScreen(p: {
               </div>
             ) : result ? (
               <div className={loading ? "opacity-60 transition-opacity" : "transition-opacity"}>
-                {activeGroupByFields.length > 0 && <p className="border-b border-amber-100 bg-amber-50/70 px-3 py-1.5 text-[10px] text-amber-900">Grouped rows are rearranged by the selected hierarchy. Subtotals cover this page only; opening/closing balances remain in Summary, and each line’s running balance remains per ledger.</p>}
+                {lineGrouped && <p className="border-b border-sky-100 bg-sky-50/70 px-3 py-1.5 text-[10px] text-sky-900">Grouped by the selected hierarchy. Subtotals cover every line in the report, not just this page, and a group can continue on the next page. Opening/closing balances remain in Summary; each line’s running balance remains per ledger.</p>}
                 <div className="hidden md:block">
                   <table className="lg-ledger w-full min-w-[760px] text-[12px]">
                     <thead><tr><th className={`${th} w-6 pr-0`} /><th className={`${th} w-[92px]`}>Date</th><th className={th}>Particulars</th>{showSub && <th className={th}>Sub-ledger</th>}<th className={`${th} w-[120px] text-right`}>Debit</th><th className={`${th} w-[120px] text-right`}>Credit</th><th className={`${th} w-[150px] text-right`}>Balance</th></tr></thead>
                     <tbody>
-                      {activeGroupByFields.length ? renderLineGroupRows(lineGroupTree) : blocks.map((b) => <Fragment key={b.key}>
+                      {lineGrouped ? renderLineGroupRows(lineGroupTree) : blocks.map((b) => <Fragment key={b.key}>
                         {!single && <tr><td colSpan={cols} className="border-b border-slate-200 bg-slate-100 px-3 py-1 text-[12px] font-semibold text-slate-700"><span className="mr-2 font-mono text-[11px] font-normal text-slate-500">{b.code}</span>{b.name}</td></tr>}
                         {b.start && <EdgeRow label={b.start.label} balance={b.start.balance} cols={cols} />}
                         {b.rows.length === 0 && <tr><td colSpan={cols} className="px-3 py-4 text-center text-slate-500">No transactions in this period.</td></tr>}
@@ -544,7 +551,7 @@ export default function LedgerReportScreen(p: {
                   </table>
                 </div>
                 <div className="space-y-2 p-2 md:hidden">
-                  {activeGroupByFields.length ? renderLineMobileGroups(lineGroupTree) : blocks.map((b) => <section key={b.key} className="space-y-1.5">
+                  {lineGrouped ? renderLineMobileGroups(lineGroupTree) : blocks.map((b) => <section key={b.key} className="space-y-1.5">
                     {!single && <h2 className="px-1 pt-1 text-[12px] font-semibold text-slate-700"><span className="mr-1.5 font-mono text-[11px] font-normal text-slate-500">{b.code}</span>{b.name}</h2>}
                     {b.start && <div className="flex justify-between px-1 text-[12px] italic text-slate-600"><span>{b.start.label}</span><span className="tabular-nums">{balanceOf(b.start.balance)}</span></div>}
                     {b.rows.length === 0 && <p className="px-1 py-2 text-[12px] text-slate-500">No transactions in this period.</p>}
