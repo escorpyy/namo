@@ -98,7 +98,7 @@ export default function LedgerReportScreen(p: {
   const [dateRangeOpen, setDateRangeOpen] = useState(false);
   const [dateDraft, setDateDraft] = useState({ from: query.from, to: query.to });
   const [dateRangeError, setDateRangeError] = useState("");
-  const requestNo = useRef(0), resultScope = useRef(""), keyHandler = useRef<(e: KeyboardEvent) => void>();
+  const requestNo = useRef(0), focusAfterLoad = useRef(false), resultScope = useRef(""), keyHandler = useRef<(e: KeyboardEvent) => void>();
   const barRef = useRef<HTMLDivElement>(null), scrollRef = useRef<HTMLDivElement>(null), filterButtonRef = useRef<HTMLButtonElement>(null), groupByButtonRef = useRef<HTMLButtonElement>(null), panelRef = useRef<HTMLDivElement>(null);
   const presetPeriodRef = useRef({ from: query.from, to: query.to });
 
@@ -139,6 +139,7 @@ export default function LedgerReportScreen(p: {
     if (!ready) return;
     if (!query.from || !query.to || query.from > query.to) { setError("Choose a valid date range."); return; }
     const current = ++requestNo.current;
+    focusAfterLoad.current = true;
     setLoading(true); setError("");
     if (resultScope.current !== scopeKey) setResult(null); // another ledger or filter: do not show the old rows; a new period or page keeps them, dimmed, until the new ones arrive
     ledgerReportApi.get({ companyId: p.companyId, branchId: p.branchId, fiscalYear: p.fyCode, from: query.from, to: query.to,
@@ -325,6 +326,25 @@ export default function LedgerReportScreen(p: {
     setViewMode("summary");
   };
 
+  // Keyboard entry into the lines: the first visible line (Summary: the first ledger), which selects itself on focus.
+  const focusFirstLine = () => {
+    const root = scrollRef.current;
+    if (!root) return;
+    const visible = (el: Element) => el.getClientRects().length > 0;
+    const first = viewMode === "summary"
+      ? Array.from(root.querySelectorAll<HTMLElement>("button[data-summary-ledger]")).find(visible)
+      : Array.from(root.querySelectorAll<HTMLElement>("[data-row]")).find(visible);
+    first?.focus();
+  };
+  // After every refresh (ledger, period, page, filters) the focus lands on the first line, so ↑ ↓ work straight away.
+  useEffect(() => {
+    if (loading || !focusAfterLoad.current) return;
+    focusAfterLoad.current = false;
+    if (filtersOpen || dateRangeOpen || groupByOpen) return;
+    focusFirstLine();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, result]);
+
   keyHandler.current = (e) => {
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     if (e.key === "Escape") {
@@ -333,6 +353,8 @@ export default function LedgerReportScreen(p: {
       else if (drillOrigin.current && viewMode !== "summary") { e.preventDefault(); returnToSummary(); }
       return;
     }
+    // ↑ ↓ with nothing focused (or only the scroll area) enter the lines instead of doing nothing.
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !filtersOpen && !dateRangeOpen && !groupByOpen && (e.target === document.body || e.target === scrollRef.current)) { e.preventDefault(); focusFirstLine(); return; }
     if (e.key === "F2") { e.preventDefault(); if (filtersOpen) closeFilters(); else openFilters(); }
     if (e.key === "F4" && !filtersOpen) { e.preventDefault(); barRef.current?.querySelector<HTMLInputElement>('[data-field="ledger-picker"]')?.focus(); }
   };
