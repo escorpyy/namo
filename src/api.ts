@@ -144,10 +144,21 @@ export interface LedgerReportRow {
   lineId: number; voucherId: number; generalLedgerId: number; subLedgerId: number | null; d: string; voucherNumber: string;
   kind: "JOURNAL" | "CASH_BANK"; voucherLabel: string; posted: boolean; postedAt: string | null; postedBy: number | null; postedByName: string | null;
   remarks: string | null; narration: string | null; reference: string | null; reversalOfId: number | null; hasReversal: boolean;
-  ledgerCode: string; ledgerName: string; subLedgerCode: string | null; subLedgerName: string | null; debit: string; credit: string;
+  ledgerCode: string; ledgerName: string;
+  accountSubGroupId: number; accountSubGroupCode: string; accountSubGroupName: string;
+  accountGroupId: number; accountGroupCode: string; accountGroupName: string;
+  agentId: number | null; agentCode: string | null; agentName: string | null; subAreaId: number | null; subAreaCode: string | null; subAreaName: string | null; areaId: number | null; areaCode: string | null; areaName: string | null;
+  subLedgerCode: string | null; subLedgerName: string | null; debit: string; credit: string;
   sourceNumber: string; sourceLabel: string; products: LedgerReportProduct[]; productIds: number[]; running: string; total: number;
 }
-export interface LedgerReportSummary { generalLedgerId: number; code: string; name: string; opening: string; debit: string; credit: string; closing: string }
+export interface LedgerReportSummary {
+  generalLedgerId: number; code: string; name: string;
+  accountSubGroupId: number; accountSubGroupCode: string; accountSubGroupName: string;
+  accountGroupId: number; accountGroupCode: string; accountGroupName: string;
+  agentId: number | null; agentCode: string | null; agentName: string | null;
+  subAreaId: number | null; subAreaCode: string | null; subAreaName: string | null; areaId: number | null; areaCode: string | null; areaName: string | null;
+  opening: string; debit: string; credit: string; closing: string;
+}
 export interface LedgerReportLookups {
   ledgers: { id: number; code: string; name: string; type: string; requiresSubLedger: boolean; isActive: boolean }[];
   subLedgers: { id: number; code: string; name: string; generalLedgerId: number }[];
