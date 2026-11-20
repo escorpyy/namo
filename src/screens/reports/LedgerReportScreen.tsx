@@ -1,10 +1,11 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { ArrowLeft, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Filter, RefreshCw, Search, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Filter, ListTree, RefreshCw, Search, X } from "lucide-react";
 import { ledgerReportApi, type LedgerReportLookups, type LedgerReportResult, type LedgerReportRow } from "../../api";
 import { Combobox, type ComboOption } from "../../components/Combobox";
 import { DateInput } from "../../components/DateInput";
 import { adToBs } from "../../lib/nepaliDate";
 import { amount, balanceOf, balanceText, buildBlocks, csvCell, fmtMinor, minor, money, monthsOf, pickInitialMonth, todayLocal, voucherRef, type LedgerBlock } from "../../lib/ledgerReportLayout";
+import { buildLedgerGroupTree, firstLedgerGroupRow, LEDGER_GROUP_FIELDS, type LedgerGroupFieldId, type LedgerGroupNode } from "../../lib/ledgerReportGrouping";
 import type { StatusInfo } from "../../types";
 
 type Ledger = LedgerReportLookups["ledgers"][number];
@@ -89,6 +90,8 @@ export default function LedgerReportScreen(p: {
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [selectedSummaryLedgerId, setSelectedSummaryLedgerId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<"summary" | "lines" | "details">("lines");
+  const [groupByFields, setGroupByFields] = useState<LedgerGroupFieldId[]>([]);
+  const [groupByOpen, setGroupByOpen] = useState(false);
   const drillOrigin = useRef<Pick<Query, "ledgerIds" | "allLedgers" | "subLedgerId"> | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [ledgerFilter, setLedgerFilter] = useState("");
@@ -96,7 +99,7 @@ export default function LedgerReportScreen(p: {
   const [dateDraft, setDateDraft] = useState({ from: query.from, to: query.to });
   const [dateRangeError, setDateRangeError] = useState("");
   const requestNo = useRef(0), resultScope = useRef(""), keyHandler = useRef<(e: KeyboardEvent) => void>();
-  const barRef = useRef<HTMLDivElement>(null), scrollRef = useRef<HTMLDivElement>(null), filterButtonRef = useRef<HTMLButtonElement>(null), panelRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLDivElement>(null), scrollRef = useRef<HTMLDivElement>(null), filterButtonRef = useRef<HTMLButtonElement>(null), groupByButtonRef = useRef<HTMLButtonElement>(null), panelRef = useRef<HTMLDivElement>(null);
   const presetPeriodRef = useRef({ from: query.from, to: query.to });
 
   const ready = query.allLedgers || query.ledgerIds.length > 0;
@@ -143,11 +146,6 @@ export default function LedgerReportScreen(p: {
   }, [p.companyId, p.branchId, p.fyCode, query, page, ready, scopeKey]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => () => { requestNo.current += 1; }, []);
-  useEffect(() => {
-    setSelectedRowKey(result?.rows[0] ? rowKey(result.rows[0]) : null);
-    setSelectedSummaryLedgerId(result?.summary[0]?.generalLedgerId ?? null);
-  }, [result]);
-
   useEffect(() => {
     p.setStatus({ mode: "view", count: result?.total ?? 0, shown: result?.rows.length ?? 0,
       message: error || (loading ? "Running ledger query…" : result ? "Ledger ready" : ready ? "Loading…" : "Choose a ledger"), kind: error ? "err" : "info",
@@ -213,6 +211,35 @@ export default function LedgerReportScreen(p: {
   const cols = showSub ? 7 : 6;
   const summary = single && !query.subLedgerId ? result?.summary.find((s) => s.generalLedgerId === query.ledgerIds[0]) : undefined;
   const summaryRows = result?.summary ?? [];
+  const availableGroupFields = useMemo(() => viewMode === "summary" ? LEDGER_GROUP_FIELDS.filter((f) => f.summary) : LEDGER_GROUP_FIELDS, [viewMode]);
+  const activeGroupByFields = useMemo(() => groupByFields.filter((field) => availableGroupFields.some((f) => f.id === field)), [groupByFields, availableGroupFields]);
+  const summaryGroupTree = useMemo(() => buildLedgerGroupTree(summaryRows, activeGroupByFields, months), [summaryRows, activeGroupByFields, months]);
+  const lineGroupTree = useMemo(() => buildLedgerGroupTree(rows, activeGroupByFields, months), [rows, activeGroupByFields, months]);
+  useEffect(() => {
+    const firstRow = activeGroupByFields.length ? firstLedgerGroupRow(lineGroupTree) : rows[0];
+    setSelectedRowKey(firstRow ? rowKey(firstRow) : null);
+    const firstSummaryRow = activeGroupByFields.length ? firstLedgerGroupRow(summaryGroupTree) : summaryRows[0];
+    setSelectedSummaryLedgerId(firstSummaryRow?.generalLedgerId ?? null);
+  }, [result, activeGroupByFields, lineGroupTree, summaryGroupTree, rows, summaryRows]);
+  const setGroupField = (field: LedgerGroupFieldId, checked: boolean) => setGroupByFields((old) => {
+    if (checked) return old.includes(field) || old.length >= 3 ? old : [...old, field];
+    return old.filter((x) => x !== field);
+  });
+  const moveGroupField = (field: LedgerGroupFieldId, delta: number) => setGroupByFields((old) => {
+    const index = old.indexOf(field), next = index + delta;
+    if (index < 0 || next < 0 || next >= old.length) return old;
+    const result = [...old]; [result[index], result[next]] = [result[next], result[index]]; return result;
+  });
+  const rowSubtotal = (groupRows: LedgerReportRow[]) => groupRows.reduce((total, row) => {
+    total.debit += minor(row.debit); total.credit += minor(row.credit); return total;
+  }, { debit: 0n, credit: 0n });
+  const summarySubtotal = (groupRows: LedgerReportResult["summary"]) => groupRows.reduce((total, row) => {
+    const opening = balanceSides(row.opening), closing = balanceSides(row.closing);
+    total.openingDebit += opening.debit; total.openingCredit += opening.credit;
+    total.debit += minor(row.debit); total.credit += minor(row.credit);
+    total.closingDebit += closing.debit; total.closingCredit += closing.credit;
+    return total;
+  }, { openingDebit: 0n, openingCredit: 0n, debit: 0n, credit: 0n, closingDebit: 0n, closingCredit: 0n });
   const summaryTotals = useMemo(() => summaryRows.reduce((t, s) => {
     const opening = balanceSides(s.opening), closing = balanceSides(s.closing);
     t.openingDebit += opening.debit; t.openingCredit += opening.credit;
@@ -225,7 +252,7 @@ export default function LedgerReportScreen(p: {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedRowKey(key); toggleRow(key); }
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
-      const all = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>("[data-row]") ?? []), at = all.indexOf(e.currentTarget);
+      const all = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>("[data-row]") ?? []).filter((row) => row.getClientRects().length > 0), at = all.indexOf(e.currentTarget);
       const next = all[Math.max(0, Math.min(all.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)))];
       if (next) { if (next.dataset.rowKey) setSelectedRowKey(next.dataset.rowKey); next.focus(); }
     }
@@ -295,6 +322,7 @@ export default function LedgerReportScreen(p: {
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     if (e.key === "Escape") {
       if (dateRangeOpen) { e.preventDefault(); setDateRangeOpen(false); setDateRangeError(""); }
+      else if (groupByOpen) { e.preventDefault(); setGroupByOpen(false); groupByButtonRef.current?.focus(); }
       else if (drillOrigin.current && viewMode !== "summary") { e.preventDefault(); returnToSummary(); }
       return;
     }
@@ -320,6 +348,53 @@ export default function LedgerReportScreen(p: {
       </Fragment>
     );
   };
+  const summaryLedgerRow = (s: LedgerReportResult["summary"][number]) => {
+    const opening = balanceSides(s.opening), closing = balanceSides(s.closing), selected = selectedSummaryLedgerId === s.generalLedgerId;
+    return <tr key={s.generalLedgerId} data-summary-row data-ledger-id={s.generalLedgerId} data-selected={selected} aria-selected={selected} className={selected ? "bg-cobalt-100/80 shadow-[inset_3px_0_0_#3154d4]" : ""} onClick={() => setSelectedSummaryLedgerId(s.generalLedgerId)}>
+      <td className={`${td} whitespace-nowrap`}><button data-summary-ledger type="button" className="text-left hover:text-cobalt-800 hover:underline focus-visible:rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-600" onFocus={() => setSelectedSummaryLedgerId(s.generalLedgerId)} onKeyDown={onSummaryKey} onClick={() => drillIntoLedger(s.generalLedgerId)} aria-label={`View lines for ${s.code} ${s.name}`}><span className="mr-2 font-mono text-[11px] text-slate-500">{s.code}</span><span className="font-medium text-slate-800">{s.name}</span></button></td>
+      {[opening.debit, opening.credit, minor(s.debit), minor(s.credit), closing.debit, closing.credit].map((v, i) => <td key={i} className={`${td} whitespace-nowrap text-right tabular-nums`}>{v ? fmtMinor(v) : "—"}</td>)}
+    </tr>;
+  };
+  const renderSummaryGroupRows = (nodes: LedgerGroupNode<LedgerReportResult["summary"][number]>[], prefix = ""): React.ReactNode[] => nodes.flatMap((node, i) => {
+    const key = `${prefix}${node.field}-${i}-${node.label}`, totals = summarySubtotal(node.rows);
+    const groupHeader = <tr key={`${key}-header`} className="bg-cobalt-50/70 text-slate-700"><td colSpan={7} className={`${td} font-semibold`} style={{ paddingLeft: `${12 + node.depth * 16}px` }}>{LEDGER_GROUP_FIELDS.find((f) => f.id === node.field)?.label}: {node.label}<span className="ml-2 text-[10px] font-normal text-slate-500">{node.rows.length} ledgers</span></td></tr>;
+    const subtotal = <tr key={`${key}-subtotal`} className="bg-slate-50 font-semibold text-slate-800"><td className={`${td} border-t border-slate-200`} style={{ paddingLeft: `${18 + node.depth * 16}px` }}>Subtotal</td>{[totals.openingDebit, totals.openingCredit, totals.debit, totals.credit, totals.closingDebit, totals.closingCredit].map((value, col) => <td key={col} className={`${td} border-t border-slate-200 whitespace-nowrap text-right tabular-nums`}>{value ? fmtMinor(value) : "—"}</td>)}</tr>;
+    const body = node.children.length ? renderSummaryGroupRows(node.children, `${key}/`) : node.rows.map(summaryLedgerRow);
+    return [groupHeader, ...body, subtotal];
+  });
+  const renderSummaryMobileGroups = (nodes: LedgerGroupNode<LedgerReportResult["summary"][number]>[], prefix = ""): React.ReactNode[] => nodes.flatMap((node, i) => {
+    const key = `${prefix}${node.field}-${i}-${node.label}`, totals = summarySubtotal(node.rows);
+    const values = [totals.openingDebit, totals.openingCredit, totals.debit, totals.credit, totals.closingDebit, totals.closingCredit];
+    const body = node.children.length ? renderSummaryMobileGroups(node.children, `${key}/`) : node.rows.map((s) => {
+      const opening = balanceSides(s.opening), closing = balanceSides(s.closing), amounts = [opening.debit, opening.credit, minor(s.debit), minor(s.credit), closing.debit, closing.credit], selected = selectedSummaryLedgerId === s.generalLedgerId;
+      return <article key={s.generalLedgerId} data-summary-row data-ledger-id={s.generalLedgerId} data-selected={selected} aria-selected={selected} className={`rounded-lg border p-2.5 ${selected ? "border-cobalt-500 bg-cobalt-50 ring-1 ring-cobalt-300" : "border-slate-200 bg-white"}`}>
+        <h2 className="truncate text-[12px] font-semibold text-slate-800"><button data-summary-ledger type="button" className="text-left hover:text-cobalt-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-600" onFocus={() => setSelectedSummaryLedgerId(s.generalLedgerId)} onKeyDown={onSummaryKey} onClick={() => drillIntoLedger(s.generalLedgerId)} aria-label={`View lines for ${s.code} ${s.name}`}><span className="mr-1.5 font-mono text-[11px] font-normal text-slate-500">{s.code}</span>{s.name}</button></h2>
+        <div className="mt-2 grid grid-cols-3 gap-x-2 gap-y-1.5 border-t border-slate-100 pt-2 text-[11px]">{["Opening Dr", "Opening Cr", "Period Dr", "Period Cr", "Closing Dr", "Closing Cr"].map((label, at) => <div key={label}><div className="text-slate-400">{label}</div><b className="tabular-nums">{amounts[at] ? fmtMinor(amounts[at]) : "—"}</b></div>)}</div>
+      </article>;
+    });
+    return [<section key={key} className="space-y-2 rounded-lg border border-cobalt-100 bg-cobalt-50/40 p-2"><h3 className="text-[12px] font-semibold text-slate-700">{LEDGER_GROUP_FIELDS.find((f) => f.id === node.field)?.label}: {node.label}</h3>{body}<div className="grid grid-cols-3 gap-1 border-t border-slate-200 pt-1 text-[9px] text-slate-500">{["Opening Dr", "Opening Cr", "Period Dr", "Period Cr", "Closing Dr", "Closing Cr"].map((label, at) => <div key={label}>{label}: <b className="text-slate-700">{values[at] ? fmtMinor(values[at]) : "—"}</b></div>)}</div></section>];
+  });
+  const renderLineGroupRows = (nodes: LedgerGroupNode<LedgerReportRow>[], prefix = ""): React.ReactNode[] => nodes.flatMap((node, i) => {
+    const key = `${prefix}${node.field}-${i}-${node.label}`, totals = rowSubtotal(node.rows);
+    const header = <tr key={`${key}-header`} className="bg-cobalt-50/70"><td colSpan={cols} className={`${td} font-semibold text-slate-700`} style={{ paddingLeft: `${12 + node.depth * 16}px` }}>{LEDGER_GROUP_FIELDS.find((f) => f.id === node.field)?.label}: {node.label}<span className="ml-2 text-[10px] font-normal text-slate-500">{node.rows.length} rows on this page</span></td></tr>;
+    const body = node.children.length ? renderLineGroupRows(node.children, `${key}/`) : node.rows.map(lineRow);
+    const subtotal = <tr key={`${key}-subtotal`} className="bg-slate-50 font-semibold text-slate-800"><td colSpan={cols - 3} className={`${td} border-t border-slate-200`} style={{ paddingLeft: `${18 + node.depth * 16}px` }}>Page subtotal · {node.rows.length} rows</td><td className={`${td} border-t border-slate-200 text-right tabular-nums`}>{fmtMinor(totals.debit)}</td><td className={`${td} border-t border-slate-200 text-right tabular-nums`}>{fmtMinor(totals.credit)}</td><td className={`${td} border-t border-slate-200 text-right tabular-nums`}>{balanceOf(totals.debit - totals.credit)}</td></tr>;
+    return [header, ...body, subtotal];
+  });
+  const renderLineMobileGroups = (nodes: LedgerGroupNode<LedgerReportRow>[], prefix = ""): React.ReactNode[] => nodes.flatMap((node, i) => {
+    const key = `${prefix}${node.field}-${i}-${node.label}`, totals = rowSubtotal(node.rows), body = node.children.length ? renderLineMobileGroups(node.children, `${key}/`) : node.rows.map((r) => {
+      const rowKeyValue = rowKey(r), tag = statusTag(r), open = viewMode === "details" || expanded === rowKeyValue, selected = selectedRowKey === rowKeyValue;
+      return <article key={rowKeyValue} aria-selected={selected} className={`overflow-hidden rounded-lg border ${selected ? "border-cobalt-500 bg-cobalt-50 ring-1 ring-cobalt-300" : "border-slate-200 bg-white"}`}>
+        <button data-row data-row-key={rowKeyValue} type="button" className="block w-full p-2.5 text-left" onFocus={() => setSelectedRowKey(rowKeyValue)} onClick={() => { setSelectedRowKey(rowKeyValue); toggleRow(rowKeyValue); }} onKeyDown={(e) => onRowKey(e, rowKeyValue)} aria-expanded={open}>
+          <div className="flex items-center justify-between gap-2"><span className="text-[11px] tabular-nums text-slate-500">{shownDate(r.d.slice(0, 10), p.calendar)}</span><span className="text-[13px] font-semibold text-cobalt-800">{voucherRef(r)}{tag && <span className={`ml-1.5 rounded px-1 text-[10px] font-semibold ring-1 ring-inset ${tag.cls}`}>{tag.text}</span>}</span></div>
+          <div className="mt-0.5 truncate text-[12px] text-slate-700">{particulars(r)}{r.subLedgerName ? ` · ${r.subLedgerName}` : ""}</div>
+          <div className="mt-1.5 grid grid-cols-3 gap-2 border-t border-slate-100 pt-1.5 text-[11px]"><div><div className="text-slate-400">Debit</div><b className="tabular-nums">{Number(r.debit) ? amount(r.debit) : "—"}</b></div><div><div className="text-slate-400">Credit</div><b className="tabular-nums">{Number(r.credit) ? amount(r.credit) : "—"}</b></div><div className="text-right"><div className="text-slate-400">Balance</div><b className="tabular-nums">{balanceText(r.running)}</b></div></div>
+        </button>
+        {open && <div className="border-t border-slate-200 bg-slate-50 p-3"><RowDetail r={r} /></div>}
+      </article>;
+    });
+    return [<section key={key} className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-2"><h3 className="text-[12px] font-semibold text-slate-700">{LEDGER_GROUP_FIELDS.find((f) => f.id === node.field)?.label}: {node.label}<span className="ml-2 text-[10px] font-normal text-slate-500">{node.rows.length} rows on this page</span></h3>{body}<div className="flex justify-between border-t border-slate-200 pt-1 text-[10px] text-slate-500"><span>Page subtotal</span><span className="tabular-nums">Dr {amount(fmtMinor(totals.debit))} · Cr {amount(fmtMinor(totals.credit))} · Net {balanceOf(totals.debit - totals.credit)}</span></div></section>];
+  });
   const edgeTitle = "Posted entries of this ledger for the whole period, whatever filters are set";
 
   return (
@@ -348,6 +423,19 @@ export default function LedgerReportScreen(p: {
         </div>
         {drillOrigin.current && viewMode !== "summary" && <button type="button" className="btn" onClick={returnToSummary} title="Return to the previous summary selection"><ArrowLeft size={13} /> Back to Summary</button>}
         <button ref={filterButtonRef} type="button" className="btn" onClick={openFilters} aria-haspopup="dialog" aria-expanded={filtersOpen}><Filter size={13} /> Filters{activeFilters > 0 && <span className="lg-count">{activeFilters}</span>}<kbd className="kbd hidden 2xl:inline">F2</kbd></button>
+        <div className="relative">
+          <button ref={groupByButtonRef} type="button" className={`btn ${groupByOpen ? "border-cobalt-500 text-cobalt-800" : ""}`} onClick={() => setGroupByOpen((open) => !open)} aria-haspopup="dialog" aria-expanded={groupByOpen} title="Arrange report rows into up to three nested groups"><ListTree size={13} /> Group By{groupByFields.length > 0 && <span className="lg-count">{groupByFields.length}</span>}</button>
+          {groupByOpen && <div role="dialog" aria-label="Group By fields" className="absolute right-0 top-full z-50 mt-1 w-[min(22rem,calc(100vw-1.5rem))] rounded-lg border border-slate-300 bg-white p-3 shadow-xl" onMouseDown={(e) => { if (e.target === e.currentTarget) setGroupByOpen(false); }}>
+            <div className="flex items-start gap-2"><div className="min-w-0 flex-1"><h2 className="text-[12px] font-semibold text-slate-800">Group report rows</h2><p className="mt-0.5 text-[10px] text-slate-500">Select up to 3 levels. Their order sets the hierarchy.</p></div><button type="button" className="rounded p-1 text-slate-500 hover:bg-slate-100" onClick={() => setGroupByOpen(false)} aria-label="Close Group By"><X size={14} /></button></div>
+            {groupByFields.length > 0 && <div className="mt-2 space-y-1 rounded-md bg-slate-50 p-2"><p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Group order</p>{groupByFields.map((field, index) => <div key={field} className="flex items-center gap-2 text-[11px]"><span className="w-4 text-right text-slate-400">{index + 1}</span><span className="min-w-0 flex-1 truncate">{LEDGER_GROUP_FIELDS.find((f) => f.id === field)?.label}</span><button type="button" className="btn px-1 py-0.5" disabled={index === 0} onClick={() => moveGroupField(field, -1)} aria-label={`Move ${LEDGER_GROUP_FIELDS.find((f) => f.id === field)?.label} up`}><ArrowUp size={12} /></button><button type="button" className="btn px-1 py-0.5" disabled={index === groupByFields.length - 1} onClick={() => moveGroupField(field, 1)} aria-label={`Move ${LEDGER_GROUP_FIELDS.find((f) => f.id === field)?.label} down`}><ArrowDown size={12} /></button></div>)}</div>}
+            <div className="mt-2 max-h-64 space-y-0.5 overflow-y-auto">{LEDGER_GROUP_FIELDS.map((field) => {
+              const checked = groupByFields.includes(field.id);
+              return <label key={field.id} className={`flex items-center gap-2 rounded px-1.5 py-1.5 text-[11px] ${!checked && groupByFields.length >= 3 ? "text-slate-400" : "hover:bg-slate-50"}`}><input type="checkbox" checked={checked} disabled={!checked && groupByFields.length >= 3} onChange={(e) => setGroupField(field.id, e.target.checked)} className="h-3.5 w-3.5 accent-cobalt-700" /><span className="min-w-0 flex-1">{field.label}</span><span className="shrink-0 text-[9px] text-slate-400">{field.summary ? "Summary + Lines" : "Lines/Details"}</span></label>;
+            })}</div>
+            {viewMode === "summary" && groupByFields.some((field) => !LEDGER_GROUP_FIELDS.find((f) => f.id === field)?.summary) && <p className="mt-2 rounded bg-amber-50 px-2 py-1.5 text-[10px] text-amber-800">Transaction-level groups are retained but take effect in Lines/Details only. Summary totals are not allocated to transaction categories.</p>}
+            <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-2"><span className="text-[10px] text-slate-400">Unassigned values stay visible.</span><button type="button" className="text-[11px] font-medium text-cobalt-700 hover:underline" onClick={() => setGroupByFields([])}>Clear grouping</button></div>
+          </div>}
+        </div>
         <div className="ml-auto flex items-center gap-1.5">
           {summary && <span className="lg-chip" title={`Opening ${balanceText(summary.opening)} · Debit ${amount(summary.debit)} · Credit ${amount(summary.credit)}`}>Closing <b className="tabular-nums">{balanceText(summary.closing)}</b></span>}
           {pageCount > 1 && <div className="flex items-center gap-1 text-[12px] text-slate-600"><button type="button" className="btn px-1.5" disabled={page <= 1 || loading} onClick={() => setPage((x) => Math.max(1, x - 1))} aria-label="Previous page"><ChevronLeft size={14} /></button><span className="tabular-nums" title={`${result?.total.toLocaleString()} lines`}>{page} / {pageCount}</span><button type="button" className="btn px-1.5" disabled={page >= pageCount || loading} onClick={() => setPage((x) => x + 1)} aria-label="Next page"><ChevronRight size={14} /></button></div>}
@@ -424,17 +512,14 @@ export default function LedgerReportScreen(p: {
                   <table className="lg-ledger w-full min-w-[900px] text-[12px]">
                     <thead><tr><th className={th}>Ledger</th><th className={`${th} text-right`}>Opening Dr</th><th className={`${th} text-right`}>Opening Cr</th><th className={`${th} text-right`}>Period Dr</th><th className={`${th} text-right`}>Period Cr</th><th className={`${th} text-right`}>Closing Dr</th><th className={`${th} text-right`}>Closing Cr</th></tr></thead>
                     <tbody>
-                      {summaryRows.map((s) => { const opening = balanceSides(s.opening), closing = balanceSides(s.closing), selected = selectedSummaryLedgerId === s.generalLedgerId; return <tr key={s.generalLedgerId} data-summary-row data-ledger-id={s.generalLedgerId} data-selected={selected} aria-selected={selected} className={selected ? "bg-cobalt-100/80 shadow-[inset_3px_0_0_#3154d4]" : ""} onClick={() => setSelectedSummaryLedgerId(s.generalLedgerId)}>
-                        <td className={`${td} whitespace-nowrap`}><button data-summary-ledger type="button" className="text-left hover:text-cobalt-800 hover:underline focus-visible:rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-600" onFocus={() => setSelectedSummaryLedgerId(s.generalLedgerId)} onKeyDown={onSummaryKey} onClick={() => drillIntoLedger(s.generalLedgerId)} aria-label={`View lines for ${s.code} ${s.name}`}><span className="mr-2 font-mono text-[11px] text-slate-500">{s.code}</span><span className="font-medium text-slate-800">{s.name}</span></button></td>
-                        {[opening.debit, opening.credit, minor(s.debit), minor(s.credit), closing.debit, closing.credit].map((v, i) => <td key={i} className={`${td} whitespace-nowrap text-right tabular-nums`}>{v ? fmtMinor(v) : "—"}</td>)}
-                      </tr>; })}
+                      {activeGroupByFields.length ? renderSummaryGroupRows(summaryGroupTree) : summaryRows.map(summaryLedgerRow)}
                       <tr className="bg-slate-50 font-semibold text-slate-900"><td className="border-t border-slate-300 px-3 py-1.5">Total</td>{Object.values(summaryTotals).map((v, i) => <td key={i} className="border-t border-slate-300 px-3 py-1.5 text-right tabular-nums">{v ? fmtMinor(v) : "—"}</td>)}</tr>
                       {summaryRows.length === 0 && <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-500">No ledger balances in this selection.</td></tr>}
                     </tbody>
                   </table>
                 </div>
                 <div className="space-y-2 p-2 md:hidden">
-                  {summaryRows.map((s) => { const opening = balanceSides(s.opening), closing = balanceSides(s.closing), values = [opening.debit, opening.credit, minor(s.debit), minor(s.credit), closing.debit, closing.credit], selected = selectedSummaryLedgerId === s.generalLedgerId; return <article key={s.generalLedgerId} data-summary-row data-ledger-id={s.generalLedgerId} data-selected={selected} aria-selected={selected} className={`rounded-lg border p-2.5 ${selected ? "border-cobalt-500 bg-cobalt-50 ring-1 ring-cobalt-300" : "border-slate-200 bg-white"}`}>
+                  {activeGroupByFields.length ? renderSummaryMobileGroups(summaryGroupTree) : summaryRows.map((s) => { const opening = balanceSides(s.opening), closing = balanceSides(s.closing), values = [opening.debit, opening.credit, minor(s.debit), minor(s.credit), closing.debit, closing.credit], selected = selectedSummaryLedgerId === s.generalLedgerId; return <article key={s.generalLedgerId} data-summary-row data-ledger-id={s.generalLedgerId} data-selected={selected} aria-selected={selected} className={`rounded-lg border p-2.5 ${selected ? "border-cobalt-500 bg-cobalt-50 ring-1 ring-cobalt-300" : "border-slate-200 bg-white"}`}>
                     <h2 className="truncate text-[12px] font-semibold text-slate-800"><button data-summary-ledger type="button" className="text-left hover:text-cobalt-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-600" onFocus={() => setSelectedSummaryLedgerId(s.generalLedgerId)} onKeyDown={onSummaryKey} onClick={() => drillIntoLedger(s.generalLedgerId)} aria-label={`View lines for ${s.code} ${s.name}`}><span className="mr-1.5 font-mono text-[11px] font-normal text-slate-500">{s.code}</span>{s.name}</button></h2>
                     <div className="mt-2 grid grid-cols-3 gap-x-2 gap-y-1.5 border-t border-slate-100 pt-2 text-[11px]">{["Opening Dr", "Opening Cr", "Period Dr", "Period Cr", "Closing Dr", "Closing Cr"].map((label, i) => <div key={label}><div className="text-slate-400">{label}</div><b className="tabular-nums">{values[i] ? fmtMinor(values[i]) : "—"}</b></div>)}</div>
                   </article>; })}
@@ -443,11 +528,12 @@ export default function LedgerReportScreen(p: {
               </div>
             ) : result ? (
               <div className={loading ? "opacity-60 transition-opacity" : "transition-opacity"}>
+                {activeGroupByFields.length > 0 && <p className="border-b border-amber-100 bg-amber-50/70 px-3 py-1.5 text-[10px] text-amber-900">Grouped rows are rearranged by the selected hierarchy. Subtotals cover this page only; opening/closing balances remain in Summary, and each line’s running balance remains per ledger.</p>}
                 <div className="hidden md:block">
                   <table className="lg-ledger w-full min-w-[760px] text-[12px]">
                     <thead><tr><th className={`${th} w-6 pr-0`} /><th className={`${th} w-[92px]`}>Date</th><th className={th}>Particulars</th>{showSub && <th className={th}>Sub-ledger</th>}<th className={`${th} w-[120px] text-right`}>Debit</th><th className={`${th} w-[120px] text-right`}>Credit</th><th className={`${th} w-[150px] text-right`}>Balance</th></tr></thead>
                     <tbody>
-                      {blocks.map((b) => <Fragment key={b.key}>
+                      {activeGroupByFields.length ? renderLineGroupRows(lineGroupTree) : blocks.map((b) => <Fragment key={b.key}>
                         {!single && <tr><td colSpan={cols} className="border-b border-slate-200 bg-slate-100 px-3 py-1 text-[12px] font-semibold text-slate-700"><span className="mr-2 font-mono text-[11px] font-normal text-slate-500">{b.code}</span>{b.name}</td></tr>}
                         {b.start && <EdgeRow label={b.start.label} balance={b.start.balance} cols={cols} />}
                         {b.rows.length === 0 && <tr><td colSpan={cols} className="px-3 py-4 text-center text-slate-500">No transactions in this period.</td></tr>}
@@ -458,13 +544,13 @@ export default function LedgerReportScreen(p: {
                   </table>
                 </div>
                 <div className="space-y-2 p-2 md:hidden">
-                  {blocks.map((b) => <section key={b.key} className="space-y-1.5">
+                  {activeGroupByFields.length ? renderLineMobileGroups(lineGroupTree) : blocks.map((b) => <section key={b.key} className="space-y-1.5">
                     {!single && <h2 className="px-1 pt-1 text-[12px] font-semibold text-slate-700"><span className="mr-1.5 font-mono text-[11px] font-normal text-slate-500">{b.code}</span>{b.name}</h2>}
                     {b.start && <div className="flex justify-between px-1 text-[12px] italic text-slate-600"><span>{b.start.label}</span><span className="tabular-nums">{balanceOf(b.start.balance)}</span></div>}
                     {b.rows.length === 0 && <p className="px-1 py-2 text-[12px] text-slate-500">No transactions in this period.</p>}
                     {b.rows.map((r) => { const key = rowKey(r), tag = statusTag(r), open = viewMode === "details" || expanded === key, selected = selectedRowKey === key; return (
                       <article key={key} aria-selected={selected} className={`overflow-hidden rounded-lg border ${selected ? "border-cobalt-500 bg-cobalt-50 ring-1 ring-cobalt-300" : "border-slate-200 bg-white"}`}>
-                        <button type="button" className="block w-full p-2.5 text-left" onFocus={() => setSelectedRowKey(key)} onClick={() => { setSelectedRowKey(key); toggleRow(key); }} aria-expanded={open}>
+                        <button data-row data-row-key={key} type="button" className="block w-full p-2.5 text-left" onFocus={() => setSelectedRowKey(key)} onClick={() => { setSelectedRowKey(key); toggleRow(key); }} onKeyDown={(e) => onRowKey(e, key)} aria-expanded={open}>
                           <div className="flex items-center justify-between gap-2"><span className="text-[11px] tabular-nums text-slate-500">{shownDate(r.d.slice(0, 10), p.calendar)}</span><span className="text-[13px] font-semibold text-cobalt-800">{voucherRef(r)}{tag && <span className={`ml-1.5 rounded px-1 text-[10px] font-semibold ring-1 ring-inset ${tag.cls}`}>{tag.text}</span>}</span></div>
                           <div className="mt-0.5 truncate text-[12px] text-slate-700">{particulars(r)}{r.subLedgerName ? ` · ${r.subLedgerName}` : ""}</div>
                           <div className="mt-1.5 grid grid-cols-3 gap-2 border-t border-slate-100 pt-1.5 text-[11px]"><div><div className="text-slate-400">Debit</div><b className="tabular-nums">{Number(r.debit) ? amount(r.debit) : "—"}</b></div><div><div className="text-slate-400">Credit</div><b className="tabular-nums">{Number(r.credit) ? amount(r.credit) : "—"}</b></div><div className="text-right"><div className="text-slate-400">Balance</div><b className="tabular-nums">{balanceText(r.running)}</b></div></div>

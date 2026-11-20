@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addDay, amount, balanceOf, buildBlocks, csvCell, fmtMinor, minor, monthsOf, pickInitialMonth, todayLocal, voucherRef } from "../src/lib/ledgerReportLayout";
+import { buildLedgerGroupTree, firstLedgerGroupRow } from "../src/lib/ledgerReportGrouping";
 import type { LedgerReportRow, LedgerReportSummary } from "../src/api";
 
 const FY_START = "2025-07-17", FY_END = "2026-07-16"; // FY 2082/083: Shrawan 1, 2082 to Ashadh 32, 2083
@@ -56,10 +57,49 @@ describe("ledger report balances", () => {
 const line = (n: number, gl: number, debit: string, credit: string, running: string, posted = true): LedgerReportRow => ({
   lineId: n, voucherId: n, generalLedgerId: gl, subLedgerId: null, d: "2025-08-01", voucherNumber: `JV-${n}`, kind: "JOURNAL", voucherLabel: "Journal voucher",
   posted, postedAt: null, postedBy: null, postedByName: null, remarks: null, narration: null, reference: null, reversalOfId: null, hasReversal: false,
-  ledgerCode: gl === 1 ? "1010" : "2020", ledgerName: gl === 1 ? "Cash" : "Creditors", subLedgerCode: null, subLedgerName: null, debit, credit,
+  ledgerCode: gl === 1 ? "1010" : "2020", ledgerName: gl === 1 ? "Cash" : "Creditors",
+  accountSubGroupId: gl, accountSubGroupCode: gl === 1 ? "10" : "20", accountSubGroupName: gl === 1 ? "Current assets" : "Payables",
+  accountGroupId: gl, accountGroupCode: gl === 1 ? "1" : "2", accountGroupName: gl === 1 ? "Assets" : "Liabilities",
+  agentId: null, agentCode: null, agentName: null, areaId: null, areaCode: null, areaName: null, subAreaId: null, subAreaCode: null, subAreaName: null,
+  subLedgerCode: null, subLedgerName: null, debit, credit,
   sourceNumber: `JV-${n}`, sourceLabel: "Journal voucher", products: [], productIds: [], running, total: 0,
 });
-const sum = (gl: number, opening: string, debit: string, credit: string, closing: string): LedgerReportSummary => ({ generalLedgerId: gl, code: gl === 1 ? "1010" : "2020", name: gl === 1 ? "Cash" : "Creditors", opening, debit, credit, closing });
+const sum = (gl: number, opening: string, debit: string, credit: string, closing: string): LedgerReportSummary => ({
+  generalLedgerId: gl, code: gl === 1 ? "1010" : "2020", name: gl === 1 ? "Cash" : "Creditors",
+  accountSubGroupId: gl, accountSubGroupCode: gl === 1 ? "10" : "20", accountSubGroupName: gl === 1 ? "Current assets" : "Payables",
+  accountGroupId: gl, accountGroupCode: gl === 1 ? "1" : "2", accountGroupName: gl === 1 ? "Assets" : "Liabilities",
+  agentId: null, agentCode: null, agentName: null, areaId: null, areaCode: null, areaName: null, subAreaId: null, subAreaCode: null, subAreaName: null,
+  opening, debit, credit, closing,
+});
+
+describe("ledger report grouping", () => {
+  it("builds the selected hierarchy in order and keeps rows under the right account group", () => {
+    const rows = [line(1, 1, "1", "0", "1"), line(2, 2, "0", "1", "-1"), line(3, 1, "2", "0", "3")];
+    const tree = buildLedgerGroupTree(rows, ["accountGroup", "accountSubGroup"], monthsOf(FY_START, FY_END, "BS"));
+    expect(tree.map((group) => group.label)).toEqual(["1 — Assets", "2 — Liabilities"]);
+    expect(tree[0].children[0].rows.map((row) => row.lineId)).toEqual([1, 3]);
+    expect(tree[1].children[0].rows.map((row) => row.lineId)).toEqual([2]);
+  });
+
+  it("finds the first row in the displayed group order", () => {
+    const rows = [line(1, 2, "0", "1", "-1"), line(2, 1, "1", "0", "1")];
+    const tree = buildLedgerGroupTree(rows, ["accountGroup"], monthsOf(FY_START, FY_END, "BS"));
+    expect(firstLedgerGroupRow(tree)?.lineId).toBe(2);
+  });
+
+  it("places missing dimensions in a visible Unassigned group", () => {
+    const tree = buildLedgerGroupTree([line(1, 1, "1", "0", "1")], ["agent"], monthsOf(FY_START, FY_END, "BS"));
+    expect(tree[0].label).toBe("Unassigned");
+  });
+
+  it("uses fiscal-calendar month labels for transaction grouping", () => {
+    const rows = [line(1, 1, "1", "0", "1"), line(2, 1, "1", "0", "2")];
+    rows[0].d = "2025-08-18";
+    rows[1].d = "2025-07-18";
+    const tree = buildLedgerGroupTree(rows, ["month"], monthsOf(FY_START, FY_END, "BS"));
+    expect(tree.map((group) => group.label)).toEqual(["Shrawan 2082", "Bhadra 2082"]);
+  });
+});
 
 describe("ledger report blocks", () => {
   const summary = [sum(1, "1000.00", "500.00", "200.00", "1300.00"), sum(2, "-50.00", "0.00", "25.00", "-75.00")];

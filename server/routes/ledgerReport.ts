@@ -67,9 +67,21 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
   const fromTs = `${start}`;
   const toTs = `${end}`;
 
+  // Summary grouping stays stable at the ledger/party-master level; transaction totals remain calculated independently below.
   const summary = await db.execute(sql`
     WITH chosen AS (
-      SELECT g.id, g.code, g.name FROM "GeneralLedger" g
+      SELECT g.id, g.code, g.name,
+        sg.id AS "accountSubGroupId", sg.code AS "accountSubGroupCode", sg.description AS "accountSubGroupName",
+        ag.id AS "accountGroupId", ag.code AS "accountGroupCode", ag.description AS "accountGroupName",
+        COALESCE(p."agentId", g."agentId") AS "agentId", a.code AS "agentCode", a.name AS "agentName",
+        COALESCE(p."subAreaId", g."subAreaId") AS "subAreaId", sa.code AS "subAreaCode", sa.name AS "subAreaName", ar.id AS "areaId", ar.code AS "areaCode", ar.name AS "areaName"
+      FROM "GeneralLedger" g
+      JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId"
+      JOIN "AccountGroup" ag ON ag.id = sg."accountGroupId"
+      LEFT JOIN "Party" p ON p."generalLedgerId" = g.id
+      LEFT JOIN "Agent" a ON a.id = COALESCE(p."agentId", g."agentId")
+      LEFT JOIN "SubArea" sa ON sa.id = COALESCE(p."subAreaId", g."subAreaId")
+      LEFT JOIN "Area" ar ON ar.id = sa."areaId"
       WHERE g."companyId" = ${companyId} ${ledgerScope}
     ), ob AS (
       SELECT o."generalLedgerId" AS gl, SUM(o."debit" - o."credit") AS net
@@ -91,12 +103,20 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
         AND (v."voucherDate" < ${start}::date OR v."voucherDate" BETWEEN ${start}::date AND ${end}::date)
     ), sums AS (
       SELECT c.id AS gl, c.code, c.name,
+        c."accountSubGroupId", c."accountSubGroupCode", c."accountSubGroupName",
+        c."accountGroupId", c."accountGroupCode", c."accountGroupName",
+        c."agentId", c."agentCode", c."agentName", c."subAreaId", c."subAreaCode", c."subAreaName", c."areaId", c."areaCode", c."areaName",
         COALESCE(o.net, 0) + COALESCE(SUM(tx.dr - tx.cr) FILTER (WHERE tx.d < ${start}::date), 0) AS opening,
         COALESCE(SUM(tx.dr) FILTER (WHERE tx.d BETWEEN ${start}::date AND ${end}::date), 0) AS debit,
         COALESCE(SUM(tx.cr) FILTER (WHERE tx.d BETWEEN ${start}::date AND ${end}::date), 0) AS credit
-      FROM chosen c LEFT JOIN ob o ON o.gl = c.id LEFT JOIN tx ON tx.gl = c.id GROUP BY c.id, c.code, c.name, o.net
+      FROM chosen c LEFT JOIN ob o ON o.gl = c.id LEFT JOIN tx ON tx.gl = c.id
+      GROUP BY c.id, c.code, c.name, c."accountSubGroupId", c."accountSubGroupCode", c."accountSubGroupName",
+        c."accountGroupId", c."accountGroupCode", c."accountGroupName", c."agentId", c."agentCode", c."agentName",
+        c."subAreaId", c."subAreaCode", c."subAreaName", c."areaId", c."areaCode", c."areaName", o.net
     )
-    SELECT gl AS "generalLedgerId", code, name, opening::text,
+    SELECT gl AS "generalLedgerId", code, name,
+      "accountSubGroupId", "accountSubGroupCode", "accountSubGroupName", "accountGroupId", "accountGroupCode", "accountGroupName",
+      "agentId", "agentCode", "agentName", "subAreaId", "subAreaCode", "subAreaName", "areaId", "areaCode", "areaName", opening::text,
       debit::text, credit::text, (opening + debit - credit)::text AS closing FROM sums ORDER BY code, name
   `) as any[];
 
@@ -110,12 +130,16 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
   const where = sql.join(filters, sql` AND `);
   const rowOrder = ledgerIds.length !== 1 ? sql`"ledgerCode", d, "voucherNumber", "voucherId", "lineId"` : sql`d, "voucherNumber", "voucherId", "lineId"`;
 
+  // Transaction-level Agent prefers the originating sale/purchase document, then party master, then the ledger default.
   const rows = await db.execute(sql`
     WITH raw AS (
       SELECT l.id AS "lineId", v.id AS "voucherId", l."generalLedgerId", l."subLedgerId", v."voucherDate" AS d,
         v."voucherNumber", 'JOURNAL'::text AS kind, 'Journal voucher'::text AS "voucherLabel", v."isPosted" AS posted,
         v."postedAt", v."postedBy", u.name AS "postedByName", COALESCE(ia.remarks, v.remarks) AS remarks, l.narration, ia."referenceNo" AS reference,
         v."reversalOfId", (rv.id IS NOT NULL) AS "hasReversal", g.code AS "ledgerCode", g.name AS "ledgerName",
+        sg.id AS "accountSubGroupId", sg.code AS "accountSubGroupCode", sg.description AS "accountSubGroupName",
+        ag.id AS "accountGroupId", ag.code AS "accountGroupCode", ag.description AS "accountGroupName",
+        COALESCE(si."agentId", pb."agentId", pt."agentId", g."agentId") AS "agentId", a.code AS "agentCode", a.name AS "agentName", COALESCE(pt."subAreaId", g."subAreaId") AS "subAreaId", sa.code AS "subAreaCode", sa.name AS "subAreaName", ar.id AS "areaId", ar.code AS "areaCode", ar.name AS "areaName",
         s.code AS "subLedgerCode", s.name AS "subLedgerName", l.debit::text AS debit, l.credit::text AS credit,
         COALESCE(si."invoiceNumber", ia."assessmentNumber", pb."invoiceNumber", v."voucherNumber") AS "sourceNumber",
         CASE WHEN si.id IS NOT NULL THEN 'Sales invoice' WHEN ia.id IS NOT NULL THEN 'Import cost assessment' WHEN pb.id IS NOT NULL THEN 'Purchase bill' ELSE 'Journal voucher' END AS "sourceLabel",
@@ -123,10 +147,14 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
         COALESCE(sp.ids, pp.ids, '[]'::jsonb) AS "productIds"
       FROM "JournalVoucherLine" l JOIN "JournalVoucher" v ON v.id = l."journalVoucherId"
       JOIN "GeneralLedger" g ON g.id = l."generalLedgerId" LEFT JOIN "SubLedger" s ON s.id = l."subLedgerId"
+      JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId" JOIN "AccountGroup" ag ON ag.id = sg."accountGroupId"
       LEFT JOIN "User" u ON u.id = v."postedBy" LEFT JOIN "JournalVoucher" rv ON rv."reversalOfId" = v.id AND rv."isPosted" = true
       LEFT JOIN "SalesInvoice" si ON si."journalVoucherId" = v.id
       LEFT JOIN "PurchaseImportAssessment" ia ON ia."journalVoucherId" = v.id OR ia."reversalVoucherId" = v.id
       LEFT JOIN "PurchaseBill" pb ON pb."journalVoucherId" = v.id OR pb.id = ia."importBillId"
+      LEFT JOIN "Party" pt ON pt.id = s."partyId" OR (s."partyId" IS NULL AND pt."generalLedgerId" = g.id)
+      LEFT JOIN "Agent" a ON a.id = COALESCE(si."agentId", pb."agentId", pt."agentId", g."agentId")
+      LEFT JOIN "SubArea" sa ON sa.id = COALESCE(pt."subAreaId", g."subAreaId") LEFT JOIN "Area" ar ON ar.id = sa."areaId"
       LEFT JOIN LATERAL (
         SELECT jsonb_agg(jsonb_build_object('id', p.id, 'code', p.code, 'description', p.description, 'qty', sl.qty::text, 'unit', pu.code, 'altQty', sl."altQty"::text, 'altUnit', au.code, 'rate', sl.rate::text, 'amount', sl."basicAmount"::text) ORDER BY sl."lineNumber") AS products,
           jsonb_agg(p.id) AS ids
@@ -142,10 +170,16 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
       UNION ALL
       SELECT l.id, v.id, l."generalLedgerId", l."subLedgerId", v."voucherDate", v."voucherNumber", 'CASH_BANK'::text,
         'Cash / bank voucher'::text, v."isPosted", v."postedAt", v."postedBy", u.name, v.remarks, l.narration,
-        v."payeeReference", v."reversalOfId", (rv.id IS NOT NULL), g.code, g.name, s.code, s.name,
+        v."payeeReference", v."reversalOfId", (rv.id IS NOT NULL), g.code, g.name,
+        sg.id, sg.code, sg.description, ag.id, ag.code, ag.description, COALESCE(pt."agentId", g."agentId"), a.code, a.name, COALESCE(pt."subAreaId", g."subAreaId"), sa.code, sa.name, ar.id, ar.code, ar.name,
+        s.code, s.name,
         l.debit::text, l.credit::text, v."voucherNumber", 'Cash / bank voucher', '[]'::jsonb, '[]'::jsonb
       FROM "CashBankVoucherLine" l JOIN "CashBankVoucher" v ON v.id = l."cashBankVoucherId"
       JOIN "GeneralLedger" g ON g.id = l."generalLedgerId" LEFT JOIN "SubLedger" s ON s.id = l."subLedgerId"
+      JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId" JOIN "AccountGroup" ag ON ag.id = sg."accountGroupId"
+      LEFT JOIN "Party" pt ON pt.id = s."partyId" OR (s."partyId" IS NULL AND pt."generalLedgerId" = g.id)
+      LEFT JOIN "Agent" a ON a.id = COALESCE(pt."agentId", g."agentId")
+      LEFT JOIN "SubArea" sa ON sa.id = COALESCE(pt."subAreaId", g."subAreaId") LEFT JOIN "Area" ar ON ar.id = sa."areaId"
       LEFT JOIN "User" u ON u.id = v."postedBy" LEFT JOIN "CashBankVoucher" rv ON rv."reversalOfId" = v.id AND rv."isPosted" = true
       WHERE v."companyId" = ${companyId} AND v."branchId" = ${branchId} AND v."fiscalYear" = ${fiscalYear}
         AND v."voucherDate" BETWEEN ${start}::date AND ${end}::date ${idsFilter(ledgerIds, sql`g.id`)} ${subOnLine}
