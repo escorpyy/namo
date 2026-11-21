@@ -2,6 +2,7 @@ import type { ContextData } from "./types";
 import type { Row } from "./lib/form";
 import type { CodeMode, CodeRuleRow, CodeSuggestion } from "../shared/codeRules";
 import type { SeriesMode, SeriesRow } from "../shared/numberSeries";
+import type { GlRoleKey } from "../shared/glSetup";
 
 export class ApiError extends Error {
   constructor(
@@ -72,6 +73,18 @@ export const numberSeriesApi = {
     req<SeriesRow>(id ? `/api/number-series/${id}` : `/api/number-series`, { method: id ? "PUT" : "POST", body: JSON.stringify({ companyId, userId, ...v }) }),
   available: (companyId: number, documentType: string, branchId: number, fiscalYear: string, userId?: number) =>
     req<AvailableSeries[]>(`/api/number-series/available?companyId=${companyId}&documentType=${documentType}&branchId=${branchId}&fiscalYear=${encodeURIComponent(fiscalYear)}${userId ? `&userId=${userId}` : ""}`),
+};
+
+export type GLSetupRole = {
+  role: GlRoleKey; label: string; hint: string; generalLedgerId: number | null;
+  allowJournal: boolean; allowCashBank: boolean; allowSalesInvoice: boolean; allowSalesReturn: boolean;
+  allowPurchaseBill: boolean; allowPurchaseReturn: boolean; allowOpeningBalance: boolean; allowStockOpening: boolean; isLocked: boolean;
+};
+export type GLSetupLedger = { id: number; code: string; name: string; normalBalance: "DEBIT" | "CREDIT"; isActive: boolean; isCashOrBank: boolean; requiresSubLedger: boolean };
+export const glSetupApi = {
+  get: (companyId: number) => req<{ roles: GLSetupRole[]; ledgers: GLSetupLedger[] }>(`/api/gl-setup?companyId=${companyId}`),
+  save: (companyId: number, userId: number, roles: GLSetupRole[]) =>
+    req<{ roles: GLSetupRole[]; ledgers: GLSetupLedger[] }>("/api/gl-setup", { method: "PUT", body: JSON.stringify({ companyId, userId, roles }) }),
 };
 
 // Opening Balance: grid screen ka alag API (company + branch + fiscal year ke saare ledgers)

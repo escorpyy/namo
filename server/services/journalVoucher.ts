@@ -8,6 +8,7 @@ import { recheckSettlements, settlementsOf, writeSettlements, type SettlementInp
 import { guardPeriod, type LockOverride } from "./periodLock";
 import { type Actor, type Opts, type Tx, assertBranch, inActorTx, parseDate, resolveFiscalYear, today } from "./purchase/common";
 import { ZERO, fmt, toMicro, type Micro } from "./purchase/money";
+import { assertGlEntryAllowed } from "./glEntryControl";
 
 // JOURNAL VOUCHER: a hand-made accounting entry that touches no cash or bank ledger (those go through a Cash/Bank voucher).
 //
@@ -193,6 +194,7 @@ export function saveJournalVoucher(input: JournalVoucherInput, actor: Actor, opt
     await guardPeriod(tx, input.companyId, existing ? [existing.voucherDate, date] : [date], opts.lockOverride, "voucherDate");
     const fy = await resolveFiscalYear(tx, input.companyId, date, input.fiscalYear ?? null);
     const lines = await resolveLines(tx, input.companyId, input.lines ?? []);
+    await assertGlEntryAllowed(tx, input.companyId, lines.map((line) => line.generalLedgerId), "JOURNAL");
     if (existing?.isPosted) assertPostable(lines);
     // The database refuses ANY voucher whose lines do not balance at commit (drafts too, migration 0007): say so in plain words first.
     const sumDr = lines.reduce((a, l) => a + l.debit, ZERO), sumCr = lines.reduce((a, l) => a + l.credit, ZERO);
@@ -236,6 +238,7 @@ export function postJournalVoucher(id: number, companyId: number | null, actor: 
     const stored = await tx.select().from(S.journalVoucherLine).where(eq(S.journalVoucherLine.journalVoucherId, id)).orderBy(asc(S.journalVoucherLine.lineNumber));
     // check again as if freshly entered: a ledger may have been deactivated or turned into a cash ledger since the draft was saved
     const lines = await resolveLines(tx, v.companyId, stored.map((l) => ({ generalLedgerId: l.generalLedgerId, subLedgerId: l.subLedgerId, agentId: l.agentId, debit: l.debit, credit: l.credit, narration: l.narration })));
+    await assertGlEntryAllowed(tx, v.companyId, lines.map((line) => line.generalLedgerId), "JOURNAL");
     assertPostable(lines);
     await recheckSettlements(tx, id, v.companyId, "JOURNAL");
     await tx.update(S.journalVoucher).set({ isPosted: true, postedAt: new Date(), postedBy: actor.userId, updatedAt: new Date() }).where(eq(S.journalVoucher.id, id));
@@ -279,6 +282,7 @@ export function reverseJournalVoucher(id: number, companyId: number | null, acto
     const fy = await resolveFiscalYear(tx, orig.companyId, date, null);
 
     const olines = await tx.select().from(S.journalVoucherLine).where(eq(S.journalVoucherLine.journalVoucherId, id)).orderBy(asc(S.journalVoucherLine.lineNumber));
+    await assertGlEntryAllowed(tx, orig.companyId, olines.map((line) => line.generalLedgerId), "JOURNAL");
     let number = `R-${orig.voucherNumber}`.slice(0, 30), k = 1;
     while ((await tx.select({ id: S.journalVoucher.id }).from(S.journalVoucher).where(and(eq(S.journalVoucher.branchId, orig.branchId), eq(S.journalVoucher.voucherNumber, number)))).length) {
       number = `R${++k}-${orig.voucherNumber}`.slice(0, 30);

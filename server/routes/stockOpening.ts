@@ -4,6 +4,7 @@ import { db } from "../db";
 import * as S from "../db/schema";
 import { HttpError, wrap } from "./_util";
 import { mulRound2, parseDec } from "../../shared/decimal";
+import { assertGlEntryAllowed, assertGlRolesAllowed } from "../services/glEntryControl";
 
 const SOB = S.stockOpeningBalance, SD = S.stockDetail, OB = S.openingBalance;
 const int = (v: unknown, name: string) => {
@@ -118,6 +119,15 @@ stockOpeningRouter.put("/", wrap(async (req, res) => {
 
   let saved = 0;
   await db.transaction(async (tx) => {
+    const touchedStockDetailIds = [...new Set([
+      ...sdIds,
+      ...existing.filter((row) => deletes.includes(row.id)).map((row) => row.stockDetailId),
+    ])];
+    await assertGlRolesAllowed(tx, companyId, ["OPENING_STOCK_PL", "CLOSING_STOCK_PL", "CLOSING_STOCK_BS"], "STOCK_OPENING");
+    if (touchedStockDetailIds.length) {
+      const mapped = await tx.select({ closingBSGLId: SD.closingBSGLId }).from(SD).where(inArray(SD.id, touchedStockDetailIds));
+      await assertGlEntryAllowed(tx, companyId, mapped.map((row) => row.closingBSGLId).filter((id): id is number => id !== null), "STOCK_OPENING");
+    }
     if (deletes.length) await tx.delete(SOB).where(inArray(SOB.id, deletes));
     for (const c of clean) {
       const vals = { stockDetailId: c.sdId, locationId: c.loc, batchNo: c.batch, expiryDate: c.exp ? new Date(`${c.exp}T00:00:00Z`) : null, quantity: c.qty, rate: c.rate, value: c.value };

@@ -5,6 +5,7 @@ import { setAuditContext } from "../db/audit";
 import * as S from "../db/schema";
 import { HttpError, wrap } from "./_util";
 import { stockMismatches } from "./stockRecon";
+import { assertGlEntryAllowed } from "../services/glEntryControl";
 
 const OB = S.openingBalance;
 const AMOUNT = /^\d{1,12}(\.\d{1,2})?$/; // NPR: 2 decimals, negative nahi (DB me CHECK nahi hai, yahan enforce)
@@ -149,6 +150,7 @@ openingBalanceRouter.put("/", wrap(async (req, res) => {
   let saved = 0, deleted = 0;
   await db.transaction(async (tx) => {
     await setAuditContext(tx, { userId }); // the audit trail (ERP-024) records who saved these balances
+    await assertGlEntryAllowed(tx, companyId, clean.map((row) => row.gl.id), "OPENING_BALANCE");
     for (const c of clean) {
       const [ex] = await tx.select({ id: OB.id }).from(OB).where(and(
         eq(OB.fiscalYearId, fyId), eq(OB.branchId, branchId), eq(OB.generalLedgerId, c.gl.id),

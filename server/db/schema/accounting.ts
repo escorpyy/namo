@@ -1,6 +1,7 @@
 import {
   type AnyPgColumn,
   boolean,
+  check,
   index,
   integer,
   pgTable,
@@ -8,6 +9,7 @@ import {
   uniqueIndex,
   varchar,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createdAt, updatedAt } from "./_helpers";
 import { accountTypeEnum, glTypeEnum, normalBalanceEnum } from "./enums";
 import { company } from "./core";
@@ -113,6 +115,35 @@ export const generalLedger = pgTable(
     index("GeneralLedger_glType_idx").on(t.glType),
     index("GeneralLedger_subAreaId_idx").on(t.subAreaId),
     index("GeneralLedger_agentId_idx").on(t.agentId),
+  ],
+);
+
+// Company-level default GL mappings and entry permissions. These do not replace
+// per-product ledger mappings; they define named roles and gate matching entries.
+export const generalLedgerSetup = pgTable(
+  "GeneralLedgerSetup",
+  {
+    id: serial().primaryKey(),
+    companyId: integer().notNull().references(() => company.id, { onDelete: "restrict" }),
+    role: varchar({ length: 32 }).notNull(),
+    generalLedgerId: integer().references(() => generalLedger.id, { onDelete: "restrict" }),
+    allowJournal: boolean().notNull().default(false),
+    allowCashBank: boolean().notNull().default(false),
+    allowSalesInvoice: boolean().notNull().default(false),
+    allowSalesReturn: boolean().notNull().default(false),
+    allowPurchaseBill: boolean().notNull().default(false),
+    allowPurchaseReturn: boolean().notNull().default(false),
+    allowOpeningBalance: boolean().notNull().default(false),
+    allowStockOpening: boolean().notNull().default(false),
+    isLocked: boolean().notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("GeneralLedgerSetup_companyId_role_key").on(t.companyId, t.role),
+    index("GeneralLedgerSetup_companyId_idx").on(t.companyId),
+    index("GeneralLedgerSetup_generalLedgerId_idx").on(t.generalLedgerId),
+    check("GeneralLedgerSetup_role_check", sql`${t.role} in ('PROFIT_AND_LOSS','CASH_BOOK','SALES_ACCOUNT','SALES_RETURN_ACCOUNT','PURCHASE_ACCOUNT','PURCHASE_RETURN_ACCOUNT','OPENING_STOCK_PL','CLOSING_STOCK_PL','CLOSING_STOCK_BS')`),
   ],
 );
 

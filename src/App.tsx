@@ -20,6 +20,7 @@ import PurchaseBillWorkspace from "./screens/purchase/PurchaseBillWorkspace";
 import PurchaseOrderWorkspace from "./screens/purchase/PurchaseOrderWorkspace";
 import PurchaseChallanWorkspace from "./screens/purchase/PurchaseChallanWorkspace";
 import ImportCostAssessmentWorkspace from "./screens/purchase/ImportCostAssessmentWorkspace";
+import GLSetupScreen from "./screens/GLSetupScreen";
 import { MASTERS } from "../shared/masters";
 import type { OpenRequest } from "./lib/openRequest";
 
@@ -153,7 +154,9 @@ export default function App() {
             : screen === "purchase-challans" ? <PurchaseChallanWorkspace key={k} {...pp} onCreateBill={(id) => { setFromChallan({ id, n: Date.now() }); dirtyRef.current = false; setScreen("purchase-bills"); }} />
             : screen === "purchase-import-assessments" ? <ImportCostAssessmentWorkspace key={k} {...pp} />
             : <PurchaseBillWorkspace key={k} {...pp} fromChallan={fromChallan} />;
-        })() : screen === "journal" ? (
+        })() : screen === "gl-setup" ? (
+          <GLSetupScreen key={`${screen}:${companyId}`} companyId={companyId} userId={ctx.user.id} setStatus={setStatus} dirtyRef={dirtyRef} />
+        ) : screen === "journal" ? (
           <JournalVoucherWorkspace
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} userId={ctx.user.id} companyName={co.name}
             branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}

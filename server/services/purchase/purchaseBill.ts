@@ -12,6 +12,7 @@ import { importCostBasis } from "./importCostBasis";
 import { resolveLines, type LineInput, type ResolvedLine } from "./lines";
 import { ZERO, fmt, toMicro, type Micro } from "./money";
 import { billedByChallanLine, billedByOrderLine, pending, receivedByOrderLine, withTolerance } from "./quantities";
+import { assertGlEntryAllowed } from "../glEntryControl";
 
 // PURCHASE BILL: the vendor's invoice. This is the document that hits the books.
 //
@@ -449,6 +450,7 @@ export function postPurchaseBill(id: number, actor: Actor, opts: Opts & QtyOpts 
     }
     rows.push({ generalLedgerId: bill.vendorGLId, debit: ZERO, credit: totals.total, narration: `Bill ${bill.invoiceNumber}${bill.vendorInvoiceNo ? ` / vendor invoice ${bill.vendorInvoiceNo}` : ""}`, agentId: bill.agentId });
     const jv = mergeRows(rows);
+    await assertGlEntryAllowed(tx, bill.companyId, jv.map((row) => row.generalLedgerId), "PURCHASE_BILL");
     const dr = jv.reduce((a, r) => a + r.debit, ZERO), cr = jv.reduce((a, r) => a + r.credit, ZERO);
     if (dr !== cr) throw new HttpError(500, `Journal does not balance (Dr ${fmt(dr, 2)} / Cr ${fmt(cr, 2)}). Nothing was posted.`);
 
@@ -534,6 +536,7 @@ export function reversePurchaseBill(id: number, actor: Actor, opts: Opts & LockO
 
     const [ojv] = await tx.select().from(S.journalVoucher).where(eq(S.journalVoucher.id, orig.journalVoucherId!));
     const ojl = await tx.select().from(S.journalVoucherLine).where(eq(S.journalVoucherLine.journalVoucherId, ojv.id)).orderBy(asc(S.journalVoucherLine.lineNumber));
+    await assertGlEntryAllowed(tx, orig.companyId, ojl.map((line) => line.generalLedgerId), "PURCHASE_BILL");
     const swapped: JvRow[] = ojl.map((l) => ({ generalLedgerId: l.generalLedgerId, debit: toMicro(l.credit), credit: toMicro(l.debit), narration: `Reversal: ${l.narration ?? ""}`.slice(0, 500), agentId: l.agentId }));
     const rvNumber = `R-${ojv.voucherNumber}`.length <= 30 ? `R-${ojv.voucherNumber}` : `R-${ojv.id}`;
     const rjv = await writeVoucher(tx, { companyId: orig.companyId, branchId: orig.branchId, voucherNumber: rvNumber, voucherDate: date, fiscalYear: fy.code, remarks: `Reversal of purchase bill ${orig.invoiceNumber}${opts.reason ? `: ${opts.reason}` : ""}`.slice(0, 1024), reversalOfId: ojv.id }, swapped, actor);

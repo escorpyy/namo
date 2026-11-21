@@ -7,6 +7,7 @@ import { parseDec, toCents } from "../../shared/decimal";
 import { recheckSettlements, settlementsOf, writeSettlements, type SettlementInput } from "./billSettlement";
 import { guardPeriod, type LockOverride } from "./periodLock";
 import { type Actor, type Opts, type Tx, assertBranch, inActorTx, parseDate, resolveFiscalYear, today } from "./purchase/common";
+import { assertGlEntryAllowed } from "./glEntryControl";
 
 // Cash / Bank Voucher (ERP-006). The rules that need no database live in shared/cashBankVoucher.ts (the screen uses them too); this file
 // owns everything that does: ledgers and sub-ledgers must exist in the company and be usable, the number, the lock date, the fiscal year,
@@ -83,7 +84,9 @@ async function checkedLines(tx: Tx, input: VoucherInput): Promise<JournalLine[]>
       throw new HttpError(400, `Line ${n}: ledger ${gl.code} needs a sub-ledger.`, `lines.${i}.subLedger`);
     }
   });
-  return journalLines(input.cashBankLedgerId, input.lines, { ...input, bankSubLedgerId: input.cashBankSubLedgerId });
+  const lines = journalLines(input.cashBankLedgerId, input.lines, { ...input, bankSubLedgerId: input.cashBankSubLedgerId });
+  await assertGlEntryAllowed(tx, input.companyId, lines.map((line) => line.generalLedgerId), "CASH_BANK");
+  return lines;
 }
 
 async function insertLines(tx: Tx, voucherId: number, lines: JournalLine[]) {
@@ -186,6 +189,7 @@ export function postVoucher(id: number, companyId: number, actor: Actor, opts: O
     const gls = await tx.select({ code: S.generalLedger.code, isActive: S.generalLedger.isActive }).from(S.generalLedger).where(inArray(S.generalLedger.id, ledgerIds));
     const off = gls.find((g) => !g.isActive);
     if (off) throw new HttpError(409, `Ledger ${off.code} is not active any more.`);
+    await assertGlEntryAllowed(tx, companyId, ledgerIds, "CASH_BANK");
     await recheckSettlements(tx, id, companyId);
     await markPosted(tx, id, actor);
     return { id, posted: true as const };
@@ -209,6 +213,7 @@ export function reverseVoucher(id: number, companyId: number, actor: Actor, opts
       generalLedgerId: l.generalLedgerId, subLedgerId: l.subLedgerId, debit: paise(l.debit), credit: paise(l.credit), narration: l.narration, isCashBankLine: l.isCashBankLine,
       instrumentType: l.instrumentType, chequeNumber: l.chequeNumber, chequeDate: day(l.chequeDate),
     })));
+    await assertGlEntryAllowed(tx, companyId, lines.map((line) => line.generalLedgerId), "CASH_BANK");
     const [r] = await tx.insert(S.cashBankVoucher).values({
       companyId, branchId: orig.branchId, voucherNumber: `R-${orig.voucherNumber}`.slice(0, 30), voucherDate: date, fiscalYear: fy.code,
       cashBankLedgerId: orig.cashBankLedgerId, payeeReference: orig.payeeReference,

@@ -8,6 +8,7 @@ import { resolveLines, type LineInput } from "./purchase/lines";
 import { fmt, toMicro, ZERO } from "./purchase/money";
 import { assertMandatorySalesTerms, recalcSalesTerms, saveSalesTerms, type SalesTermInput } from "./salesInvoiceTerms";
 import { mergeRows, writeVoucher, type JvRow } from "./voucherWriter";
+import { assertGlEntryAllowed } from "./glEntryControl";
 
 type SaveInput = {
   id?: number;
@@ -300,6 +301,7 @@ export function postSalesInvoice(id: number, actor: Actor, opts: WriteOpts = {})
     }
     rows.push({ generalLedgerId: invoice.customerGLId, subLedgerId: invoice.subLedgerId, debit: totals.total, credit: ZERO, narration: `Sales invoice ${invoice.invoiceNumber}`, agentId: invoice.agentId });
     const journalRows = mergeRows(rows);
+    await assertGlEntryAllowed(tx, invoice.companyId, journalRows.map((row) => row.generalLedgerId), "SALES_INVOICE");
     const debit = journalRows.reduce((sum, row) => sum + row.debit, ZERO);
     const credit = journalRows.reduce((sum, row) => sum + row.credit, ZERO);
     if (debit !== credit) throw new HttpError(500, `Sales journal does not balance (Dr ${fmt(debit, 2)} / Cr ${fmt(credit, 2)}). Nothing was posted.`);
@@ -342,6 +344,7 @@ export function reverseSalesInvoice(id: number, actor: Actor, opts: WriteOpts & 
     if (!oldVoucher) throw new HttpError(409, "The original invoice is missing its journal voucher and cannot be reversed.");
     const oldVoucherLines = await tx.select().from(S.journalVoucherLine).where(eq(S.journalVoucherLine.journalVoucherId, oldVoucher.id)).orderBy(asc(S.journalVoucherLine.lineNumber));
     if (!oldVoucherLines.length) throw new HttpError(409, "The original journal voucher has no lines and cannot be reversed.");
+    await assertGlEntryAllowed(tx, original.companyId, oldVoucherLines.map((row) => row.generalLedgerId), "SALES_INVOICE");
     const swapped: JvRow[] = oldVoucherLines.map((row) => ({
       generalLedgerId: row.generalLedgerId, subLedgerId: row.subLedgerId, debit: toMicro(row.credit), credit: toMicro(row.debit),
       narration: `Reversal: ${row.narration ?? ""}`.slice(0, 500), agentId: row.agentId,

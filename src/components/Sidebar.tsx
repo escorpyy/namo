@@ -24,6 +24,7 @@ import {
     "fs-ledgers",
     "code-numbering",
     "number-series",
+    "gl-setup",
   ];
 
 type Item = { id: string; label: string };
@@ -174,6 +175,7 @@ const sections: Section[] = [
       { id: "branches", label: "Branch" },
       { id: "code-numbering", label: "Code Numbering" },
       { id: "number-series", label: "Number Series" },
+      { id: "gl-setup", label: "GL Setup & Entry Controls" },
       { id: "setup-accounting", label: "Accounting" },
       { id: "setup-tax", label: "Tax" },
       { id: "setup-voucher-configuration", label: "Voucher Configuration" },
