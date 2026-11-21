@@ -14,7 +14,7 @@ export const AUDITED_TABLES = [
   "PurchaseImportAssessment", "PurchaseImportAssessmentAllocation", "PurchaseImportAssessmentLine", "PurchaseImportAssessmentTerm",
   "BillSettlement", "AdvanceApplication", "TermLedgerCorrection", "SalesDocumentTerm", "SalesInvoice", "SalesInvoiceLine",
   // masters that decide where an amount posts (migration 0033)
-  "PurchaseTerm", "SalesTerm", "GeneralLedger", "AccountSubGroup",
+  "PurchaseTerm", "SalesTerm", "GeneralLedger", "AccountSubGroup", "GeneralLedgerSetup",
 ] as const;
 
 export type AuditContext = { userId?: number | null; reason?: string | null };
