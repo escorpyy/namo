@@ -18,7 +18,7 @@ describe.skipIf(!DB_READY)("audit trail (database level)", () => {
     "CashBankVoucher", "CashBankVoucherLine", "CompanyLock", "JournalVoucher", "JournalVoucherLine", "OpeningBalance",
     "PurchaseBill", "PurchaseBillImportDetail", "PurchaseBillLine", "PurchaseDocumentTerm", "PurchaseDocumentTermAllocation",
     "PurchaseImportAssessment", "PurchaseImportAssessmentAllocation", "PurchaseImportAssessmentLine", "PurchaseImportAssessmentTerm",
-    "BillSettlement", "AdvanceApplication", "SalesDocumentTerm", "SalesInvoice", "SalesInvoiceLine",
+    "BillSettlement", "AdvanceApplication", "TermLedgerCorrection", "SalesDocumentTerm", "SalesInvoice", "SalesInvoiceLine",
     "PurchaseTerm", "SalesTerm", "GeneralLedger", "AccountSubGroup", // masters that decide where an amount posts (migration 0033)
   ];
 

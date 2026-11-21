@@ -12,6 +12,7 @@ export * from "./purchaseBill";
 export * from "./salesInvoice";
 export * from "./billSettlement";
 export * from "./advanceApplication";
+export * from "./termLedgerCorrection";
 export * from "./importAssessment";
 export * from "./periodLock";
 export * from "./codeRule";

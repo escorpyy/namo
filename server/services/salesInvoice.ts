@@ -1,3 +1,4 @@
+import { correctionMirrorRows } from "./termLedgerCorrection";
 import { and, asc, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import * as S from "../db/schema";
 import { HttpError } from "../routes/_util";
@@ -349,6 +350,7 @@ export function reverseSalesInvoice(id: number, actor: Actor, opts: WriteOpts & 
       generalLedgerId: row.generalLedgerId, subLedgerId: row.subLedgerId, debit: toMicro(row.credit), credit: toMicro(row.debit),
       narration: `Reversal: ${row.narration ?? ""}`.slice(0, 500), agentId: row.agentId,
     }));
+    swapped.push(...await correctionMirrorRows(tx, "SALES_INVOICE", original.id)); // what a term ledger correction moved comes back too
     const reverseVoucherNumber = `R-${oldVoucher.voucherNumber}`.length <= 30 ? `R-${oldVoucher.voucherNumber}` : `RSI-${oldVoucher.id}`;
     const journalVoucherId = await writeVoucher(tx, {
       companyId: original.companyId, branchId: original.branchId, voucherNumber: reverseVoucherNumber, voucherDate: date,
