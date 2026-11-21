@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
+import type { OpenRequest } from "../../lib/openRequest";
 import { RotateCcw, Send } from "lucide-react";
 import { salesInvoiceApi, type PDoc, type PLookups, type SalesLookups } from "../../api";
 import { parseDec } from "../../../shared/decimal";
@@ -29,6 +30,7 @@ import { useDocScreen, type DocApi, type DocConfig, type Errors } from "../purch
 export interface SalesScreenProps {
   companyId: number; branchId: number; userId: number; branchName: string; fyCode: string; calendar: "BS" | "AD";
   setStatus: (s: StatusInfo) => void; dirtyRef: MutableRefObject<boolean>; externalMessage: { text: string; n: number } | null;
+  openRequest?: OpenRequest | null;
 }
 
 export interface SForm {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useOpenRequest, type OpenRequest } from "../../lib/openRequest";
 import { BookOpen, Plus, Search } from "lucide-react";
 import { flushSync } from "react-dom";
 import { journalApi, type JListRow, type JLookups } from "../../api";
@@ -99,6 +100,7 @@ export default function JournalVoucherWorkspace(p: PurchaseScreenProps & { compa
     if (open) setActive(open.id);
     else addTab({ docId: id, title });
   }, [addTab]);
+  useOpenRequest(p.openRequest, (id) => openDocId(id));
   const closeTab = useCallback(async (id: number, force = false) => {
     if (!force && tabsRef.current.find((t) => t.id === id)?.dirty
       && !(await dlg.confirm("This voucher has unsaved changes. Close the tab and lose them?", { title: "Close this tab?", variant: "warning", confirmLabel: "Close tab", cancelLabel: "Keep editing" }))) return;

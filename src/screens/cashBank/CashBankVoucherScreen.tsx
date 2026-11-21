@@ -1,4 +1,5 @@
 import { NarrationInput } from "../../components/NarrationInput";
+import type { OpenRequest } from "../../lib/openRequest";
 import { PeekPanel, PeekToggle, usePeekOpen, usePeekTarget } from "../../components/PeekPanel";
 import { BillSettlementPanel, SettlementList, settlementsPayload, settlementsToMap, type SettleMap } from "./BillSettlementPanel";
 import { cashBankPeekRows, pendingNet } from "../../lib/peek";
@@ -26,6 +27,7 @@ import type { Mode, StatusInfo } from "../../types";
 export interface CashBankScreenProps {
   companyId: number; branchId: number; userId: number; branchName: string; fyCode: string; calendar: "BS" | "AD";
   setStatus: (s: StatusInfo) => void; dirtyRef: MutableRefObject<boolean>; externalMessage?: { text: string; n: number } | null;
+  openRequest?: OpenRequest | null;
 }
 
 interface Line { key: number; generalLedgerId: string; subLedgerId: string; receipt: string; payment: string; narration: string }

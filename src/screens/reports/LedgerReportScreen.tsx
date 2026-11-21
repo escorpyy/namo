@@ -70,6 +70,8 @@ function EdgeRow({ label, balance, debit, credit, cols, strong, title }: { label
 export default function LedgerReportScreen(p: {
   companyId: number; branchId: number; branchName: string; fyCode: string; fyStart: string; fyEnd: string; calendar: "BS" | "AD";
   setStatus: (s: StatusInfo) => void; dirtyRef: MutableRefObject<boolean>;
+  /** Ctrl+Enter on a line: open the source record (screen id of its module, record id) in that module's workspace, in view mode. */
+  onOpenSource: (screen: string, docId: number) => void;
 }) {
   const months = useMemo(() => monthsOf(p.fyStart, p.fyEnd, p.calendar), [p.fyStart, p.fyEnd, p.calendar]);
   const makeQuery = (): Query => {
@@ -154,7 +156,7 @@ export default function LedgerReportScreen(p: {
   useEffect(() => {
     p.setStatus({ mode: "view", count: result?.total ?? 0, shown: result?.rows.length ?? 0,
       message: error || (loading ? "Running ledger query…" : result ? "Ledger ready" : ready ? "Loading…" : "Choose a ledger"), kind: error ? "err" : "info",
-      hints: ["F4 ledger · F2 filters", "↑ ↓ move between lines · Enter opens detail", "Balances count posted entries only"] });
+      hints: ["F4 ledger · F2 filters", "↑ ↓ move between lines · Enter opens detail · Ctrl+Enter opens the source","Balances count posted entries only"] });
   }, [result, loading, error, ready, p.setStatus]);
 
   // ---- toolbar ---------------------------------------------------------------------------------------------------------------
@@ -257,6 +259,12 @@ export default function LedgerReportScreen(p: {
   }, { openingDebit: 0n, openingCredit: 0n, periodDebit: 0n, periodCredit: 0n, closingDebit: 0n, closingCredit: 0n }), [summaryRows]);
   const toggleRow = (key: string) => setExpanded((x) => x === key ? null : key);
   const onRowKey = (e: React.KeyboardEvent<HTMLElement>, key: string) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { // open the record behind the line (sales bill, purchase bill, voucher...) in its own workspace, in view mode
+      e.preventDefault();
+      const r = rows.find((x) => rowKey(x) === key);
+      if (r) p.onOpenSource(r.sourceScreen, r.sourceId);
+      return;
+    }
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedRowKey(key); toggleRow(key); }
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useOpenRequest, type OpenRequest } from "../../lib/openRequest";
 import { Calculator, Plus, Search } from "lucide-react";
 import { importAssessmentApi, purchaseApi, type PLookups } from "../../api";
 import { useDialog } from "../../components/Dialog";
@@ -103,6 +104,11 @@ export default function ImportCostAssessmentWorkspace(p: PurchaseScreenProps) {
     if (open) setActive(open.id);
     else addTab({ docId: row.id, title: String(row.assessmentNumber) });
   }, [addTab]);
+  useOpenRequest(p.openRequest, (id) => {
+    const open = tabsRef.current.find((t) => t.docId === id);
+    if (open) setActive(open.id);
+    else addTab({ docId: id, title: "Assessment" });
+  });
   const closeTab = useCallback(async (id: number, force = false) => {
     if (!force && tabsRef.current.find((t) => t.id === id)?.dirty
       && !(await dlg.confirm("This assessment has unsaved changes. Close the tab and lose them?", { title: "Close this tab?", variant: "warning", confirmLabel: "Close tab", cancelLabel: "Keep editing" }))) return;

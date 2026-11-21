@@ -1,4 +1,5 @@
 import { NumberField } from "../../components/purchase/NumberField";
+import type { OpenRequest } from "../../lib/openRequest";
 import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { Check, Lock, Ban } from "lucide-react";
 import type { PDoc, PLookups } from "../../api";
@@ -16,6 +17,7 @@ import { useDocScreen, type DocConfig, type Errors } from "./useDocScreen";
 export interface PurchaseScreenProps {
   companyId: number; branchId: number; userId: number; branchName: string; fyCode: string; calendar: "BS" | "AD";
   setStatus: (s: StatusInfo) => void; dirtyRef: MutableRefObject<boolean>; externalMessage: { text: string; n: number } | null;
+  openRequest?: OpenRequest | null;
 }
 
 export interface OForm {

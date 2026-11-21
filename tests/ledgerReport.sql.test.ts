@@ -22,3 +22,15 @@ describe("ledger report SQL identifiers", () => {
     expect(route).not.toContain('OR (s."partyId" IS NULL');
   });
 });
+
+describe("ledger report source record (Ctrl+Enter)", () => {
+  it("exposes the screen and id of the source record, chosen in the same order as the label and number", () => {
+    expect(route).toContain(`CASE WHEN si.id IS NOT NULL THEN 'sales-invoices' WHEN ia.id IS NOT NULL THEN 'purchase-import-assessments' WHEN pb.id IS NOT NULL THEN 'purchase-bills' ELSE 'journal' END AS "sourceScreen"`);
+    expect(route).toContain('COALESCE(si.id, ia.id, pb.id, v.id) AS "sourceId"');
+    expect(route).toContain(`'[]'::jsonb, '[]'::jsonb, 'cash-bank'::text, v.id`);
+  });
+  it("adds the same two trailing columns to both halves of the UNION", () => {
+    expect(route).toContain(`AS "productIds",\n        CASE WHEN si.id IS NOT NULL THEN 'sales-invoices'`);
+    expect(route).toContain(`'[]'::jsonb, '[]'::jsonb, 'cash-bank'::text, v.id\n      FROM "CashBankVoucherLine" l`);
+  });
+});

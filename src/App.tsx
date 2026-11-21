@@ -21,6 +21,7 @@ import PurchaseOrderWorkspace from "./screens/purchase/PurchaseOrderWorkspace";
 import PurchaseChallanWorkspace from "./screens/purchase/PurchaseChallanWorkspace";
 import ImportCostAssessmentWorkspace from "./screens/purchase/ImportCostAssessmentWorkspace";
 import { MASTERS } from "../shared/masters";
+import type { OpenRequest } from "./lib/openRequest";
 
 export default function App() {
   const [ctx, setCtx] = useState<ContextData | null>(null);
@@ -33,6 +34,7 @@ export default function App() {
   const [calendar, setCalendar] = useState<"BS" | "AD">(() => (localStorage.getItem("cal") as "BS" | "AD") ?? "BS");
   const [status, setStatus] = useState<StatusInfo>({ mode: "new", count: 0, shown: 0, message: "Loading…", kind: "info" });
   const [note, setNote] = useState<{ text: string; n: number } | null>(null);
+  const [openReq, setOpenReq] = useState<(OpenRequest & { screen: string }) | null>(null);
   const [fromChallan, setFromChallan] = useState<{ id: number; n: number } | null>(null);
   const dirtyRef = useRef(false);
   const dlg = useDialog();
@@ -122,6 +124,14 @@ export default function App() {
     setScreen(id);
   };
 
+  // Ctrl+Enter on a ledger report line: open the record behind it, in view mode, in its own workspace.
+  const openSource = async (target: string, docId: number) => {
+    if (!(await okToLeave("Unsaved changes will be lost. Leave this screen?", "Leave this screen?", "Leave screen"))) return;
+    setOpenReq({ screen: target, docId, n: Date.now() });
+    setScreen(target);
+  };
+  const openRequest = openReq?.screen === screen ? openReq : null;
+
   return (
     <QuickCreateHost companyId={companyId} calendar={calendar}>
     <div className="h-full flex flex-col">
@@ -137,7 +147,7 @@ export default function App() {
           const k = `${screen}:${companyId}:${branchId}:${fyId}`;
           const pp = {
             companyId, branchId, userId: ctx.user.id, branchName: co.branches.find((b) => b.id === branchId)?.name ?? "-",
-            fyCode: co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-", calendar, setStatus, dirtyRef, externalMessage: note,
+            fyCode: co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-", calendar, setStatus, dirtyRef, externalMessage: note, openRequest,
           };
           return screen === "purchase-orders" ? <PurchaseOrderWorkspace key={k} {...pp} />
             : screen === "purchase-challans" ? <PurchaseChallanWorkspace key={k} {...pp} onCreateBill={(id) => { setFromChallan({ id, n: Date.now() }); dirtyRef.current = false; setScreen("purchase-bills"); }} />
@@ -147,7 +157,7 @@ export default function App() {
           <JournalVoucherWorkspace
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} userId={ctx.user.id} companyName={co.name}
             branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
-            calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note}
+            calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} openRequest={openRequest}
           />
         ) : screen === "rpt-ageing" || screen === "rpt-outstanding" ? (
           <AgeingScreen
@@ -159,19 +169,19 @@ export default function App() {
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId}
             branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
             fyStart={co.fiscalYears.find((y) => y.id === fyId)?.startDate ?? ""} fyEnd={co.fiscalYears.find((y) => y.id === fyId)?.endDate ?? ""}
-            calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef}
+            calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} onOpenSource={openSource}
           />
         ) : screen === "sales-invoices" ? (
           <SalesInvoiceWorkspace
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} userId={ctx.user.id}
             branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
-            calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note}
+            calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} openRequest={openRequest}
           />
         ) : screen === "cash-bank" ? (
           <CashBankVoucherWorkspace
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} userId={ctx.user.id}
             branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
-            calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note}
+            calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} openRequest={openRequest}
           />
         ) : screen === "stock-opening" ? (
           <StockOpeningScreen

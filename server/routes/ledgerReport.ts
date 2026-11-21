@@ -180,7 +180,9 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
         COALESCE(si."invoiceNumber", ia."assessmentNumber", pb."invoiceNumber", v."voucherNumber") AS "sourceNumber",
         CASE WHEN si.id IS NOT NULL THEN 'Sales invoice' WHEN ia.id IS NOT NULL THEN 'Import cost assessment' WHEN pb.id IS NOT NULL THEN 'Purchase bill' ELSE 'Journal voucher' END AS "sourceLabel",
         COALESCE(sp.products, pp.products, '[]'::jsonb) AS products,
-        COALESCE(sp.ids, pp.ids, '[]'::jsonb) AS "productIds"
+        COALESCE(sp.ids, pp.ids, '[]'::jsonb) AS "productIds",
+        CASE WHEN si.id IS NOT NULL THEN 'sales-invoices' WHEN ia.id IS NOT NULL THEN 'purchase-import-assessments' WHEN pb.id IS NOT NULL THEN 'purchase-bills' ELSE 'journal' END AS "sourceScreen",
+        COALESCE(si.id, ia.id, pb.id, v.id) AS "sourceId"
       FROM "JournalVoucherLine" l JOIN "JournalVoucher" v ON v.id = l."journalVoucherId"
       JOIN "GeneralLedger" g ON g.id = l."generalLedgerId" LEFT JOIN "SubLedger" s ON s.id = l."subLedgerId"
       LEFT JOIN "User" u ON u.id = v."postedBy" LEFT JOIN "JournalVoucher" rv ON rv."reversalOfId" = v.id AND rv."isPosted" = true
@@ -211,7 +213,7 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
         v."payeeReference", v."reversalOfId", (rv.id IS NOT NULL), g.code, g.name,
         ${grouped ? sql`sg.id, sg.code, sg.description, ag.id, ag.code, ag.description, COALESCE(ledgerParty."agentId", g."agentId"), a.code, a.name, COALESCE(pt."subAreaId", g."subAreaId"), sa.code, sa.name, ar.id, ar.code, ar.name, NULL::int, NULL::text, NULL::text` : attrNoneCb},
         s.code, s.name,
-        l.debit::text, l.credit::text, v."voucherNumber", 'Cash / bank voucher', '[]'::jsonb, '[]'::jsonb
+        l.debit::text, l.credit::text, v."voucherNumber", 'Cash / bank voucher', '[]'::jsonb, '[]'::jsonb, 'cash-bank'::text, v.id
       FROM "CashBankVoucherLine" l JOIN "CashBankVoucher" v ON v.id = l."cashBankVoucherId"
       JOIN "GeneralLedger" g ON g.id = l."generalLedgerId" LEFT JOIN "SubLedger" s ON s.id = l."subLedgerId"
       ${grouped ? sql`JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId" JOIN "AccountGroup" ag ON ag.id = sg."accountGroupId"

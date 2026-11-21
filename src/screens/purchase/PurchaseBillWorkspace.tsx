@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useOpenRequest, type OpenRequest } from "../../lib/openRequest";
 import { Plus, Receipt, Search } from "lucide-react";
 import { flushSync } from "react-dom";
 import { purchaseApi, type PListRow, type PLookups } from "../../api";
@@ -122,6 +123,12 @@ export default function PurchaseBillWorkspace(p: PurchaseScreenProps & { fromCha
     });
   }, []);
 
+  // another screen (the ledger report) asked for one bill to be opened
+  useOpenRequest(p.openRequest, (id) => {
+    const open = tabsRef.current.find((t) => t.docId === id);
+    if (open) setActive(open.id);
+    else addTab({ docId: id, fromChallan: null, title: "Bill" });
+  });
   // a challan's "Create Bill" opens a new tab
   useEffect(() => {
     if (!p.fromChallan || consumedChallan === p.fromChallan.n) return;

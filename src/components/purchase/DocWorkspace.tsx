@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import { useOpenRequest, type OpenRequest } from "../../lib/openRequest";
 import { Plus, Search } from "lucide-react";
 import { flushSync } from "react-dom";
 import { useDialog } from "../Dialog";
@@ -17,6 +18,7 @@ import type { DocSnapshot } from "../../screens/purchase/useDocScreen";
 export interface WorkspaceCtx {
   companyId: number; branchId: number; userId: number; branchName: string; fyCode: string; calendar: "BS" | "AD";
   setStatus: (s: StatusInfo) => void; dirtyRef: MutableRefObject<boolean>; externalMessage: { text: string; n: number } | null;
+  openRequest?: OpenRequest | null; // another screen asked for one record to be opened here (in view mode)
 }
 
 // What the workspace hands to the entry component that draws one tab.
@@ -138,6 +140,7 @@ export default function DocWorkspace<F extends object, R extends { id: number },
     else addTab({ docId: id, title: Singular }); // the tab renames itself with the document number once it is open
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addTab]);
+  useOpenRequest(ctx.openRequest, openDocId);
   const closeTab = useCallback(async (id: number, force = false) => {
     if (!force && tabsRef.current.find((t) => t.id === id)?.dirty
       && !(await dlg.confirm(`This ${singular} has unsaved changes. Close the tab and lose them?`, { title: "Close this tab?", variant: "warning", confirmLabel: "Close tab", cancelLabel: "Keep editing" }))) return;

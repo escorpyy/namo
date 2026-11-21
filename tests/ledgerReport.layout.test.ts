@@ -63,7 +63,7 @@ const line = (n: number, gl: number, debit: string, credit: string, running: str
   agentId: null, agentCode: null, agentName: null, areaId: null, areaCode: null, areaName: null, subAreaId: null, subAreaCode: null, subAreaName: null,
   invoiceAgentId: null, invoiceAgentCode: null, invoiceAgentName: null,
   subLedgerCode: null, subLedgerName: null, debit, credit,
-  sourceNumber: `JV-${n}`, sourceLabel: "Journal voucher", products: [], productIds: [], running, total: 0,
+  sourceNumber: `JV-${n}`, sourceLabel: "Journal voucher", sourceScreen: "journal", sourceId: n, products: [], productIds: [], running, total: 0,
 });
 const sum = (gl: number, opening: string, debit: string, credit: string, closing: string): LedgerReportSummary => ({
   generalLedgerId: gl, code: gl === 1 ? "1010" : "2020", name: gl === 1 ? "Cash" : "Creditors",
