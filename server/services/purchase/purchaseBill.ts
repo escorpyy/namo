@@ -440,8 +440,11 @@ export function postPurchaseBill(id: number, actor: Actor, opts: Opts & QtyOpts 
     for (const { t, name, code, masterGL } of terms) {
       const amount = toMicro(t.finalAmount);
       if (amount === ZERO) continue;
-      const gl = t.generalLedgerId ?? masterGL;
+      // The term's ledger as it is NOW: a draft saved before the master was corrected must not post to the old ledger. (A posted bill is never
+      // touched by a master change; correcting those is done by the term ledger correction.)
+      const gl = masterGL ?? t.generalLedgerId;
       if (!gl) throw new HttpError(409, `Term ${code} (${name}) has no ledger, so it cannot be posted.`);
+      if (t.generalLedgerId !== gl) await tx.update(S.purchaseDocumentTerm).set({ generalLedgerId: gl }).where(eq(S.purchaseDocumentTerm.id, t.id));
       rows.push(t.nature === "ADDITIVE" ? { generalLedgerId: gl, debit: amount, credit: ZERO, narration: `${name} ${bill.invoiceNumber}` } : { generalLedgerId: gl, debit: ZERO, credit: amount, narration: `${name} ${bill.invoiceNumber}` });
     }
     rows.push({ generalLedgerId: bill.vendorGLId, debit: ZERO, credit: totals.total, narration: `Bill ${bill.invoiceNumber}${bill.vendorInvoiceNo ? ` / vendor invoice ${bill.vendorInvoiceNo}` : ""}`, agentId: bill.agentId });

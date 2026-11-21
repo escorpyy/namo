@@ -205,8 +205,9 @@ function termMaster(kind: "purchase" | "sales"): MasterDef {
       { name: "allocationBasis", label: "Allocation Basis", type: "select", options: ALLOC_BASIS, showIf: { field: "distributeToLines", in: ["true"] }, requiredIf: { field: "distributeToLines", in: ["true"] } },
     );
   }
-  // Every purchase term must have its own ledger (e.g. Import Duty under Direct Expenses): it is where the term posts.
-  fields.push(purchase ? { ...glf("generalLedgerId", "General Ledger"), required: true } : glf("generalLedgerId", "General Ledger"));
+  // Every term, purchase or sales, must have its own ledger (e.g. Import Duty under Direct Expenses, Trade Discount under Discount Allowed):
+  // it is where the term posts. A term without one could only fail later, when a document using it is posted.
+  fields.push({ ...glf("generalLedgerId", "General Ledger"), required: true });
   if (purchase) {
     fields.push(
       // Cost assessment (COSTING terms): does the amount enter the stock value of the goods? Claimable import VAT does not.

@@ -282,14 +282,16 @@ export function postSalesInvoice(id: number, actor: Actor, opts: WriteOpts = {})
       const amount = toMicro(line.basicAmount);
       if (amount !== ZERO) rows.push({ generalLedgerId: await salesLedgerOf(tx, invoice.companyId, line.productId, type, code), debit: ZERO, credit: amount, narration: `Sales ${invoice.invoiceNumber}`, agentId: invoice.agentId });
     }
-    const termRows = await tx.select({ row: S.salesDocumentTerm, code: S.salesTerm.code, name: S.salesTerm.name }).from(S.salesDocumentTerm)
+    const termRows = await tx.select({ row: S.salesDocumentTerm, code: S.salesTerm.code, name: S.salesTerm.name, masterGL: S.salesTerm.generalLedgerId }).from(S.salesDocumentTerm)
       .innerJoin(S.salesTerm, eq(S.salesTerm.id, S.salesDocumentTerm.termId))
       .where(and(eq(S.salesDocumentTerm.documentType, "SALES_INVOICE"), eq(S.salesDocumentTerm.documentId, id)));
-    for (const { row, code, name } of termRows) {
+    for (const { row, code, name, masterGL } of termRows) {
       const amount = toMicro(row.finalAmount);
       if (amount === ZERO) continue;
-      const glId = row.generalLedgerId;
+      // The term's ledger as it is NOW (a draft saved before the master was corrected must not post to the old one); the document's copy follows.
+      const glId = masterGL ?? row.generalLedgerId;
       if (!glId) throw new HttpError(409, `Term ${code} (${name}) has no ledger, so it cannot be posted.`);
+      if (row.generalLedgerId !== glId) await tx.update(S.salesDocumentTerm).set({ generalLedgerId: glId }).where(eq(S.salesDocumentTerm.id, row.id));
       const [ledger] = await tx.select({ isActive: S.generalLedger.isActive, companyId: S.generalLedger.companyId }).from(S.generalLedger).where(eq(S.generalLedger.id, glId));
       if (!ledger || ledger.companyId !== invoice.companyId || !ledger.isActive) throw new HttpError(409, `Term ${code} (${name}) has no active ledger in this company.`);
       rows.push(row.nature === "ADDITIVE"
