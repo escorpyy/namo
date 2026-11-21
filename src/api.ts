@@ -87,6 +87,26 @@ export const glSetupApi = {
     req<{ roles: GLSetupRole[]; ledgers: GLSetupLedger[] }>("/api/gl-setup", { method: "PUT", body: JSON.stringify({ companyId, userId, roles }) }),
 };
 
+// Term ledger correction: move posted bills / invoices of one term from the ledger they were posted to onto the right one (one correcting voucher)
+export type TermCorrectionKind = "PURCHASE" | "SALES";
+export type TermCorrectionQuery = { kind: TermCorrectionKind; termId: number; fromLedgerId: number; toLedgerId: number; dateFrom?: string; dateTo?: string };
+export type TermCorrectionRow = { documentType: string; documentId: number; documentTermId: number; documentNumber: string; documentDate: string; branchId: number; termName: string; side: "DR" | "CR"; amount: string };
+export type TermCorrectionPreview = { rows: TermCorrectionRow[]; count: number; documents: number; total: string };
+const tcQuery = (companyId: number, q: TermCorrectionQuery) => {
+  const p = new URLSearchParams({ companyId: String(companyId), kind: q.kind, termId: String(q.termId), fromLedgerId: String(q.fromLedgerId), toLedgerId: String(q.toLedgerId) });
+  if (q.dateFrom) p.set("dateFrom", q.dateFrom);
+  if (q.dateTo) p.set("dateTo", q.dateTo);
+  return p.toString();
+};
+export const termCorrectionApi = {
+  preview: (companyId: number, q: TermCorrectionQuery) => req<TermCorrectionPreview>(`/api/term-ledger-correction/preview?${tcQuery(companyId, q)}`),
+  count: (companyId: number, kind: TermCorrectionKind, termId: number, ledgerId: number) =>
+    req<{ documents: number; terms: number }>(`/api/term-ledger-correction/count?companyId=${companyId}&kind=${kind}&termId=${termId}&ledgerId=${ledgerId}`),
+  apply: (companyId: number, userId: number, q: TermCorrectionQuery, date: string, reason: string) =>
+    req<{ vouchers: { branchId: number; journalVoucherId: number; voucherNumber: string; documents: number; total: string }[]; count: number; documents: number }>(
+      "/api/term-ledger-correction/apply", { method: "POST", body: JSON.stringify({ companyId, userId, ...q, date, reason }) }),
+};
+
 // Opening Balance: grid screen ka alag API (company + branch + fiscal year ke saare ledgers)
 export interface ObRow {
   key: string; generalLedgerId: number; subLedgerId: number | null; code: string; name: string;

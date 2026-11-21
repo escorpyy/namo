@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "rea
 import { flushSync } from "react-dom";
 import { codeSpec } from "../../shared/codeRules";
 import { MASTERS, matchWhere, type MasterDef, type Opt } from "../../shared/masters";
-import { ApiError, codeRulesApi, masterApi } from "../api";
+import { ApiError, codeRulesApi, masterApi, termCorrectionApi } from "../api";
 import { useOnMasterChanged } from "../lib/masterEvents";
 import { emptyForm, recordLabel, recordTitle, sameForm, tabsOf, toForm, toPayload, validate, type Errors, type FormState, type Row } from "../lib/form";
 import type { Mode, MsgKind, StatusInfo } from "../types";
@@ -29,9 +29,10 @@ interface Props {
   calendar: "BS" | "AD";
   onContextChanged: () => void;
   userId?: number; // who is editing: recorded by the audit trail
+  onCorrectTerm?: (c: { kind: "PURCHASE" | "SALES"; termId: number; fromLedgerId: number; toLedgerId: number }) => void; // open Term Ledger Correction
 }
 
-export default function MasterScreen({ def, companyId, setStatus, dirtyRef, externalMessage, calendar, onContextChanged, userId }: Props) {
+export default function MasterScreen({ def, companyId, setStatus, dirtyRef, externalMessage, calendar, onContextChanged, userId, onCorrectTerm }: Props) {
   const api = useMemo(() => masterApi(def.key), [def.key]);
   const firstField = def.fields[0].name;
   const [items, setItems] = useState<Row[]>([]);
@@ -199,6 +200,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
     if (savingRef.current) return false; // double-submit roko
     savingRef.current = true; setSaving(true);
     const wasEdit = mode === "edit" && selectedId != null;
+    const oldLedger = wasEdit ? (items.find((i) => i.id === selectedId)?.generalLedgerId as number | null | undefined) ?? null : null;
     try {
       const rec = wasEdit ? await api.update(selectedId!, companyId, payload, userId) : await api.create(companyId, payload, userId);
       setItems((prev) => sortRows(def, [...prev.filter((i) => i.id !== rec.id), rec]));
@@ -206,6 +208,17 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
       flash(`${wasEdit ? "Updated" : "Saved"} ${recordLabel(def, rec)}`, "ok");
       if (def.refreshContext) onContextChanged();
       focusForm();
+      // A term's ledger was changed: bills already posted keep the old ledger; offer the one-voucher correction
+      const newLedger = (rec.generalLedgerId as number | null | undefined) ?? null;
+      const termKind = def.key === "purchase-terms" ? "PURCHASE" : def.key === "sales-terms" ? "SALES" : null;
+      if (wasEdit && termKind && oldLedger && newLedger && oldLedger !== newLedger && onCorrectTerm) {
+        try {
+          const n = await termCorrectionApi.count(companyId, termKind, rec.id, oldLedger);
+          if (n.documents > 0 && window.confirm(`${n.documents} posted ${termKind === "PURCHASE" ? "bill(s)" : "invoice(s)"} still use the old ledger for this term. Correct them now?`)) {
+            onCorrectTerm({ kind: termKind, termId: rec.id, fromLedgerId: oldLedger, toLedgerId: newLedger });
+          }
+        } catch { /* the warning is only a convenience */ }
+      }
       return true;
     } catch (e) {
       if (e instanceof ApiError && e.field && def.fields.some((f) => f.name === e.field)) {
