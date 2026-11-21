@@ -149,10 +149,12 @@ describe.skipIf(!DB_READY)("Purchase / Sales Term masters (API)", () => {
 
   it("sales terms: same rules, no landed-cost fields", async () => {
     const S = "sales-terms";
-    expect((await post(S, { ...base, code: `S${tag}`, name: "Insurance", sequence: 600 })).status).toBe(201);
-    expect((await post(S, { ...base, code: `T${tag}`, name: "x", sequence: 610, calcBase: "SINGLE_TERM" })).status).toBe(400);
+    // a sales term needs its own ledger too: it is where the term posts
+    expect((await post(S, { ...base, code: `N${tag}`, name: "No ledger", sequence: 599 })).status).toBe(400);
+    expect((await post(S, { ...base, code: `S${tag}`, name: "Insurance", sequence: 600, generalLedgerId: glA })).status).toBe(201);
+    expect((await post(S, { ...base, code: `T${tag}`, name: "x", sequence: 610, calcBase: "SINGLE_TERM", generalLedgerId: glA })).status).toBe(400);
     // landed-cost fields are not part of the sales schema; they must be ignored, not stored or rejected
-    const r = await post(S, { ...base, code: `U${tag}`, name: "x", sequence: 611, distributeToLines: true, allocationBasis: "VALUE" });
+    const r = await post(S, { ...base, code: `U${tag}`, name: "x", sequence: 611, generalLedgerId: glA, distributeToLines: true, allocationBasis: "VALUE" });
     expect(r.status).toBe(201);
     expect(r.body.distributeToLines).toBeUndefined();
   });

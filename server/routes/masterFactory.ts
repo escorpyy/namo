@@ -3,6 +3,8 @@ import { and, asc, eq, getTableColumns, getTableName, inArray, ne, sql } from "d
 import { z } from "zod";
 import { db } from "../db";
 import { HttpError, idParam, sameCompany, wrap } from "./_util";
+import { actorOf } from "./_input";
+import { inActorTx } from "../services/purchase/common";
 import type { FieldDef, MasterDef } from "../../shared/masters";
 
 type CountSrc = { table: any; column: string };
@@ -178,7 +180,7 @@ export function masterRouter(def: MasterDef, cfg: ServerCfg) {
     await cfg.validate?.(data, { companyId: global ? 0 : companyId });
     await assertUnique(data, global ? null : companyId);
     const values = { ...toDb(def, data), ...(cfg.parent || global ? {} : { companyId }) };
-    const [created] = await db.insert(t).values(values).returning({ id: t.id });
+    const [created] = await inActorTx(await actorOf(req), undefined, (tx) => tx.insert(t).values(values).returning({ id: t.id })); // the actor goes to the audit trail
     await cfg.afterWrite?.(data, created.id);
     res.status(201).json((await selectRows({ id: created.id }))[0]);
   }));
@@ -194,7 +196,7 @@ export function masterRouter(def: MasterDef, cfg: ServerCfg) {
       throw new HttpError(400, `${def.parent!.label} must belong to the same company.`, def.parent!.field);
     await cfg.validate?.(data, { companyId, id });
     await assertUnique(data, global ? null : companyId, id);
-    await db.update(t).set(toDb(def, data)).where(eq(t.id, id));
+    await inActorTx(await actorOf(req), undefined, (tx) => tx.update(t).set(toDb(def, data)).where(eq(t.id, id)));
     await cfg.afterWrite?.(data, id);
     res.json((await selectRows({ id }))[0]);
   }));
@@ -210,7 +212,7 @@ export function masterRouter(def: MasterDef, cfg: ServerCfg) {
       if (n > 0) throw new HttpError(409, `Cannot delete: ${n} ${c.label} linked to this ${def.singular}.`);
     }
     await cfg.beforeDelete?.(row as Record<string, any>);
-    await db.delete(t).where(eq(t.id, id));
+    await inActorTx(await actorOf(req), undefined, (tx) => tx.delete(t).where(eq(t.id, id)));
     res.json({ ok: true });
   }));
 

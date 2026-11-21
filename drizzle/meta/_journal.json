@@ -232,6 +232,13 @@
       "when": 1794986636723,
       "tag": "0032_bill_settlement_journal",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795233331159,
+      "tag": "0033_audit_masters",
+      "breakpoints": true
     }
   ]
 }

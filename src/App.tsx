@@ -200,7 +200,7 @@ export default function App() {
             setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note}
           />
         ) : (
-        <MasterScreen key={`${screen}:${companyId}`} def={MASTERS[screen]} companyId={companyId} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} calendar={calendar} onContextChanged={refreshCtx} />
+        <MasterScreen key={`${screen}:${companyId}`} def={MASTERS[screen]} companyId={companyId} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} calendar={calendar} onContextChanged={refreshCtx} userId={ctx.user.id} />
         )}
       </div>
       <StatusBar

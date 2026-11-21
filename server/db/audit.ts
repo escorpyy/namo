@@ -13,6 +13,8 @@ export const AUDITED_TABLES = [
   "PurchaseBill", "PurchaseBillImportDetail", "PurchaseBillLine", "PurchaseDocumentTerm", "PurchaseDocumentTermAllocation",
   "PurchaseImportAssessment", "PurchaseImportAssessmentAllocation", "PurchaseImportAssessmentLine", "PurchaseImportAssessmentTerm",
   "BillSettlement", "AdvanceApplication", "SalesDocumentTerm", "SalesInvoice", "SalesInvoiceLine",
+  // masters that decide where an amount posts (migration 0033)
+  "PurchaseTerm", "SalesTerm", "GeneralLedger", "AccountSubGroup",
 ] as const;
 
 export type AuditContext = { userId?: number | null; reason?: string | null };

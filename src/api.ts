@@ -46,10 +46,11 @@ export const masterApi = (key: string) => {
   const edited = <T>(p: Promise<T>) => (key === "narrations" ? p.then((r) => { narrationEdits++; return r; }) : p);
   return {
     list: (companyId: number) => req<Row[]>(`/api/masters/${key}?companyId=${companyId}`),
-    create: (companyId: number, v: Record<string, unknown>) =>
-      edited(req<Row>(`/api/masters/${key}?companyId=${companyId}`, { method: "POST", body: JSON.stringify(v) })),
-    update: (id: number, companyId: number, v: Record<string, unknown>) => edited(req<Row>(`/api/masters/${key}/${id}?companyId=${companyId}`, { method: "PUT", body: JSON.stringify(v) })),
-    remove: (id: number, companyId: number) => edited(req<{ ok: true }>(`/api/masters/${key}/${id}?companyId=${companyId}`, { method: "DELETE" })),
+    // userId (optional) is who is making the change: the audit trail of the masters that decide where amounts post records it
+    create: (companyId: number, v: Record<string, unknown>, userId?: number) =>
+      edited(req<Row>(`/api/masters/${key}?companyId=${companyId}${userId ? `&userId=${userId}` : ""}`, { method: "POST", body: JSON.stringify(v) })),
+    update: (id: number, companyId: number, v: Record<string, unknown>, userId?: number) => edited(req<Row>(`/api/masters/${key}/${id}?companyId=${companyId}${userId ? `&userId=${userId}` : ""}`, { method: "PUT", body: JSON.stringify(v) })),
+    remove: (id: number, companyId: number, userId?: number) => edited(req<{ ok: true }>(`/api/masters/${key}/${id}?companyId=${companyId}${userId ? `&userId=${userId}` : ""}`, { method: "DELETE" })),
   };
 };
 
