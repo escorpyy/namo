@@ -25,6 +25,7 @@ import {
     "code-numbering",
     "number-series",
     "gl-setup",
+    "set-shortcuts",
   ];
 
 type Item = { id: string; label: string };
@@ -191,6 +192,7 @@ const sections: Section[] = [
       { id: "users", label: "Users" },
       { id: "user-access", label: "User Access" },
       { id: "set-preferences", label: "Application Preferences" },
+      { id: "set-shortcuts", label: "Keyboard Shortcuts" },
       { id: "set-localization", label: "Localization" },
       { id: "set-appearance", label: "Appearance" },
       { id: "set-notifications", label: "Notifications" },
@@ -201,6 +203,10 @@ const sections: Section[] = [
     ],
   },
 ];
+
+export const READY_SCREEN_OPTIONS = sections.flatMap((section) => section.items
+  .filter((item) => !!MASTERS[item.id] || CUSTOM_SCREENS.includes(item.id))
+  .map((item) => ({ id: item.id, label: item.label, section: section.label })));
 
 const sectionOf = (itemId: string) => sections.find((s) => s.items.some((i) => i.id === itemId))?.id;
 

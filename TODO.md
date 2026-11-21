@@ -1,4 +1,12 @@
-# GL Setup ToDo
+# Namo ERP ToDo
+
+## Keyboard Shortcuts
+
+- [x] **Create and manage shortcuts** — Under Settings → Keyboard Shortcuts, let the current user create, edit, and remove keyboard shortcuts for supported common screen actions, toggling the sidebar, and navigating to ready screens. Capture and display key combinations clearly; saved combinations must trigger the selected action. Keep bindings scoped to the current user in browser-local storage and keep existing default shortcuts working.
+
+- [x] **Warn and restrict conflicts** — Show a clear warning when a shortcut conflicts with another custom binding, an existing built-in ERP shortcut, or a reserved browser shortcut. Do not allow a conflicted set to be saved; disable and guard Save until every conflict has been resolved. Provide a way to remove or re-record a conflicting binding.
+
+## GL Setup
 
 - [x] **Company-level GL role mappings** — Add GL Setup for exactly these roles: Profit and Loss Account; Cash Book; Sales Account; Sales Return Account; Purchase Account; Purchase Return Account; Opening Stock P&L; Closing Stock P&L; Closing Stock B/S. Each role can select a General Ledger from the current company; selections and settings persist per company and load again when the screen is reopened. An unassigned role is permitted until configured. Existing Product GL mappings must not be silently overwritten.
 

@@ -38,3 +38,28 @@ Reuse Namo’s existing accounting-master design rather than introducing a new v
 - Tally ledger setup documents group classification, opening balances, and the restriction on deleting ledgers already used by vouchers: https://help.tallysolutions.com/article/Tally.ERP9/Creating_Masters/Accounts_Info/Predefined_Ledgers_in_TallyERP.htm
 - QuickBooks Online documents account types driving financial reporting, inactive accounts retaining history while preventing new transactions, and locked accounts being excluded from posting selectors: https://quickbooks.intuit.com/learn-support/en-us/help-article/chart-accounts/learn-chart-accounts-quickbooks-online/L2yc6KBob_US_en_US
 - Intuit documents required/default accounts and the limits on deactivating special accounts: https://quickbooks.intuit.com/learn-support/en-us/help-article/chart-accounts/manage-default-special-accounts-chart-accounts/L3WvLaIfa_US_en_US
+
+
+# Keyboard Shortcuts — Implementation Plan
+
+## Scope and approach
+
+Add a functional keyboard-shortcut editor under Settings → Keyboard Shortcuts. Users can create, edit, and remove bindings for common screen actions (save/update, new, edit, search, help), toggling the sidebar, and navigating to ready screens. Screen actions dispatch the app's established keyboard events so current forms keep their existing behavior; sidebar and navigation actions call the app directly. New bindings supplement rather than silently replace the documented defaults.
+
+## Persistence and runtime
+
+Persist the current user's bindings in browser `localStorage`, keyed by user ID, consistent with existing lightweight preferences. Validate and normalize saved data before using it. A shared shortcut utility owns normalization, display labels, the supported action catalog, storage access, and conflict detection. The app-level capture-phase dispatcher checks user bindings before screen listeners; it skips key-recording controls and text composition, prevents the captured custom chord from reaching browser defaults, and dispatches the selected action. Navigation goes through the existing unsaved-change guard.
+
+## Conflict policy
+
+Normalize Ctrl/Command to one portable Ctrl label. Require a modifier for ordinary keys, permit function keys, and reject duplicate custom combinations plus combinations already used by built-in ERP actions or common browser controls. Show actionable inline warnings on the affected rows and disable/guard Save until every binding is conflict-free. Users can cancel/reset a recording or remove a binding to resolve a conflict.
+
+## Project structure and design
+
+- `src/lib/keyboardShortcuts.ts`: action definitions, combination capture/normalization, conflict policy, and per-user localStorage helpers.
+- `src/screens/KeyboardShortcutsScreen.tsx`: compact editor in the existing dense slate/blue ERP style, with capture buttons, action selectors, conflict alerts, save/reset feedback, and dirty-state protection.
+- `src/components/Sidebar.tsx`: expose ready-screen labels for the navigation-action selector and add the new settings entry.
+- `src/App.tsx`: render the settings screen and host the configurable shortcut dispatcher alongside current navigation and sidebar handlers.
+- `tests/keyboardShortcuts.test.ts`: verify normalization, duplicate/reserved conflict blocking, and stored-binding validation.
+
+Keep existing hard-coded shortcuts working; the configurable bindings provide additional chords and do not rewrite transaction semantics. The settings are browser-local and per-user, not synchronized across devices.

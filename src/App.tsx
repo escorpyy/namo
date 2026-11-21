@@ -21,8 +21,17 @@ import PurchaseOrderWorkspace from "./screens/purchase/PurchaseOrderWorkspace";
 import PurchaseChallanWorkspace from "./screens/purchase/PurchaseChallanWorkspace";
 import ImportCostAssessmentWorkspace from "./screens/purchase/ImportCostAssessmentWorkspace";
 import GLSetupScreen from "./screens/GLSetupScreen";
+import KeyboardShortcutsScreen from "./screens/KeyboardShortcutsScreen";
+import { READY_SCREEN_OPTIONS } from "./components/Sidebar";
+import {
+  dispatchScreenShortcut, findShortcutConflicts, getBrowserShortcutStorage, getShortcutActions,
+  getShortcutCombination, readShortcutBindings, type ShortcutActionDefinition,
+} from "./lib/keyboardShortcuts";
 import { MASTERS } from "../shared/masters";
 import type { OpenRequest } from "./lib/openRequest";
+
+const SHORTCUT_ACTIONS = getShortcutActions(READY_SCREEN_OPTIONS);
+const SHORTCUT_ACTION_BY_ID = new Map<string, ShortcutActionDefinition>(SHORTCUT_ACTIONS.map((action) => [action.id, action]));
 
 export default function App() {
   const [ctx, setCtx] = useState<ContextData | null>(null);
@@ -39,6 +48,7 @@ export default function App() {
   const [fromChallan, setFromChallan] = useState<{ id: number; n: number } | null>(null);
   const dirtyRef = useRef(false);
   const dlg = useDialog();
+  const shortcutActionRef = useRef<(actionId: string) => void>(() => {});
 
   const pickDefaults = (c: ContextData["companies"][number]) => {
     setBranchId((c.branches.find((b) => b.isHeadOffice) ?? c.branches[0])?.id ?? 0);
@@ -90,6 +100,28 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [toggleSidebar]);
 
+  const activeUserId = ctx?.user.id;
+  useEffect(() => {
+    if (activeUserId === undefined) return;
+    const onCustomShortcut = (event: KeyboardEvent) => {
+      if (event.repeat || event.isComposing) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest("[data-shortcut-capture]")) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      const combination = getShortcutCombination(event);
+      if (!combination) return;
+      const bindings = readShortcutBindings(getBrowserShortcutStorage(), activeUserId, SHORTCUT_ACTIONS);
+      if (findShortcutConflicts(bindings, SHORTCUT_ACTIONS).length) return;
+      const binding = bindings.find((item) => item.combination === combination);
+      if (!binding) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      shortcutActionRef.current(binding.actionId);
+    };
+    window.addEventListener("keydown", onCustomShortcut, true);
+    return () => window.removeEventListener("keydown", onCustomShortcut, true);
+  }, [activeUserId]);
+
   if (error) {
     return (
       <div className="h-full grid place-items-center">
@@ -125,6 +157,14 @@ export default function App() {
     setScreen(id);
   };
 
+  shortcutActionRef.current = (actionId) => {
+    const action = SHORTCUT_ACTION_BY_ID.get(actionId);
+    if (!action) return;
+    if (action.kind === "screen-key") dispatchScreenShortcut(action);
+    else if (action.kind === "toggle-sidebar") toggleSidebar();
+    else void navigate(action.target);
+  };
+
   // Ctrl+Enter on a ledger report line: open the record behind it, in view mode, in its own workspace.
   const openSource = async (target: string, docId: number) => {
     if (!(await okToLeave("Unsaved changes will be lost. Leave this screen?", "Leave this screen?", "Leave screen"))) return;
@@ -144,7 +184,9 @@ export default function App() {
       <div className="flex-1 min-h-0 flex">
         <Sidebar collapsed={collapsed} active={screen} onToggle={toggleSidebar} onNavigate={navigate} onNotify={(text) => { setNote({ text, n: Date.now() }); void dlg.info(text, { title: "Not available yet" }); }} />
         {/* key: screen ya company badalne par list reload + form reset */}
-        {screen.startsWith("purchase-") && screen !== "purchase-terms" ? (() => {
+        {screen === "set-shortcuts" ? (
+          <KeyboardShortcutsScreen key={`${screen}:${ctx.user.id}`} userId={ctx.user.id} dirtyRef={dirtyRef} screens={READY_SCREEN_OPTIONS} />
+        ) : screen.startsWith("purchase-") && screen !== "purchase-terms" ? (() => {
           const k = `${screen}:${companyId}:${branchId}:${fyId}`;
           const pp = {
             companyId, branchId, userId: ctx.user.id, branchName: co.branches.find((b) => b.id === branchId)?.name ?? "-",
