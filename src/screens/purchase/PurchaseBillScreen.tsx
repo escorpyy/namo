@@ -5,7 +5,7 @@ import { type ComboOption } from "../../components/Combobox";
 import { Dialog } from "../../components/Dialog";
 import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
 import { COMMON_HELP, DocHeader, HINTS, Pill, formEnterKey, money } from "../../components/purchase/Bits";
-import { BillHeaderTable, HeaderTermsTable, ImportDetailsTable, IMPORT_FIELDS, LinkedCostsTable, VendorBillsTable, useVendorBills } from "../../components/purchase/BillTables";
+import { BillHeaderTable, HeaderTermsTable, ImportDetailsButton, ImportDetailsDialog, IMPORT_FIELDS, importFilled, LinkedCostsTable, VendorBillsTable, useVendorBills } from "../../components/purchase/BillTables";
 import { LinesGrid } from "../../components/purchase/LinesGrid";
 import { useTermsDialog } from "../../components/purchase/TermsDialog";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
@@ -175,12 +175,12 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
 
   // ---- tab state: title / unsaved mark for the tab strip (Alt+, / Alt+. move between tabs, Alt+W closes this one; the workspace handles those) ----
   useEffect(() => { p.onMeta(p.tabId, { title: doc ? String(doc.invoiceNumber) : "New bill", dirty: s.dirty, docId: doc?.id ?? null }); }, [doc?.invoiceNumber, doc?.id, s.dirty, p.tabId]);
-  // A save that found a problem in the (collapsed) import details opens them and puts the cursor on the field; every other field is already on screen
+  // A save that found a problem in the import details opens their dialog and puts the cursor on the field; every other field is already on screen
   // and useDocScreen moves the cursor to it.
   useEffect(() => {
     const first = Object.keys(s.errors).find((key) => s.errors[key] && key.startsWith("imp."));
     if (!first) return;
-    setImportOpen(true);
+    setImportDlg((current) => current ?? "manual");
     window.setTimeout(() => document.querySelector<HTMLElement>(`[data-field="${first}"]`)?.focus(), 60);
   }, [s.errors]);
 
@@ -208,8 +208,8 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
 
   // posted goods bills that a service bill can be linked to as a cost
   const [mains, setMains] = useState<PListRow[]>([]);
-  // Import / landed-cost detail panels stay collapsed until the user opens them (or existing data forces open once).
-  const [importOpen, setImportOpen] = useState(false);
+  // Import details live in a dialog ("auto": opened by the flow after the header, "manual": by the user or a save error); the linked-costs table stays collapsed until opened.
+  const [importDlg, setImportDlg] = useState<null | "auto" | "manual">(null);
   const [landedOpen, setLandedOpen] = useState(false);
   const importAutoOpened = useRef(false);
   const landedAutoOpened = useRef(false);
@@ -225,12 +225,11 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     return o;
   }, [mains, f?.importCostForBillId, doc]);
 
-  // Auto-expand collapsible panels once when the open document already carries data.
+  // The import dialog opens by itself once per bill; switching away from "Import" (or another bill) arms it again.
   useEffect(() => {
-    if (!f || f.invoiceType !== "IMPORT") { importAutoOpened.current = false; return; }
-    const hasImp = Object.values(f.imp).some((v) => String(v ?? "").trim() !== "");
-    if (hasImp && !importAutoOpened.current) { setImportOpen(true); importAutoOpened.current = true; }
-  }, [f?.invoiceType, f?.imp, doc?.id]);
+    if (!f || f.invoiceType !== "IMPORT") { importAutoOpened.current = false; setImportDlg(null); }
+  }, [f?.invoiceType, doc?.id]);
+  // Auto-expand the linked-costs table once when the open document already carries data.
   useEffect(() => {
     const sources = doc?.importCostSources?.length ?? 0;
     if (sources > 0 && !landedAutoOpened.current) { setLandedOpen(true); landedAutoOpened.current = true; }
@@ -286,6 +285,16 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     );
   }
 
+  // "Header completed": nothing outside the lines, terms and import details is still failing validation.
+  const headerDone = Object.entries(cfg.validate(f, lk)).every(([key, message]) => !message || /^(L\.|T\.|imp\.)/.test(key) || key === "lines" || key === "terms");
+  const autoImport = f.invoiceType === "IMPORT" && !ro && headerDone && !importAutoOpened.current && importFilled(f.imp) === 0;
+  const closeImport = () => {
+    const auto = importDlg === "auto";
+    setImportDlg(null);
+    // after the automatic dialog the flow carries on to the lines; after a manual one the cursor goes back to the button
+    window.setTimeout(() => ((auto ? document.querySelector<HTMLElement>('[data-field="L.0.p"]:not(:disabled)') : null) ?? document.querySelector<HTMLElement>('[data-nav="import-details"]'))?.focus(), 40);
+  };
+
   return (
     <>
       <section data-purchase-document className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -299,11 +308,11 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
           <div className="shrink-0">
             <BillHeaderTable f={f} lk={lk} doc={doc} readOnly={ro} companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} calendar={p.calendar}
               err={s.err} patch={s.patch} clearError={s.clearError} costTargets={sourceTargetOpts} mains={mains} duplicate={vendorBills.duplicate}
-              onInvoiceType={(type) => { if (type !== "IMPORT") setImportOpen(false); }} />
+              onInvoiceType={(type) => { if (type !== "IMPORT") setImportDlg(null); }} />
           </div>
           {f.invoiceType === "IMPORT" && (
             <div className="shrink-0">
-              <ImportDetailsTable f={f} readOnly={ro} calendar={p.calendar} err={s.err} patch={s.patch} clearError={s.clearError} open={importOpen} onToggle={() => setImportOpen((v) => !v)} />
+              <ImportDetailsButton imp={f.imp} readOnly={ro} autoOpen={autoImport} onOpen={(auto) => { importAutoOpened.current = true; setImportDlg(auto ? "auto" : "manual"); }} />
             </div>
           )}
 
@@ -345,6 +354,10 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
       </section>
 
       {T.node}
+      {importDlg && (
+        <ImportDetailsDialog imp={f.imp} readOnly={ro} calendar={p.calendar} err={s.err} onClose={closeImport}
+          onSave={(imp) => { s.patch({ imp }); s.clearError(...IMPORT_FIELDS.map((k) => `imp.${k.key}`)); closeImport(); }} />
+      )}
       {s.dialog && <Dialog spec={s.dialog} onClose={() => s.setDialog(null)} />}
       {s.help && <ShortcutsOverlay onClose={() => s.setHelp(false)} shortcuts={HELP} />}
     </>

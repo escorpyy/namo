@@ -72,7 +72,8 @@ export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, hasLines, c
           <colgroup><col /><col style={{ width: "150px" }} /></colgroup>
           <thead><tr><th colSpan={2} className="text-left">Totals</th></tr></thead>
           <tbody>
-            {entries.map((entry) => (
+            {/* additions and deductions are one signed "Net terms" figure here; the itemised terms are in the terms table */}
+            {entries.filter((entry) => entry.label !== "Additions" && entry.label !== "Deductions").map((entry) => (
               <tr key={entry.label} className={entry.total ? "bg-cobalt-50" : ""}>
                 <th scope="row" className={`text-left text-[12px] ${entry.total ? "font-semibold text-ink" : "font-medium text-slate-600"}`}>{entry.label}</th>
                 <td aria-live={entry.total ? "polite" : undefined} aria-atomic={entry.total ? true : undefined} title={entry.value}

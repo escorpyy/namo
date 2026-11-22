@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, FileText, X } from "lucide-react";
 import { purchaseApi, type PDoc, type PListRow, type PLookups } from "../../api";
 import { formatImportCost } from "../../../shared/import-costing";
 import { toMicro } from "../../../shared/purchase-calculation";
@@ -9,7 +9,7 @@ import { AdvanceBlock } from "../AdvanceBlock";
 import { Combobox, type ComboOption } from "../Combobox";
 import { DateInput } from "../DateInput";
 import { NarrationInput } from "../NarrationInput";
-import { Pill, focusStep, money } from "./Bits";
+import { Pill, focusStep, formEnterKey, money } from "./Bits";
 import { AgentPicker, SubLedgerPicker, VendorPicker, useVendorOptions } from "./HeadFields";
 import { NumberField } from "./NumberField";
 import type { BForm } from "../../screens/purchase/PurchaseBillScreen";
@@ -198,58 +198,117 @@ export function BillHeaderTable(p: BillHeaderProps) {
 
 // ---- import details (customs, LC, transport, foreign currency) --------------------------------------------------------------------
 
-export function ImportDetailsTable({ f, readOnly: ro, calendar, err, patch, clearError, open, onToggle }: {
-  f: BForm; readOnly: boolean; calendar: "BS" | "AD"; err: Errs; patch: (change: Partial<BForm>) => void; clearError: (...keys: string[]) => void; open: boolean; onToggle: () => void;
+export const importFilled = (imp: Record<string, string>) => Object.values(imp).filter((v) => String(v ?? "").trim() !== "").length;
+const MODE_LABEL: Record<string, string> = { ROAD: "Road", AIR: "Air", RAIL: "Rail", OTHER: "Other" };
+
+// Import details are a button in the flow before the lines, not a table on the screen: hover shows what is entered, click opens the dialog to view / edit / save.
+// For an import bill, moving on from the completed header lands on the button and `autoOpen` opens the dialog once.
+export function ImportDetailsButton({ imp, readOnly, autoOpen, onOpen }: { imp: Record<string, string>; readOnly: boolean; autoOpen: boolean; onOpen: (auto: boolean) => void }) {
+  const filled = importFilled(imp);
+  const needsDeclaration = !readOnly && !String(imp.customsDeclarationNo ?? "").trim();
+  const rows = IMPORT_FIELDS.filter((k) => String(imp[k.key] ?? "").trim() !== "");
+  return (
+    <div className="group relative inline-block shrink-0">
+      <button type="button" data-nav="import-details" aria-haspopup="dialog" className="btn" onClick={() => onOpen(false)} onFocus={() => { if (autoOpen) onOpen(true); }}>
+        <FileText size={14} /> Import details
+        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11.5px] font-medium text-slate-600">{filled ? `${filled} filled` : "not entered"}</span>
+        {needsDeclaration && <span className="text-[12px] font-normal text-amber-800">customs declaration no. needed to post</span>}
+      </button>
+      {filled > 0 && (
+        <div role="tooltip" className="invisible absolute left-0 top-full z-30 mt-1 w-[min(560px,90vw)] border border-slate-300 bg-white shadow-lg group-hover:visible">
+          <table aria-label="Import details entered" className="xl-table table-fixed [&_tr>:first-child]:border-l-0 [&_tr>:last-child]:border-r-0 [&>tbody>tr:last-child>*]:border-b-0">
+            <colgroup><col style={{ width: "42%" }} /><col /></colgroup>
+            <tbody>
+              {rows.map((k) => (
+                <tr key={k.key}>
+                  <th scope="row" className="bg-slate-50 text-left text-[12px] font-semibold text-slate-600">{k.short ?? k.label}</th>
+                  <td className="truncate text-left">{k.kind === "mode" ? MODE_LABEL[imp[k.key]] ?? imp[k.key] : imp[k.key]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="px-2 py-1 text-[11.5px] text-slate-500">{readOnly ? "Click to view" : "Click to edit"}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The details are edited on a draft; Save puts it on the bill, Cancel / Esc leaves the bill as it was.
+export function ImportDetailsDialog({ imp, readOnly: ro, calendar, err, onSave, onClose }: {
+  imp: Record<string, string>; readOnly: boolean; calendar: "BS" | "AD"; err: Errs; onSave: (imp: Record<string, string>) => void; onClose: () => void;
 }) {
-  const filled = Object.values(f.imp).filter((v) => String(v ?? "").trim() !== "").length;
-  const set = (key: string, v: string) => patch({ imp: { ...f.imp, [key]: v } });
+  const [draft, setDraft] = useState<Record<string, string>>(imp);
+  const changed = JSON.stringify(draft) !== JSON.stringify(imp);
+  const set = (key: string, v: string) => setDraft((d) => ({ ...d, [key]: v }));
+  useEffect(() => {
+    const t = window.setTimeout(() => (document.querySelector<HTMLElement>("[data-import-dialog] [data-field]:not(:disabled)") ?? document.querySelector<HTMLElement>("[data-import-dialog] button"))?.focus(), 40);
+    return () => window.clearTimeout(t);
+  }, []);
   const rows: (typeof IMPORT_FIELDS)[] = [];
   for (let i = 0; i < IMPORT_FIELDS.length; i += 4) rows.push(IMPORT_FIELDS.slice(i, i + 4));
-  const fx = Number(f.imp.exchangeRate) > 0 && Number(f.imp.foreignInvoiceAmount) > 0;
+  const fx = Number(draft.exchangeRate) > 0 && Number(draft.foreignInvoiceAmount) > 0;
   return (
-    <div className="lg-grid min-w-0 border border-slate-200 bg-white [&_.fld:disabled]:text-slate-700 [&_select:disabled]:[-webkit-text-fill-color:#334155]">
-      <table aria-label="Import details" className={`xl-table min-w-[960px] table-fixed ${FRAME} ${NO_HOVER}`}>
-        <colgroup>{[0, 1, 2, 3].map((i) => <Fragment key={i}><col style={{ width: "128px" }} /><col /></Fragment>)}</colgroup>
-        <thead>
-          <tr>
-            <th colSpan={8} className="p-0 text-left">
-              <button type="button" className="flex min-h-[34px] w-full items-center gap-2 px-3 py-1 text-left hover:bg-slate-100" onClick={onToggle} aria-expanded={open}>
-                {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                <span className="text-[13px] font-semibold text-ink">Import details</span>
-                <span className="text-[12px] font-normal text-slate-500">{filled ? `${filled} field${filled === 1 ? "" : "s"} filled` : "Optional — expand to enter customs, LC, transport, FX"}</span>
-              </button>
-            </th>
-          </tr>
-        </thead>
-        {open && (
-          <tbody>
-            <tr><td colSpan={8} className="bg-slate-50 text-left text-[12px] text-slate-600">
-              Customs declaration number is needed to post an import bill. Other fields are optional.
-              {fx && <> {(f.imp.currencyCode ?? "").toUpperCase()} {f.imp.foreignInvoiceAmount} × {f.imp.exchangeRate} = NPR <b>{(Math.round(Number(f.imp.foreignInvoiceAmount) * Number(f.imp.exchangeRate) * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}</b>. Enter line rates in NPR (foreign rate × exchange rate).</>}
-            </td></tr>
-            {rows.map((chunk, r) => (
-              <tr key={r}>
-                {chunk.map((k) => {
-                  const name = `imp.${k.key}`, value = f.imp[k.key] ?? "";
-                  return k.kind === "date"
-                    ? <DateCell key={k.key} name={name} label={k.label} value={value} onChange={(v) => { set(k.key, v); clearError(name); }} calendar={calendar} readOnly={ro} error={err(name)} hint={false} />
-                    : (
-                      <Fragment key={k.key}>
-                        <FLabel title={k.label}>{k.short ?? k.label}</FLabel>
-                        <FCell error={err(name)}>
-                          {k.kind === "mode"
-                            ? <SelectInput name={name} label={k.label} disabled={ro} value={value} onChange={(v) => set(k.key, v)}><option value="">—</option><option value="ROAD">Road</option><option value="AIR">Air</option><option value="RAIL">Rail</option><option value="OTHER">Other</option></SelectInput>
-                            : <TextInput name={name} label={k.label} value={value} onChange={(v) => set(k.key, v)} readOnly={ro} max={k.max ?? 60} error={err(name)} />}
-                        </FCell>
-                      </Fragment>
-                    );
-                })}
-                <Filler pairs={4 - chunk.length} />
-              </tr>
-            ))}
-          </tbody>
-        )}
-      </table>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-3" onMouseDown={(e) => { if (e.target === e.currentTarget && !changed) onClose(); }}>
+      <div data-import-dialog data-purchase-document role="dialog" aria-modal="true" aria-labelledby="import-dialog-title" className="ledger flex max-h-[92vh] w-[min(1100px,96vw)] flex-col border border-slate-500 bg-white shadow-xl"
+        onKeyDown={(e) => {
+          if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); return; }
+          if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); e.stopPropagation(); if (!ro) onSave(draft); return; }
+          if (e.key === "Tab") {
+            const all = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("input, select, textarea, button")).filter((x) => !(x as HTMLInputElement).disabled && x.getClientRects().length > 0);
+            const first = all[0], last = all[all.length - 1];
+            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+            return;
+          }
+          formEnterKey(e);
+        }}>
+        <header className="flex items-center gap-3 border-b border-slate-300 px-4 py-2.5">
+          <h2 id="import-dialog-title" className="text-[15px] font-semibold text-ink">Import details</h2>
+          <span className="text-[12px] text-slate-500">{ro ? "View only" : "Customs declaration number is needed to post an import bill; the rest is optional."}</span>
+          <span className="flex-1" />
+          <button type="button" className="btn !h-7 !px-2" aria-label="Close" onClick={onClose}><X size={14} /></button>
+        </header>
+        <div className="lg-scroll min-h-0 overflow-auto p-3">
+          {fx && <p className="mb-2 text-[12px] text-slate-600">{(draft.currencyCode ?? "").toUpperCase()} {draft.foreignInvoiceAmount} × {draft.exchangeRate} = NPR <b>{(Math.round(Number(draft.foreignInvoiceAmount) * Number(draft.exchangeRate) * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}</b>. Enter line rates in NPR (foreign rate × exchange rate).</p>}
+          <div className="lg-grid min-w-0 border border-slate-200 bg-white [&_.fld:disabled]:text-slate-700 [&_select:disabled]:[-webkit-text-fill-color:#334155]">
+            <table aria-label="Import details" className={`xl-table min-w-[860px] table-fixed ${FRAME} ${NO_HOVER}`}>
+              <colgroup>{[0, 1, 2, 3].map((i) => <Fragment key={i}><col style={{ width: "128px" }} /><col /></Fragment>)}</colgroup>
+              <tbody>
+                {rows.map((chunk, r) => (
+                  <tr key={r}>
+                    {chunk.map((k) => {
+                      const name = `imp.${k.key}`, value = draft[k.key] ?? "";
+                      return k.kind === "date"
+                        ? <DateCell key={k.key} name={name} label={k.label} value={value} onChange={(v) => set(k.key, v)} calendar={calendar} readOnly={ro} error={err(name)} hint={false} />
+                        : (
+                          <Fragment key={k.key}>
+                            <FLabel title={k.label}>{k.short ?? k.label}</FLabel>
+                            <FCell error={err(name)}>
+                              {k.kind === "mode"
+                                ? <SelectInput name={name} label={k.label} disabled={ro} value={value} onChange={(v) => set(k.key, v)}><option value="">—</option><option value="ROAD">Road</option><option value="AIR">Air</option><option value="RAIL">Rail</option><option value="OTHER">Other</option></SelectInput>
+                                : <TextInput name={name} label={k.label} value={value} onChange={(v) => set(k.key, v)} readOnly={ro} max={k.max ?? 60} error={err(name)} />}
+                            </FCell>
+                          </Fragment>
+                        );
+                    })}
+                    <Filler pairs={4 - chunk.length} />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <footer className="flex items-center justify-end gap-2 border-t border-slate-300 px-4 py-2.5">
+          {ro
+            ? <button type="button" className="btn" onClick={onClose}>Close <span className="kbd">Esc</span></button>
+            : (
+              <>
+                <button type="button" className="btn btn-primary" onClick={() => onSave(draft)}>Save <span className="kbd">Ctrl+S</span></button>
+                <button type="button" className="btn" onClick={onClose}>Cancel <span className="kbd">Esc</span></button>
+              </>
+            )}
+        </footer>
+      </div>
     </div>
   );
 }
