@@ -232,7 +232,7 @@ describe.skipIf(!DB_READY)("Company, Branch and Fiscal Year masters (API)", () =
     it("cannot be deleted while it has opening data (seeded head office) or user access; then it can", async () => {
       const seeded = await del("branches", seededHo);
       expect(seeded.status).toBe(409);
-      expect(seeded.body.message).toMatch(/Opening Balance/);
+      expect(seeded.body.message).toMatch(/Cannot delete: .* linked to this Branch/); // the first blocker named depends on what other tests have posted (vouchers or opening balances)
       const b = (await rows("branches", tc)).find((x) => x.code === `B1${tag}`);
       const sita = (await rows("user-access", companyId)).find((a) => a.userName === "Sita Karki").userId;
       const access = await call("POST", `/api/masters/user-access?companyId=${tc}`, { userId: sita, branchId: b.id, role: "VIEWER", isActive: true });
