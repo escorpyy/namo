@@ -4,16 +4,17 @@ import type { LedgerImpact } from "../api";
 // The two questions asked when the ledger of a master (a billing term) is changed and transactions already carry the old ledger.
 // Step 1 tells the person what is happening and how many transactions are involved; step 2 asks whether those are moved too.
 // Resolves "ALL" (reassign everything till date), "UPCOMING" (only transactions from now on) or null (cancel: nothing is saved).
-export async function askLedgerChange(dlg: DialogApi, o: { masterLabel: string; oldLedger: string; newLedger: string; impact: LedgerImpact }): Promise<"ALL" | "UPCOMING" | null> {
+export async function askLedgerChange(dlg: DialogApi, o: { masterLabel: string; field?: string; noun?: string; oldLedger: string; newLedger: string; impact: LedgerImpact }): Promise<"ALL" | "UPCOMING" | null> {
   const { impact } = o;
   const n = impact.documents;
+  const field = o.field ?? "General Ledger", noun = o.noun ?? "term";
   const first = await dlg.choose(
     <div className="space-y-2">
-      <p>You are changing the General Ledger of <b>{o.masterLabel}</b> in the master.</p>
+      <p>You are changing the {field} of <b>{o.masterLabel}</b> in the master.</p>
       <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[12.5px]">
         <span className="text-slate-500">From</span> <b>{o.oldLedger}</b> <span className="text-slate-500">to</span> <b>{o.newLedger}</b>
       </p>
-      <p><b>{n}</b> {n === 1 ? "transaction is" : "transactions are"} already posted or saved with <b>{o.oldLedger}</b> for this term{impact.posted !== n ? ` (${impact.posted} posted, ${n - impact.posted} draft)` : ""}.</p>
+      <p><b>{n}</b> {n === 1 ? "transaction is" : "transactions are"} already posted or saved with <b>{o.oldLedger}</b> for this {noun}{impact.posted !== n ? ` (${impact.posted} posted, ${n - impact.posted} draft)` : ""}.</p>
       <p className="text-slate-500">Every change is recorded in the audit trail.</p>
     </div>,
     { title: "Change ledger of this master?", variant: "warning", choices: [{ label: "Cancel", value: "CANCEL", kind: "neutral" }, { label: "Reassign…", value: "REASSIGN", kind: "primary" }] },

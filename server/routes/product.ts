@@ -4,6 +4,9 @@ import { db } from "../db";
 import * as S from "../db/schema";
 import { HttpError, idParam, sameCompany, wrap } from "./_util";
 import { applyConditions, buildSchema } from "./masterFactory";
+import { actorOf } from "./_input";
+import { inActorTx } from "../services/purchase/common";
+import { activeJobFor, productKind, productLedger, startProductJob, windowsOf, type ProductPeriod, type ProductSide } from "../services/ledgerReassign";
 import type { MasterDef } from "../../shared/masters";
 
 const P = S.product, SD = S.stockDetail, NS = S.nonStockDetail, SV = S.serviceDetail, FA = S.fixedAssetDetail, BD = S.bundleDetail, AU = S.alternateUnit, BC = S.bundleComponent;
@@ -161,7 +164,7 @@ export function productRouter(def: MasterDef) {
     if (!Number.isInteger(companyId)) throw new HttpError(400, "companyId is required.");
     const d = parse(req.body);
     await check(d, companyId);
-    const id = await db.transaction(async (tx) => {
+    const id = await inActorTx(await actorOf(req), undefined, async (tx: any) => {
       const [p] = await tx.insert(P).values({ companyId, type: d.type, ...headerVals(d) }).returning({ id: P.id });
       await writeDetail(tx, p.id, d, true);
       return p.id;
@@ -177,11 +180,29 @@ export function productRouter(def: MasterDef) {
     const d = parse(req.body);
     if (d.type !== ex.type) throw new HttpError(409, "Product type cannot be changed after creation (create a new product instead).", "type");
     await check(d, ex.companyId, id);
-    await db.transaction(async (tx) => {
+    const actor = await actorOf(req);
+    // The ledger this product posts to (purchase side / sales side) may be changing: transactions already posted can be moved to the new one (background job)
+    const sides = [["PURCHASE", d.type === "FIXED_ASSET" ? d.assetGLId : d.purchaseGLId, req.query.reassign], ["SALES", d.salesGLId, req.query.reassignSales]] as const;
+    const changes: { side: ProductSide; from: number; to: number; periods: ProductPeriod[]; scope: "ALL" | "UPCOMING" }[] = [];
+    for (const [side, next, scope] of sides) {
+      const cur = await productLedger(db, id, side);
+      if (!cur?.ledgerId || !next || cur.ledgerId === Number(next)) continue;
+      if (await activeJobFor(ex.companyId, productKind(side), id)) throw new HttpError(409, "The previous ledger reassignment for this product is still running. Wait for it to finish, then change the ledger again.");
+      changes.push({ side, from: cur.ledgerId, to: Number(next), periods: cur.periods, scope: scope === "ALL" ? "ALL" : "UPCOMING" });
+    }
+    const label = `${ex.code} — ${ex.description}`;
+    const windowTo = await inActorTx(changes.length ? { ...actor, reason: `Ledger of product "${label}" changed in the master (${changes.map((c) => `${c.side.toLowerCase()}: ${c.scope === "ALL" ? "transactions to date are reassigned" : "upcoming transactions only"}`).join("; ")})` } : actor, undefined, async (tx: any) => {
       await tx.update(P).set(headerVals(d)).where(eq(P.id, id));
       await writeDetail(tx, id, d, false);
+      return ((await tx.execute(sql`select to_char(clock_timestamp() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as at`)) as any)[0].at as string;
     });
-    res.json((await selectRows({ id }))[0]);
+    const jobs: { id: number; total: number }[] = [];
+    for (const c of changes) {
+      if (c.scope !== "ALL") continue;
+      const j = await startProductJob({ companyId: ex.companyId, productId: id, side: c.side, masterName: label, fromLedgerId: c.from, toLedgerId: c.to, windows: windowsOf(c.periods, c.from, windowTo), userId: actor.userId ?? null });
+      jobs.push({ id: j.id, total: j.total });
+    }
+    res.json({ ...(await selectRows({ id }))[0], ...(jobs.length ? { ledgerJob: jobs[0], ledgerJobs: jobs } : {}) });
   }));
 
   r.delete("/:id", wrap(async (req, res) => {

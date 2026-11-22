@@ -13,6 +13,33 @@ const sideOf = (kind: TermKind, nature: string, reversal: boolean): "DR" | "CR" 
   return dr !== reversal ? "DR" : "CR";
 };
 
+// Moves `amount` on one side of a posted voucher from one ledger to another: takes it off the old ledger's line (the line goes when nothing is left) and
+// puts it on the same side of the new ledger (added to a plain line of that ledger if the voucher has one). False when the voucher has no such amount.
+export async function moveOnVoucher(tx: Tx, jv: number, side: "DR" | "CR", amount: string, oldLedger: number, newLedger: number): Promise<boolean> {
+  const col = side === "DR" ? "debit" : "credit";
+  const [line] = (await tx.execute(sql`
+    select id, ${sql.identifier(col)} as amt from "JournalVoucherLine"
+     where "journalVoucherId" = ${jv} and "generalLedgerId" = ${oldLedger} and ${sql.identifier(col)} >= ${amount}
+     order by ${sql.identifier(col)} desc limit 1`)) as unknown as { id: number; amt: string }[];
+  if (!line) return false;
+  if (Number(line.amt) === Number(amount)) await tx.execute(sql`delete from "JournalVoucherLine" where id = ${line.id}`);
+  else await tx.execute(sql`update "JournalVoucherLine" set ${sql.identifier(col)} = ${sql.identifier(col)} - ${amount} where id = ${line.id}`);
+  const [same] = (await tx.execute(sql`
+    select id from "JournalVoucherLine"
+     where "journalVoucherId" = ${jv} and "generalLedgerId" = ${newLedger} and "subLedgerId" is null and "agentId" is null and ${sql.identifier(col)} > 0
+     order by id limit 1`)) as unknown as { id: number }[];
+  if (same) await tx.execute(sql`update "JournalVoucherLine" set ${sql.identifier(col)} = ${sql.identifier(col)} + ${amount} where id = ${same.id}`);
+  else {
+    const [{ n }] = (await tx.execute(sql`select coalesce(max("lineNumber"), 0) + 1 as n from "JournalVoucherLine" where "journalVoucherId" = ${jv}`)) as unknown as { n: number }[];
+    const [src] = (await tx.execute(sql`select narration, "agentId" from "JournalVoucherLine" where id = ${line.id}`)) as unknown as { narration: string | null }[];
+    await tx.insert(S.journalVoucherLine).values({
+      journalVoucherId: jv, lineNumber: n, generalLedgerId: newLedger, subLedgerId: null,
+      debit: side === "DR" ? amount : "0", credit: side === "CR" ? amount : "0", narration: src?.narration ?? null,
+    });
+  }
+  return true;
+}
+
 export async function propagateTermLedger(tx: Tx, companyId: number, kind: TermKind, termId: number, oldLedger: number, newLedger: number, only?: number[]) {
   const bill = kind === "PURCHASE" ? "PurchaseBill" : "SalesInvoice";
   const termTbl = kind === "PURCHASE" ? "PurchaseDocumentTerm" : "SalesDocumentTerm";
@@ -30,34 +57,10 @@ export async function propagateTermLedger(tx: Tx, companyId: number, kind: TermK
   for (const r of rows) {
     if (r.isPosted && r.jv && Number(r.amount) > 0) {
       const side = sideOf(kind, r.nature, r.reversal);
-      const col = side === "DR" ? "debit" : "credit";
-      const [line] = (await tx.execute(sql`
-        select id, ${sql.identifier(col)} as amt from "JournalVoucherLine"
-         where "journalVoucherId" = ${r.jv} and "generalLedgerId" = ${oldLedger} and ${sql.identifier(col)} >= ${r.amount}
-         order by ${sql.identifier(col)} desc limit 1`)) as unknown as { id: number; amt: string }[];
-      if (!line) {
+      if (!(await moveOnVoucher(tx, r.jv, side, r.amount, oldLedger, newLedger))) {
         // The voucher does not carry this amount on the old ledger (it was posted some other way): nothing to move. The document still takes the new
         // ledger for the term and the job reports it as skipped, so the person can look at it.
         skipped++;
-        await tx.execute(sql`update ${sql.identifier(termTbl)} set "generalLedgerId" = ${newLedger} where id = ${r.termRowId}`);
-        continue;
-      }
-      // take the amount off the old line (drop the line when nothing is left) ...
-      if (Number(line.amt) === Number(r.amount)) await tx.execute(sql`delete from "JournalVoucherLine" where id = ${line.id}`);
-      else await tx.execute(sql`update "JournalVoucherLine" set ${sql.identifier(col)} = ${sql.identifier(col)} - ${r.amount} where id = ${line.id}`);
-      // ... and put it on the new ledger, on the same side (added to an existing plain line of that ledger if there is one)
-      const [same] = (await tx.execute(sql`
-        select id from "JournalVoucherLine"
-         where "journalVoucherId" = ${r.jv} and "generalLedgerId" = ${newLedger} and "subLedgerId" is null and "agentId" is null and ${sql.identifier(col)} > 0
-         order by id limit 1`)) as unknown as { id: number }[];
-      if (same) await tx.execute(sql`update "JournalVoucherLine" set ${sql.identifier(col)} = ${sql.identifier(col)} + ${r.amount} where id = ${same.id}`);
-      else {
-        const [{ n }] = (await tx.execute(sql`select coalesce(max("lineNumber"), 0) + 1 as n from "JournalVoucherLine" where "journalVoucherId" = ${r.jv}`)) as unknown as { n: number }[];
-        const [src] = (await tx.execute(sql`select narration from "JournalVoucherLine" where id = ${line.id}`)) as unknown as { narration: string | null }[];
-        await tx.insert(S.journalVoucherLine).values({
-          journalVoucherId: r.jv, lineNumber: n, generalLedgerId: newLedger, subLedgerId: null,
-          debit: side === "DR" ? r.amount : "0", credit: side === "CR" ? r.amount : "0", narration: src?.narration ?? null,
-        });
       }
     }
     // the ledger the document remembers for this term follows too (drafts included: they post to the master's ledger anyway)

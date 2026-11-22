@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, pgTable, serial, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { check, index, integer, jsonb, pgTable, serial, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 import { createdAt } from "./_helpers";
 import { generalLedger } from "./accounting";
 import { company, user } from "./core";
@@ -17,7 +17,7 @@ export const ledgerReassignJob = pgTable(
   {
     id: serial().primaryKey(),
     companyId: integer().notNull().references(() => company.id, { onDelete: "restrict" }),
-    kind: varchar({ length: 30 }).notNull(), // PURCHASE_TERM | SALES_TERM
+    kind: varchar({ length: 30 }).notNull(), // PURCHASE_TERM | SALES_TERM | PRODUCT_PURCHASE | PRODUCT_SALES (masterId = the product)
     masterId: integer().notNull(),
     masterName: varchar({ length: 200 }).notNull(),
     fromLedgerId: integer().notNull().references(() => generalLedger.id, { onDelete: "restrict" }),
@@ -32,11 +32,28 @@ export const ledgerReassignJob = pgTable(
     startedAt: timestamp({ precision: 3 }),
     finishedAt: timestamp({ precision: 3 }),
     seenAt: timestamp({ precision: 3 }), // the person has been told it finished
+    // Products only: the periods in which the OLD ledger was in force ([{ from, to }] as UTC ISO, null = open). A document posted in another period used another ledger.
+    windows: jsonb().$type<{ from: string | null; to: string | null }[]>(),
   },
   (t) => [
     index("LedgerReassignJob_companyId_idx").on(t.companyId),
     index("LedgerReassignJob_status_idx").on(t.status),
     check("LedgerReassignJob_status_check", sql`${t.status} IN ('QUEUED', 'RUNNING', 'DONE', 'FAILED')`),
     check("LedgerReassignJob_ledgers_check", sql`${t.fromLedgerId} <> ${t.toLedgerId}`),
+  ],
+);
+
+// Documents a product job has already moved, so a restarted job never moves one twice (a product's lines carry no ledger of their own to tell by).
+export const ledgerReassignItem = pgTable(
+  "LedgerReassignItem",
+  {
+    id: serial().primaryKey(),
+    jobId: integer().notNull().references(() => ledgerReassignJob.id, { onDelete: "cascade" }),
+    documentType: varchar({ length: 20 }).notNull(), // PURCHASE_BILL | SALES_INVOICE
+    documentId: integer().notNull(),
+  },
+  (t) => [
+    uniqueIndex("LedgerReassignItem_job_document_key").on(t.jobId, t.documentType, t.documentId),
+    check("LedgerReassignItem_type_check", sql`${t.documentType} IN ('PURCHASE_BILL', 'SALES_INVOICE')`),
   ],
 );

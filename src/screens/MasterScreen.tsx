@@ -201,22 +201,30 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
     savingRef.current = true; setSaving(true);
     const wasEdit = mode === "edit" && selectedId != null;
     try {
-      // A billing term's ledger is being changed while transactions already carry the old one: ask what should happen to them
-      let reassign: "ALL" | "UPCOMING" | undefined;
-      const jobKind = def.key === "purchase-terms" ? "PURCHASE_TERM" : def.key === "sales-terms" ? "SALES_TERM" : null;
+      // The ledger of a billing term, or the purchase / sales ledger of a product, is being changed while transactions already carry the old one:
+      // ask what should happen to them (Cancel / Reassign, then Upcoming only / All till date)
+      let reassign: "ALL" | "UPCOMING" | undefined, reassignSales: "ALL" | "UPCOMING" | undefined;
       const before = wasEdit ? items.find((i) => i.id === selectedId) : undefined;
-      const oldLedger = (before?.generalLedgerId as number | null | undefined) ?? null, newLedger = (payload.generalLedgerId as number | null | undefined) ?? null;
-      if (jobKind && wasEdit && oldLedger && newLedger && oldLedger !== newLedger) {
-        const impact = await ledgerReassignApi.impact(companyId, jobKind, selectedId!);
-        if (impact.documents > 0) {
-          const gls = await masterApi("general-ledger").list(companyId);
-          const nameOf = (id: number) => { const g = gls.find((x) => x.id === id); return g ? `${g.code} — ${g.name}` : `#${id}`; };
-          const choice = await askLedgerChange(dlg, { masterLabel: recordLabel(def, before!), oldLedger: nameOf(oldLedger), newLedger: nameOf(newLedger), impact });
-          if (!choice) { flash("Ledger change cancelled. Nothing was saved.", "info"); return false; }
-          reassign = choice;
-        }
+      const isTerm = def.key === "purchase-terms" || def.key === "sales-terms", isProduct = def.key === "products";
+      type Side = { kind: "PURCHASE_TERM" | "SALES_TERM" | "PRODUCT_PURCHASE" | "PRODUCT_SALES"; field: string; noun: string; from: number | null; to: number | null; set: (v: "ALL" | "UPCOMING") => void };
+      const sides: Side[] = [];
+      if (before && isTerm) sides.push({ kind: def.key === "purchase-terms" ? "PURCHASE_TERM" : "SALES_TERM", field: "General Ledger", noun: "term", from: (before.generalLedgerId as number | null) ?? null, to: (payload.generalLedgerId as number | null) ?? null, set: (v) => { reassign = v; } });
+      if (before && isProduct) {
+        const asset = before.type === "FIXED_ASSET";
+        sides.push({ kind: "PRODUCT_PURCHASE", field: asset ? "Asset Ledger" : "Purchase Ledger", noun: "product", from: ((asset ? before.assetGLId : before.purchaseGLId) as number | null) ?? null, to: ((asset ? payload.assetGLId : payload.purchaseGLId) as number | null) ?? null, set: (v) => { reassign = v; } });
+        sides.push({ kind: "PRODUCT_SALES", field: "Sales Ledger", noun: "product", from: (before.salesGLId as number | null) ?? null, to: (payload.salesGLId as number | null) ?? null, set: (v) => { reassignSales = v; } });
       }
-      const rec = wasEdit ? await api.update(selectedId!, companyId, payload, userId, reassign) : await api.create(companyId, payload, userId);
+      for (const sd of sides) {
+        if (!sd.from || !sd.to || sd.from === sd.to) continue;
+        const impact = await ledgerReassignApi.impact(companyId, sd.kind, selectedId!);
+        if (impact.documents === 0) continue;
+        const gls = await masterApi("general-ledger").list(companyId);
+        const nameOf = (id: number) => { const g = gls.find((x) => x.id === id); return g ? `${g.code} — ${g.name}` : `#${id}`; };
+        const choice = await askLedgerChange(dlg, { masterLabel: recordLabel(def, before!), field: sd.field, noun: sd.noun, oldLedger: nameOf(sd.from), newLedger: nameOf(sd.to), impact });
+        if (!choice) { flash("Ledger change cancelled. Nothing was saved.", "info"); return false; }
+        sd.set(choice);
+      }
+      const rec = wasEdit ? await api.update(selectedId!, companyId, payload, userId, reassign, reassignSales) : await api.create(companyId, payload, userId);
       const ledgerJob = (rec as { ledgerJob?: { id: number } }).ledgerJob;
       if (ledgerJob) window.dispatchEvent(new CustomEvent("namo:ledger-job", { detail: ledgerJob.id })); // the progress box opens (LedgerJobWatcher)
       setItems((prev) => sortRows(def, [...prev.filter((i) => i.id !== rec.id), rec]));

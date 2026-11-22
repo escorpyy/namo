@@ -2,7 +2,7 @@ import { Router } from "express";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import * as S from "../db/schema";
-import { jobsFor, markSeen, retryJob, termImpact, type JobKind } from "../services/ledgerReassign";
+import { jobsFor, markSeen, productImpact, retryJob, termImpact } from "../services/ledgerReassign";
 import { HttpError, wrap } from "./_util";
 
 // What a ledger change on a master would touch, and the background jobs that move posted transactions to the new ledger.
@@ -21,11 +21,15 @@ const whole = (v: unknown, name: string): number => {
 ledgerReassignRouter.get("/impact", wrap(async (req, res) => {
   const companyId = whole(req.query.companyId, "companyId"), masterId = whole(req.query.masterId, "masterId");
   const kind = req.query.kind;
-  if (kind !== "PURCHASE_TERM" && kind !== "SALES_TERM") throw new HttpError(400, "kind must be PURCHASE_TERM or SALES_TERM.", "kind");
+  if (kind === "PRODUCT_PURCHASE" || kind === "PRODUCT_SALES") {
+    res.json(await productImpact(companyId, masterId, kind === "PRODUCT_PURCHASE" ? "PURCHASE" : "SALES"));
+    return;
+  }
+  if (kind !== "PURCHASE_TERM" && kind !== "SALES_TERM") throw new HttpError(400, "kind must be PURCHASE_TERM, SALES_TERM, PRODUCT_PURCHASE or PRODUCT_SALES.", "kind");
   const term = kind === "PURCHASE_TERM" ? S.purchaseTerm : S.salesTerm;
   const [m] = await db.select({ name: term.name, generalLedgerId: term.generalLedgerId }).from(term).where(and(eq(term.id, masterId), eq(term.companyId, companyId)));
   if (!m) throw new HttpError(404, "Term not found in this company.");
-  const impact = m.generalLedgerId ? await termImpact(companyId, kind as JobKind, masterId, m.generalLedgerId) : { documents: 0, posted: 0, lines: 0 };
+  const impact = m.generalLedgerId ? await termImpact(companyId, kind, masterId, m.generalLedgerId) : { documents: 0, posted: 0, lines: 0 };
   res.json({ masterName: m.name, ledgerId: m.generalLedgerId, ...impact });
 }));
 

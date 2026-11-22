@@ -57,6 +57,7 @@ describe.skipIf(!DB_READY)("Changing a term's ledger in the master moves posted 
         const byDoc = (child: string, fk: string, parent: string) => tx.execute(sql`delete from ${sql.identifier(child)} where ${sql.identifier(fk)} in (select id from ${sql.identifier(parent)} where "companyId" = ${co})`);
         for (const t of ["NumberCounter", "NumberSeriesUser", "NumberSeriesBranch"]) await byDoc(t, "seriesId", "NumberSeries");
         await tx.execute(sql`delete from "NumberSeries" where "companyId" = ${co}`);
+        await tx.execute(sql`delete from "LedgerReassignItem" where "jobId" in (select id from "LedgerReassignJob" where "companyId" = ${co})`);
         await tx.execute(sql`delete from "LedgerReassignJob" where "companyId" = ${co}`);
         await tx.execute(sql`delete from "PurchaseDocumentTermAllocation" where "documentTermId" in (select id from "PurchaseDocumentTerm" where "companyId" = ${co})`);
         await tx.execute(sql`delete from "PurchaseDocumentTerm" where "companyId" = ${co}`);
@@ -128,5 +129,53 @@ describe.skipIf(!DB_READY)("Changing a term's ledger in the master moves posted 
     expect((await act(b1, "reverse", { date: "2025-12-21", reason: "returned" })).status).toBe(200);
     expect(await bal(W.right)).toBe(-200 + 100 - 100); // b4 adds -100, b1's reversal gives +100 back
     void b3;
+  });
+
+  it("a product's purchase ledger: changing it moves the bills posted with the old one, not the ones posted after", async () => {
+    // fresh bills with the product (the term is not used here); the product posts to W.wrong (Purchase) and should post to W.purch2
+    W.purch2 = await ins("GeneralLedger", { companyId: W.co, code: c("PUR2"), name: "Purchase 2", accountSubGroupId: (await rows(sql`select "accountSubGroupId" as g from "GeneralLedger" where id = ${W.wrong}`))[0].g, normalBalance: "DEBIT", updatedAt: NOW });
+    const mk = async (date: string, n: number) => {
+      const r = await call("POST", "/api/purchase/bills", { companyId: W.co, branchId: W.br, invoiceDate: date, vendorGLId: W.vendor, vendorInvoiceNo: `P${n}${tag}`, lines: [{ productId: W.rice, qty: 10, rate: 100 }] });
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      expect((await act(r.body.result.id, "post")).status).toBe(200);
+      return r.body.result.id as number;
+    };
+    const wrongBefore = await bal(W.wrong);
+    const p1 = await mk("2025-10-20", 11), p2 = await mk("2025-10-21", 12);
+    expect((await act(p2, "reverse", { date: "2025-10-22", reason: "returned" })).status).toBe(200);
+    expect(await bal(W.wrong)).toBe(wrongBefore + 1000); // p1 only; p2 and its reversal net to zero
+    const imp = await call("GET", `/api/ledger-reassign/impact?companyId=${W.co}&kind=PRODUCT_PURCHASE&masterId=${W.rice}`);
+    expect(imp.body).toMatchObject({ ledgerId: W.wrong });
+    expect(imp.body.documents).toBeGreaterThanOrEqual(2);
+
+    const cur = (await call("GET", `/api/masters/products?companyId=${W.co}`)).body.find((x: any) => x.id === W.rice);
+    const put = (extra: string, gl: number) => call("PUT", `/api/masters/products/${W.rice}?companyId=${W.co}&userId=1${extra}`, { ...cur, purchaseGLId: gl });
+    // "Upcoming only": nothing already posted moves
+    expect((await put("", W.purch2)).status).toBe(200);
+    expect(await bal(W.purch2)).toBe(0);
+    const p3 = await mk("2025-10-23", 13); // posted with the new ledger
+    expect(await bal(W.purch2)).toBe(1000);
+    // back, then "All till date"
+    expect((await put("", W.wrong)).status).toBe(200);
+    const wrongNow = await bal(W.wrong);
+    const r = await put("&reassign=ALL", W.purch2);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    let job: any;
+    for (let i = 0; i < 100; i++) {
+      job = (await call("GET", `/api/ledger-reassign/jobs?companyId=${W.co}`)).body.find((j: any) => j.id === r.body.ledgerJob.id);
+      if (job?.status === "DONE" || job?.status === "FAILED") break;
+      await new Promise((x) => setTimeout(x, 100));
+    }
+    expect(job, JSON.stringify(job)).toMatchObject({ status: "DONE" });
+    expect(job.skipped).toBe(0);
+    // every bill posted before the change moved (p1, p2 and p2's reversal net to its own zero); p3 was already on the new ledger and is not moved again
+    expect((await rows(sql`select count(*)::int as n from "LedgerReassignItem" where "jobId" = ${job.id} and "documentId" = ${p3}`))[0].n).toBe(0);
+    // everything that was ever posted with the old ledger moved (also the bills of the first period, before the ledger was switched away and back);
+    // live purchases: b3, b4 (first test), p1, p3 = 4000; every reversed pair nets to zero
+    expect(job.processed).toBeGreaterThanOrEqual(6);
+    expect(await bal(W.wrong)).toBe(0);
+    expect(await bal(W.purch2)).toBe(4000);
+    expect((await rows(sql`select v.id from "JournalVoucher" v join "JournalVoucherLine" l on l."journalVoucherId" = v.id where v."companyId" = ${W.co} group by v.id having sum(l.debit) <> sum(l.credit)`)).length).toBe(0);
+    void p1; void wrongNow;
   });
 });
