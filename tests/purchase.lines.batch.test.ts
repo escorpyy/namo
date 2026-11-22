@@ -6,7 +6,7 @@ import { hasBatch } from "../src/components/purchase/BatchDialog";
 import { blankLine, type Product } from "../src/lib/purchaseForm";
 import type { PLookups } from "../src/api";
 
-// Purchase bill lines: one Batch column (Yes / No), Net amount always last.
+// Purchase bill lines: one "More" column (location, batch, expiry) after Net amount; the alternate qty / unit columns are always there.
 
 const product: Product = { id: 1, code: "OIL", description: "Oil", type: "STOCK", isActive: true, baseUnitId: 1, tracksBatch: true, tracksExpiry: true, defaultLocationId: null, purchaseRate: "120", alternateUnits: [] };
 const lookups = { vendors: [], subLedgers: [], agents: [], locations: [], units: [{ id: 1, code: "LTR", name: "Litre", decimalPlaces: 2 }], products: [product], terms: [], fiscalYears: [] } as unknown as PLookups;
@@ -17,24 +17,28 @@ const render = (batchNo: string, kind: "bill" | "challan" = "bill") => renderToS
 const heads = (html: string) => [...html.matchAll(/<span class="(?:xl-rowhead|text-right|text-center|)">([^<]*)<\/span>/g)].map((m) => m[1]).filter(Boolean);
 
 describe("purchase bill lines grid", () => {
-  it("has one Batch column and ends with Net amount (then only the remove button)", () => {
+  it("has one More column after Net amount (then only the remove button), and always the alternate columns", () => {
     const h = heads(render(""));
-    expect(h).toContain("Batch");
+    expect(h).toEqual(expect.arrayContaining(["Alt Qty", "Alt Unit", "More"]));
+    expect(h).not.toContain("Batch");
     expect(h).not.toContain("Mfg Date");
     expect(h).not.toContain("Expiry");
-    expect(h[h.length - 1]).toBe("Net Amount");
+    expect(h).not.toContain("Location");
+    expect(h.indexOf("More")).toBe(h.indexOf("Net Amount") + 1);
+    expect(h[h.length - 1]).toBe("More");
   });
-  it("Batch says No when empty and Yes when filled", () => {
-    expect(render("")).toContain("Batch details: no");
-    expect(render("B-17")).toContain("Batch details: yes");
+  it("More shows what is filled", () => {
+    expect(render("")).toContain("Add location");
+    expect(render("B-17")).toContain("B-17");
   });
   it("a challan keeps its own batch / expiry columns", () => {
     const h = heads(render("", "challan"));
     expect(h).toEqual(expect.arrayContaining(["Mfg Date", "Expiry"]));
   });
   it("any filled batch field counts as filled", () => {
-    expect(hasBatch({ batchNo: "", manufactureDate: "", expiryDate: "" })).toBe(false);
-    expect(hasBatch({ batchNo: " ", manufactureDate: "", expiryDate: "" })).toBe(false);
-    expect(hasBatch({ batchNo: "", manufactureDate: "", expiryDate: "2027-01-01" })).toBe(true);
+    expect(hasBatch({ locationId: "", batchNo: "", manufactureDate: "", expiryDate: "" })).toBe(false);
+    expect(hasBatch({ locationId: "", batchNo: " ", manufactureDate: "", expiryDate: "" })).toBe(false);
+    expect(hasBatch({ locationId: "", batchNo: "", manufactureDate: "", expiryDate: "2027-01-01" })).toBe(true);
+    expect(hasBatch({ locationId: "2", batchNo: "", manufactureDate: "", expiryDate: "" })).toBe(true);
   });
 });
