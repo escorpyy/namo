@@ -15,13 +15,14 @@ import { parseAmount } from "../../../shared/cashBankVoucher";
 import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import CustomerSide from "./CustomerSide";
 import { DateField, TextField } from "../../components/purchase/HeadFields";
+import { ExportPanel, DATE_KEYS, blankExport, exportFromDoc, foreignCurrency, type ExportValues } from "../../components/sales/ExportPanel";
 import { LinesGrid } from "../../components/purchase/LinesGrid";
 import { NumberField } from "../../components/purchase/NumberField";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
 import { focusStep } from "../../components/purchase/Bits";
 import {
-  addDaysIso, alwaysShowTerms, blankLine, dateErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, validateLines, validateTerms,
+  addDaysIso, alwaysShowTerms, blankLine, dateErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, trimDec, termToPayload, validateLines, validateTerms,
   type LineRow, type TermRow,
 } from "../../lib/purchaseForm";
 import type { StatusInfo } from "../../types";
@@ -33,8 +34,17 @@ export interface SalesScreenProps {
   openRequest?: OpenRequest | null;
 }
 
+// foreign rate x NRB rate, 6 decimals (what the server stores as the NPR rate)
+const nprRate = (rate: string, xr: string): string => {
+  const a = parseDec(rate), b = parseDec(xr);
+  if (!a || !b || a.scale > 6 || b.scale > 6) return "";
+  const m = (x: { n: bigint; scale: number }) => x.n * 10n ** BigInt(6 - x.scale);
+  const q = m(a) * m(b), r = q / 1_000_000n + ((q % 1_000_000n) * 2n >= 1_000_000n ? 1n : 0n);
+  return `${r / 1_000_000n}.${(r % 1_000_000n).toString().padStart(6, "0")}`;
+};
+
 export interface SForm {
-  numberSeriesId: string; docNumber: string; invoiceDate: string; invoiceType: "LOCAL" | "EXPORT"; salesType: "GOODS_SALES" | "SERVICE_SALES"; customerGLId: string; subLedgerId: string; agentId: string;
+  numberSeriesId: string; docNumber: string; invoiceDate: string; invoiceType: "LOCAL" | "EXPORT"; salesType: "GOODS_SALES" | "SERVICE_SALES"; exp: ExportValues; customerGLId: string; subLedgerId: string; agentId: string;
   dueDays: string; dueDate: string; remarks: string; lines: LineRow[]; terms: TermRow[];
 }
 
@@ -86,15 +96,15 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
   const cfg = useMemo<DocConfig<SForm>>(() => ({
     kind: "sales-invoice", api, title: "Sales Invoice", singular: "Invoice", statusOptions: STATE_OPTIONS,
     emptyForm: (lk) => ({
-      numberSeriesId: "", docNumber: "", invoiceDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), invoiceType: "LOCAL", salesType: "GOODS_SALES", customerGLId: "", subLedgerId: "", agentId: "", dueDays: "", dueDate: "", remarks: "",
+      numberSeriesId: "", docNumber: "", invoiceDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), invoiceType: "LOCAL", salesType: "GOODS_SALES", exp: blankExport(), customerGLId: "", subLedgerId: "", agentId: "", dueDays: "", dueDate: "", remarks: "",
       lines: [blankLine()], terms: alwaysShowTerms(lk.terms),
     }),
     toForm: (d: PDoc, lk) => {
       const prods = new Map(lk.products.map((x) => [String(x.id), x]));
       return {
-        numberSeriesId: str(d.numberSeriesId), docNumber: str(d.invoiceNumber), invoiceDate: str(d.invoiceDate), invoiceType: d.invoiceType === "EXPORT" ? "EXPORT" : "LOCAL", salesType: d.salesType === "SERVICE_SALES" ? "SERVICE_SALES" : "GOODS_SALES", customerGLId: str(d.customerGLId), subLedgerId: str(d.subLedgerId), agentId: str(d.agentId),
+        numberSeriesId: str(d.numberSeriesId), docNumber: str(d.invoiceNumber), invoiceDate: str(d.invoiceDate), invoiceType: d.invoiceType === "EXPORT" ? "EXPORT" : "LOCAL", salesType: d.salesType === "SERVICE_SALES" ? "SERVICE_SALES" : "GOODS_SALES", exp: exportFromDoc(d.exportDetail), customerGLId: str(d.customerGLId), subLedgerId: str(d.subLedgerId), agentId: str(d.agentId),
         dueDays: d.dueDays ? str(d.dueDays) : "", dueDate: str(d.dueDate), remarks: str(d.remarks),
-        lines: d.lines.length ? d.lines.map((l) => lineFromDoc(l, prods.get(str(l.productId)))) : [blankLine()], terms: (d.terms ?? []).map(termFromDoc),
+        lines: d.lines.length ? d.lines.map((l) => { const row = lineFromDoc(l, prods.get(str(l.productId))); return d.exportDetail?.exportCurrency && l.foreignRate != null ? { ...row, rate: trimDec(l.foreignRate) } : row; }) : [blankLine()], terms: (d.terms ?? []).map(termFromDoc),
       };
     },
     toPayload: (f, doc) => {
@@ -105,7 +115,11 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
         invoiceDate: f.invoiceDate, invoiceType: f.invoiceType, salesType: f.salesType, fiscalYear: p.fyCode, customerGLId: Number(f.customerGLId), subLedgerId: f.subLedgerId ? Number(f.subLedgerId) : null, agentId: f.agentId ? Number(f.agentId) : null,
         dueDays: f.dueDays ? Number(f.dueDays) : 0, dueDate: f.dueDate || null, remarks: nn(f.remarks),
         ...(doc ? { invoiceNumber: doc.invoiceNumber, numberSeriesId: doc.numberSeriesId ?? null } : { invoiceNumber: nn(f.docNumber), numberSeriesId: f.numberSeriesId ? Number(f.numberSeriesId) : null }),
-        lines: f.lines.filter((l) => !isBlankLine(l)).map((l) => lineToPayload(l, prods.get(l.productId), "sales")),
+        lines: f.lines.filter((l) => !isBlankLine(l)).map((l) => {
+          const row = lineToPayload(l, prods.get(l.productId), "sales");
+          return f.invoiceType === "EXPORT" && foreignCurrency(f.exp) ? { ...row, rate: null, foreignRate: row.rate } : row; // typed in the invoice currency; the server converts to NPR
+        }),
+        exportDetail: f.invoiceType === "EXPORT" ? Object.fromEntries(Object.entries(f.exp).map(([k, v]) => [k, nn(v)])) : null,
         terms: f.terms.filter((t) => !isBlankTerm(t)).map((t) => termToPayload(t, masters.get(t.termId))),
       };
     },
@@ -116,6 +130,12 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
       if (!customer) e.customerGLId = "Pick the customer.";
       else if (customer.requiresSubLedger && !f.subLedgerId) e.subLedgerId = `${customer.code} needs a sub ledger.`;
       e.dueDate = dateErr("Due date", f.dueDate);
+      if (f.invoiceType === "EXPORT") {
+        for (const k of DATE_KEYS) { const m = dateErr(k, f.exp[k] ?? ""); if (m) e[`exp.${k}`] = m; }
+        const cur = f.exp.exportCurrency.trim();
+        if (cur && !/^[A-Za-z]{3}$/.test(cur)) e.exportDetail = "Currency must be a 3-letter code such as USD.";
+        else if (foreignCurrency(f.exp) && !(Number(f.exp.exportExchangeRate) > 0)) e.exportDetail = "Enter the NRB exchange rate for the invoice currency.";
+      }
       if (f.dueDays && !/^\d{1,4}$/.test(f.dueDays)) e.dueDays = "Due days must be a whole number.";
       const prods = new Map(lk.products.map((x) => [String(x.id), x]));
       Object.assign(e, validateLines(f.lines, prods, { rate: "required", tracking: false }), validateTerms(f.terms, new Map(lk.terms.map((x) => [String(x.id), x])), f.lines.filter((l) => !isBlankLine(l)).length));
@@ -148,8 +168,9 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
     const priced = live.flatMap((l, i) => {
       const product = products.get(l.productId), qty = effectiveQty(l, product);
       const badAlt = (!!l.altQty && !l.altUnitId) || (!!l.altUnitId && !l.altQty);
-      const amount = lineAmount(l, product);
-      if (!product || badAlt || !qty || !parseDec(qty) || parseDec(qty)!.n <= 0n || !l.rate || !parseDec(l.rate) || !amount) { incomplete = true; return []; }
+      // in a foreign currency the grid holds the foreign rate; the preview prices in NPR like the server does
+      const amount = lineAmount(f.invoiceType === "EXPORT" && foreignCurrency(f.exp) ? { ...l, rate: nprRate(l.rate, f.exp.exportExchangeRate) } : l, product);
+      if (!product || badAlt || !qty || !parseDec(qty) || parseDec(qty)!.n <= 0n || !l.rate || !parseDec(l.rate) || !amount || (f.invoiceType === "EXPORT" && foreignCurrency(f.exp) && !(Number(f.exp.exportExchangeRate) > 0))) { incomplete = true; return []; }
       return [{ lineNumber: i + 1, basicAmount: amount }];
     });
     const terms = f.terms.filter((t) => !isBlankTerm(t)).map((t) => ({ rowKey: t.key, termId: Number(t.termId), lineNumber: t.lineNumber, calcType: t.calcType, rate: t.rate, inputAmount: t.inputAmount, isOverridden: t.isOverridden, overrideAmount: t.overrideAmount }));
@@ -253,8 +274,10 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
               </div>
             </section>
 
+            {f.invoiceType === "EXPORT" && <ExportPanel value={f.exp} onChange={(exp) => { s.patch({ exp }); s.clearError("exportDetail"); }} readOnly={ro} errors={s.errors} calendar={p.calendar} />}
+
             <section className="lg-card flex min-h-0 flex-1 flex-col">
-              <LinesGrid fill kind="sales" lines={f.lines} onChange={(lines) => T.updateLines(lines, (c) => s.patch(c))} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)}
+              <LinesGrid fill kind="sales" currency={f.invoiceType === "EXPORT" && foreignCurrency(f.exp) ? f.exp.exportCurrency.trim().toUpperCase() : undefined} lines={f.lines} onChange={(lines) => T.updateLines(lines, (c) => s.patch(c))} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)}
                 onOpenTerms={(index, continueAfterApply) => T.open({ scope: "line", lineNumber: T.lineNumberAt(index), lineIndex: index, continueAfterApply })} termSummary={T.lineSummary} />
             </section>
 

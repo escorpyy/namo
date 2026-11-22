@@ -288,6 +288,13 @@
       "when": 1795370000000,
       "tag": "0040_sales_invoice_type",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1795380000000,
+      "tag": "0041_sales_export_detail",
+      "breakpoints": true
     }
   ]
 }

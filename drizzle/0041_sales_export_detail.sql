@@ -1,0 +1,36 @@
+ALTER TABLE "SalesInvoice" ADD COLUMN "exportCurrency" varchar(3);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "exportExchangeRate" numeric(18,6);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "exportForeignTotal" numeric(18,6);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "salesContractNo" varchar(40);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "salesContractDate" date;--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "notifyParty" varchar(200);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "buyerOrderNo" varchar(40);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "buyerOrderDate" date;--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "buyerTaxId" varchar(40);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "customsDeclarationNo" varchar(30);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "customsDeclarationDate" date;--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "customsOfficeExit" varchar(100);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "certificateOfOriginNo" varchar(40);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "preferentialScheme" varchar(60);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "incoterm" varchar(10);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "incotermPlace" varchar(60);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "transportMode" varchar(10);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "pointOfLoading" varchar(60);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "pointOfDischarge" varchar(60);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "finalDestination" varchar(60);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "vehicleNo" varchar(40);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "transportDocNo" varchar(40);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "transportDocDate" date;--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "packagesMarks" varchar(200);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "grossWeight" numeric(18,6);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "netWeight" numeric(18,6);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "paymentTerms" varchar(60);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "fxReference" varchar(60);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "bankAccountName" varchar(100);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "bankAccountNo" varchar(40);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "bankName" varchar(100);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD COLUMN "bankSwift" varchar(20);--> statement-breakpoint
+ALTER TABLE "SalesInvoiceLine" ADD COLUMN "foreignRate" numeric(18,6);--> statement-breakpoint
+ALTER TABLE "SalesInvoiceLine" ADD COLUMN "foreignAmount" numeric(18,6);--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD CONSTRAINT "SalesInvoice_export_only_check" CHECK ("invoiceType" = 'EXPORT' OR ("exportCurrency" IS NULL AND "customsDeclarationNo" IS NULL AND "finalDestination" IS NULL));--> statement-breakpoint
+ALTER TABLE "SalesInvoice" ADD CONSTRAINT "SalesInvoice_export_currency_check" CHECK (("exportCurrency" IS NULL AND "exportExchangeRate" IS NULL AND "exportForeignTotal" IS NULL) OR ("exportCurrency" ~ '^[A-Z]{3}$' AND "exportExchangeRate" > 0));

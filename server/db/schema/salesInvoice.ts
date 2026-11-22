@@ -83,6 +83,42 @@ export const salesInvoice = pgTable(
 
     remarks: varchar({ length: 1024 }),
 
+    // EXPORT invoices only (all optional; the service layer clears them on a LOCAL invoice).
+    // Money on an export is entered in exportCurrency when it is not NPR: each line keeps its foreignRate, the NPR rate/amount are
+    // foreignRate x exportExchangeRate (Nepal Rastra Bank rate of the day), and only the NPR figures are posted.
+    exportCurrency: varchar({ length: 3 }),
+    exportExchangeRate: numeric({ precision: 18, scale: 6 }),
+    exportForeignTotal: numeric({ precision: 18, scale: 6 }),
+    salesContractNo: varchar({ length: 40 }),
+    salesContractDate: date({ mode: "date" }),
+    notifyParty: varchar({ length: 200 }),
+    buyerOrderNo: varchar({ length: 40 }),
+    buyerOrderDate: date({ mode: "date" }),
+    buyerTaxId: varchar({ length: 40 }),
+    customsDeclarationNo: varchar({ length: 30 }),
+    customsDeclarationDate: date({ mode: "date" }),
+    customsOfficeExit: varchar({ length: 100 }),
+    certificateOfOriginNo: varchar({ length: 40 }),
+    preferentialScheme: varchar({ length: 60 }),
+    incoterm: varchar({ length: 10 }),
+    incotermPlace: varchar({ length: 60 }),
+    transportMode: varchar({ length: 10 }),
+    pointOfLoading: varchar({ length: 60 }),
+    pointOfDischarge: varchar({ length: 60 }),
+    finalDestination: varchar({ length: 60 }),
+    vehicleNo: varchar({ length: 40 }),
+    transportDocNo: varchar({ length: 40 }),
+    transportDocDate: date({ mode: "date" }),
+    packagesMarks: varchar({ length: 200 }),
+    grossWeight: numeric({ precision: 18, scale: 6 }),
+    netWeight: numeric({ precision: 18, scale: 6 }),
+    paymentTerms: varchar({ length: 60 }),
+    fxReference: varchar({ length: 60 }),
+    bankAccountName: varchar({ length: 100 }),
+    bankAccountNo: varchar({ length: 40 }),
+    bankName: varchar({ length: 100 }),
+    bankSwift: varchar({ length: 20 }),
+
     reversalOfId: integer().references((): AnyPgColumn => salesInvoice.id, {
       onDelete: "set null",
     }),
@@ -128,6 +164,8 @@ export const salesInvoice = pgTable(
       "SalesInvoice_not_own_reversal_check",
       sql`${t.reversalOfId} IS NULL OR ${t.reversalOfId} <> ${t.id}`,
     ),
+    check("SalesInvoice_export_only_check", sql`${t.invoiceType} = 'EXPORT' OR (${t.exportCurrency} IS NULL AND ${t.customsDeclarationNo} IS NULL AND ${t.finalDestination} IS NULL)`),
+    check("SalesInvoice_export_currency_check", sql`(${t.exportCurrency} IS NULL AND ${t.exportExchangeRate} IS NULL AND ${t.exportForeignTotal} IS NULL) OR (${t.exportCurrency} ~ '^[A-Z]{3}$' AND ${t.exportExchangeRate} > 0)`),
     check("SalesInvoice_documentType_check", sql`${t.documentType} = 'SALES_INVOICE'`),
     // A posted invoice must say which voucher it posted.
     check(
@@ -160,6 +198,9 @@ export const salesInvoiceLine = pgTable(
       .references(() => productUnit.id, { onDelete: "restrict" }),
     rate: numeric({ precision: 18, scale: 6 }).notNull(),
     basicAmount: numeric({ precision: 18, scale: 6 }).notNull(),
+    // export invoice in a foreign currency: the rate and amount as typed, in that currency (rate/basicAmount above stay NPR)
+    foreignRate: numeric({ precision: 18, scale: 6 }),
+    foreignAmount: numeric({ precision: 18, scale: 6 }),
 
     createdAt: createdAt(),
     updatedAt: updatedAt(),

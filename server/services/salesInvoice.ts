@@ -5,7 +5,8 @@ import { guardPeriod, type LockOverride } from "./periodLock";
 import { numberForSave, usableSeries } from "./numberSeries";
 import { type Actor, type Opts, addDays, assertBranch, inActorTx, inTx, optDate, parseDate, resolveFiscalYear, today } from "./purchase/common";
 import { resolveLines, type LineInput } from "./purchase/lines";
-import { fmt, toMicro, ZERO } from "./purchase/money";
+import { fmt, mul, roundTo, toMicro, ZERO } from "./purchase/money";
+import { cleanExport, EXPORT_COLUMNS, NO_EXPORT, type ExportInput } from "./salesExport";
 import { assertMandatorySalesTerms, recalcSalesTerms, saveSalesTerms, type SalesTermInput } from "./salesInvoiceTerms";
 import { mergeRows, writeVoucher, type JvRow } from "./voucherWriter";
 import { assertGlEntryAllowed } from "./glEntryControl";
@@ -27,8 +28,9 @@ type SaveInput = {
   dueDays?: number;
   dueDate?: string | Date | null;
   remarks?: string | null;
-  lines: LineInput[];
+  lines: (LineInput & { foreignRate?: string | number | null })[];
   terms?: SalesTermInput[];
+  exportDetail?: ExportInput | null; // EXPORT invoices only
 };
 type WriteOpts = Opts & { lockOverride?: LockOverride | null; reason?: string | null };
 type InvoiceState = "DRAFT" | "POSTED" | "REVERSED" | "REVERSAL";
@@ -193,6 +195,7 @@ export function getSalesInvoice(id: number, companyId: number) {
       id: invoice.id, companyId: invoice.companyId, branchId: invoice.branchId, invoiceNumber: invoice.invoiceNumber, numberSeriesId: invoice.numberSeriesId,
       invoiceDate: iso(invoice.invoiceDate), fiscalYear: invoice.fiscalYear, invoiceType: invoice.invoiceType, salesType: invoice.salesType, customerGLId: invoice.customerGLId, customerCode: customer[0]?.code ?? "", customerName: customer[0]?.name ?? "",
       subLedgerId: invoice.subLedgerId, subLedgerCode: sub[0]?.code ?? null, subLedgerName: sub[0]?.name ?? null, agentId: invoice.agentId, agentCode: agent[0]?.code ?? null, agentName: agent[0]?.name ?? null,
+      exportDetail: invoice.invoiceType === "EXPORT" ? Object.fromEntries(EXPORT_COLUMNS.map((k) => { const v = (invoice as any)[k]; return [k, v instanceof Date ? iso(v) : v ?? null]; })) : null,
       dueDays: invoice.dueDays, dueDate: iso(invoice.dueDate), remarks: invoice.remarks, isPosted: invoice.isPosted, postedAt: invoice.postedAt,
       reversalOfId: invoice.reversalOfId, reversalOf: reversalOf[0] ?? null, reversedBy: reversedBy[0] ?? null, state: stateOf(invoice.isPosted, invoice.reversalOfId, reversed),
       journalVoucher: voucher[0] ? { ...voucher[0], voucherDate: iso(voucher[0].voucherDate) } : null,
@@ -232,7 +235,17 @@ export async function saveSalesInvoice(input: SaveInput, actor: Actor, opts: Wri
     const agentId = input.agentId ? Number(input.agentId) : null;
     await assertAgent(tx, input.companyId, agentId);
     const fy = await resolveFiscalYear(tx, input.companyId, invoiceDate, input.fiscalYear);
-    const prepared = await resolveLines(tx, input.companyId, input.lines, { allowZeroQty: false });
+    // export block: stored only on an EXPORT invoice. In a foreign currency each line is typed with a foreignRate and priced in NPR.
+    const hasExportData = !!input.exportDetail && Object.values(input.exportDetail).some((v) => v !== null && v !== undefined && String(v).trim() !== "");
+    if (invoiceType === "LOCAL" && hasExportData) throw new HttpError(400, "Export details belong on an EXPORT invoice.", "exportDetail");
+    const ex = invoiceType === "EXPORT" ? cleanExport(input.exportDetail) : { cols: { ...NO_EXPORT }, currency: null, rate: null as bigint | null };
+    const lineInputs = input.lines.map((l, i) => {
+      if (ex.rate === null) return { ...l, foreignRate: null };
+      const fr = l.foreignRate === null || l.foreignRate === undefined || String(l.foreignRate).trim() === "" ? null : toMicro(l.foreignRate);
+      if (fr === null || fr < ZERO) throw new HttpError(400, `Line ${i + 1}: enter the rate in ${ex.currency}.`, "lines");
+      return { ...l, foreignRate: fr, rate: fmt(mul(fr, ex.rate)) };
+    });
+    const prepared = await resolveLines(tx, input.companyId, lineInputs, { allowZeroQty: false });
     if (prepared.some((l) => l.productType === "FIXED_ASSET" || l.productType === "BUNDLE")) throw new HttpError(400, "Direct sales invoices support stock, non-stock and service items only.", "lines");
     assertLinesMatchSalesType(salesType, prepared);
     const numbering = await numberForSave(tx, {
@@ -243,8 +256,8 @@ export async function saveSalesInvoice(input: SaveInput, actor: Actor, opts: Wri
     let id = existing?.id ?? 0;
     const values = {
       companyId: input.companyId, branchId: input.branchId, documentType: "SALES_INVOICE" as const,
-      invoiceNumber: numbering.number, numberSeriesId: numbering.seriesId, invoiceDate, fiscalYear: fy.code, invoiceType, salesType,
-      customerGLId: customerGL, subLedgerId, agentId, dueDays, dueDate, remarks,
+      invoiceNumber: numbering.number, numberSeriesId: numbering.seriesId, invoiceDate, fiscalYear: fy.code, invoiceType, salesType, ...ex.cols,
+      customerGLId: customerGL, subLedgerId, agentId, dueDays, dueDate, remarks, ...ex.cols,
     };
     if (existing) {
       await tx.update(S.salesInvoice).set({ ...values, updatedAt: new Date() }).where(eq(S.salesInvoice.id, existing.id));
@@ -254,14 +267,19 @@ export async function saveSalesInvoice(input: SaveInput, actor: Actor, opts: Wri
       id = created.id;
     }
     const lineIdByNumber = new Map<number, number>();
-    for (const line of prepared) {
+    let foreignTotal = ZERO;
+    for (const [i, line] of prepared.entries()) {
+      const fr = lineInputs[i].foreignRate as bigint | null;
+      if (fr !== null) foreignTotal += roundTo(mul(line.qty, fr), 2);
       const [created] = await tx.insert(S.salesInvoiceLine).values({
         salesInvoiceId: id, lineNumber: line.lineNumber, productId: line.productId, altQty: line.altQty === null ? null : fmt(line.altQty),
         altUnitId: line.altUnitId, qty: fmt(line.qty), unitId: line.unitId, rate: fmt(line.rate), basicAmount: fmt(line.basicAmount),
+        foreignRate: fr === null ? null : fmt(fr), foreignAmount: fr === null ? null : fmt(roundTo(mul(line.qty, fr), 2)),
       }).returning({ id: S.salesInvoiceLine.id, lineNumber: S.salesInvoiceLine.lineNumber });
       lineIdByNumber.set(created.lineNumber, created.id);
     }
     await saveSalesTerms(tx, { companyId: input.companyId, docId: id }, input.terms ?? [], lineIdByNumber);
+    if (ex.rate !== null) await tx.update(S.salesInvoice).set({ exportForeignTotal: fmt(foreignTotal) }).where(eq(S.salesInvoice.id, id));
     const totals = await recalcSalesTerms(tx, id);
     if (totals.total < ZERO) throw new HttpError(400, "Sales invoice total cannot be negative.", "terms");
     await tx.update(S.salesInvoice).set({ basicAmount: fmt(totals.itemTotal), termAmount: fmt(totals.termNet), totalAmount: fmt(totals.total), updatedAt: new Date() }).where(eq(S.salesInvoice.id, id));
@@ -369,7 +387,7 @@ export function reverseSalesInvoice(id: number, actor: Actor, opts: WriteOpts & 
     }
     const [reversal] = await tx.insert(S.salesInvoice).values({
       companyId: original.companyId, branchId: original.branchId, documentType: "SALES_INVOICE", invoiceNumber, numberSeriesId: null,
-      invoiceDate: date, fiscalYear: fy.code, invoiceType: original.invoiceType, salesType: original.salesType, customerGLId: original.customerGLId, subLedgerId: original.subLedgerId, agentId: original.agentId,
+      invoiceDate: date, fiscalYear: fy.code, invoiceType: original.invoiceType, salesType: original.salesType, ...Object.fromEntries(EXPORT_COLUMNS.map((k) => [k, original[k]])), customerGLId: original.customerGLId, subLedgerId: original.subLedgerId, agentId: original.agentId,
       dueDays: 0, dueDate: null, basicAmount: original.basicAmount, termAmount: original.termAmount, totalAmount: original.totalAmount,
       remarks: `Reversal of ${original.invoiceNumber}: ${reason}`.slice(0, 1024), reversalOfId: original.id, journalVoucherId,
       isPosted: true, postedAt: new Date(), postedBy: actor.userId, createdBy: actor.userId,
@@ -378,7 +396,7 @@ export function reverseSalesInvoice(id: number, actor: Actor, opts: WriteOpts & 
     for (const line of originalLines) {
       const [created] = await tx.insert(S.salesInvoiceLine).values({
         salesInvoiceId: reversal.id, lineNumber: line.lineNumber, productId: line.productId, altQty: line.altQty, altUnitId: line.altUnitId,
-        qty: line.qty, unitId: line.unitId, rate: line.rate, basicAmount: line.basicAmount,
+        qty: line.qty, unitId: line.unitId, rate: line.rate, basicAmount: line.basicAmount, foreignRate: line.foreignRate, foreignAmount: line.foreignAmount,
       }).returning({ id: S.salesInvoiceLine.id });
       newLineByOld.set(line.id, created.id);
     }

@@ -161,6 +161,43 @@ describe.skipIf(!DB_READY)("sales invoice service layer", () => {
     });
   });
 
+  it("an export invoice keeps its shipment/customs details and prices foreign-currency lines in NPR", async () => {
+    await run(async (tx, w) => {
+      const detail = { exportCurrency: "usd", exportExchangeRate: "133.5", customsDeclarationNo: "CDF-77", customsDeclarationDate: "2025-10-13", finalDestination: "Germany", incoterm: "FCA", incotermPlace: "Kathmandu", transportMode: "AIR", netWeight: "12.5", bankSwift: "NABBNPKA" };
+      const line = { productId: w.productId, qty: 2, unitId: w.unitId, foreignRate: 10 };
+      const saved = await svc.saveSalesInvoice(draftInput(w, { invoiceType: "EXPORT", exportDetail: detail, lines: [line] }), ACTOR, { tx });
+      const [inv] = await rows(tx, sql`select "exportCurrency", "exportExchangeRate", "exportForeignTotal", "customsDeclarationNo", "finalDestination", "transportMode", "basicAmount" from "SalesInvoice" where id = ${saved.id}`);
+      expect(inv).toMatchObject({ exportCurrency: "USD", customsDeclarationNo: "CDF-77", finalDestination: "Germany", transportMode: "AIR" });
+      expect(Number(inv.exportExchangeRate)).toBe(133.5);
+      expect(Number(inv.exportForeignTotal)).toBe(20); // 2 x USD 10
+      expect(Number(inv.basicAmount)).toBe(2670); // 20 x 133.5, in rupees
+      const [l] = await rows(tx, sql`select rate, "basicAmount", "foreignRate", "foreignAmount" from "SalesInvoiceLine" where "salesInvoiceId" = ${saved.id}`);
+      expect([Number(l.rate), Number(l.basicAmount), Number(l.foreignRate), Number(l.foreignAmount)]).toEqual([1335, 2670, 10, 20]);
+
+      // posts in rupees, and the reversal keeps the export details
+      const posted = await svc.postSalesInvoice(saved.id, ACTOR, { tx });
+      const [jv] = await rows(tx, sql`select sum(credit)::numeric as credit from "JournalVoucherLine" where "journalVoucherId" = ${posted.journalVoucherId}`);
+      expect(Number(jv.credit)).toBe(2937); // 2670 + 10% tax
+      const rev = await svc.reverseSalesInvoice(saved.id, ACTOR, { tx, date: "2025-10-20", reason: "export check" });
+      const [r] = await rows(tx, sql`select "exportCurrency", "customsDeclarationNo" from "SalesInvoice" where id = ${rev.id}`);
+      expect(r).toMatchObject({ exportCurrency: "USD", customsDeclarationNo: "CDF-77" });
+    });
+  });
+
+  it("refuses export details on a local invoice, a foreign currency without a rate, and a foreign line without its rate", async () => {
+    await run(async (tx, w) => {
+      await expect(svc.saveSalesInvoice(draftInput(w, { exportDetail: { finalDestination: "India" } }), ACTOR, { tx })).rejects.toMatchObject({ status: 400 });
+      await expect(svc.saveSalesInvoice(draftInput(w, { invoiceType: "EXPORT", exportDetail: { exportCurrency: "USD" } }), ACTOR, { tx })).rejects.toMatchObject({ status: 400 });
+      await expect(svc.saveSalesInvoice(draftInput(w, { invoiceType: "EXPORT", exportDetail: { exportCurrency: "USD", exportExchangeRate: "133" } }), ACTOR, { tx })).rejects.toMatchObject({ status: 400 });
+      await expect(svc.saveSalesInvoice(draftInput(w, { invoiceType: "EXPORT", exportDetail: { transportMode: "BOAT" } }), ACTOR, { tx })).rejects.toMatchObject({ status: 400 });
+      // an export in NPR needs no rate and no foreign rates
+      const npr = await svc.saveSalesInvoice(draftInput(w, { invoiceType: "EXPORT", exportDetail: { exportCurrency: "NPR", finalDestination: "India" } }), ACTOR, { tx });
+      const [row] = await rows(tx, sql`select "exportCurrency", "basicAmount" from "SalesInvoice" where id = ${npr.id}`);
+      expect(row.exportCurrency).toBeNull();
+      expect(Number(row.basicAmount)).toBe(100);
+    });
+  });
+
   it("refuses a draft with no lines", async () => {
     await run(async (tx, w) => {
       await expect(svc.saveSalesInvoice(draftInput(w, { lines: [] }), ACTOR, { tx })).rejects.toMatchObject({ status: 400 });

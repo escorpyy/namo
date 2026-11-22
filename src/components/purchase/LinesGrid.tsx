@@ -27,6 +27,7 @@ const COL_HEAD: Record<ColKey, string> = {
   xd: "Expected", lc: "Location", b: "Batch", mf: "Mfg Date", ex: "Expiry", link: "Linked to", rm: "",
 };
 const CENTER_HEAD = new Set(["Batch"]);
+const isRightHead = (h: string) => RIGHT_HEAD.has(h) || h.startsWith("Rate (") || h.startsWith("Amount (");
 const RIGHT_HEAD = new Set(["Alt Qty", "Quantity", "Rate", "Amount", "Term Amount", "Net Amount", "Expected", "Mfg Date", "Expiry"]);
 const FILL_FIELDS: (keyof LineRow)[] = ["productId", "altQty", "altUnitId", "qty", "unitId", "rate", "locationId", "batchNo", "manufactureDate", "expiryDate", "expectedDate"];
 const LOCKED_FILL_FIELDS: (keyof LineRow)[] = ["rate"];
@@ -79,12 +80,13 @@ interface Props {
   contextKey: string;
   lockProducts?: boolean;
   rateLabel?: string;
+  currency?: string; // export invoice in a foreign currency: the rate and amount are typed in it (no NPR rate is pre-filled)
   onOpenTerms?: (index: number, continueAfterApply?: () => void) => void;
   termSummary?: (index: number) => { amount: string; count: number };
   fill?: boolean;
 }
 
-export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, errors, calendar, clearError, contextKey, lockProducts, onOpenTerms, termSummary, fill }: Props) {
+export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, errors, calendar, clearError, contextKey, lockProducts, onOpenTerms, termSummary, fill, currency }: Props) {
   const unitCode = useMemo(() => new Map(lookups.units.map((u) => [u.id, u.code])), [lookups.units]);
   const productOpts = useMemo<ReferenceOption[]>(() => lookups.products.map((p) => ({ value: String(p.id), label: `${p.code} — ${p.description}`, code: p.code, name: p.description, detail: p.type.replaceAll("_", " "), searchText: `${p.type} ${p.tracksBatch ? "batch" : ""} ${p.tracksExpiry ? "expiry" : ""}`, isActive: p.isActive, badge: p.type === "STOCK" ? undefined : p.type.replace("_", " ").toLowerCase() })), [lookups.products]);
   const locOpts = useMemo<ReferenceOption[]>(() => lookups.locations.map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, isActive: l.isActive })), [lookups.locations]);
@@ -103,15 +105,15 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
     }
     if (stockish && lines.some((row) => row.link)) showLink = true;
     const cols = lineColumns(kind, showAlt, showLoc, showBatch, showExpiry, showLink, hasTerms);
-    return { cols, showAlt, showLoc, showBatch, showExpiry, showLink, template: cols.map((c) => COL_SIZE[c]).join(" "), heads: cols.map((c) => COL_HEAD[c]) };
-  }, [kind, lines, products, onOpenTerms]);
+    return { cols, showAlt, showLoc, showBatch, showExpiry, showLink, template: cols.map((c) => COL_SIZE[c]).join(" "), heads: cols.map((c) => (currency && (c === "r" || c === "amt") ? `${COL_HEAD[c]} (${currency})` : COL_HEAD[c])) };
+  }, [kind, lines, products, onOpenTerms, currency]);
 
   const patch = (i: number, p: Partial<LineRow>) => { onChange(lines.map((l, k) => (k === i ? { ...l, ...p } : l))); clearError(...Object.keys(errors).filter((k) => k.startsWith(`L.${i}.`)), "lines"); };
   const pick = (i: number, id: string) => {
     const p = products.get(id), l = lines[i];
     patch(i, {
       productId: id, altUnitId: "", altQty: "", unitId: "", batchNo: p?.tracksBatch ? l.batchNo : "", expiryDate: p?.tracksExpiry ? l.expiryDate : "", manufactureDate: p?.tracksExpiry ? l.manufactureDate : "",
-      rate: l.rate || (kind === "sales" ? (p?.salesRate && Number(p.salesRate) > 0 ? String(Number(p.salesRate)) : "") : kind !== "challan" && p?.purchaseRate && Number(p.purchaseRate) > 0 ? String(Number(p.purchaseRate)) : ""),
+      rate: l.rate || (kind === "sales" ? (currency ? "" : p?.salesRate && Number(p.salesRate) > 0 ? String(Number(p.salesRate)) : "") : kind !== "challan" && p?.purchaseRate && Number(p.purchaseRate) > 0 ? String(Number(p.purchaseRate)) : ""),
       locationId: p?.type === "STOCK" ? l.locationId || (p.defaultLocationId ? String(p.defaultLocationId) : "") : "",
     });
   };
@@ -183,7 +185,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
       <div className={`${fill ? "min-h-0 overflow-auto" : "overflow-x-auto"} lg-scroll outline-none`} data-grid="lines" data-nav="lines-grid" {...gridRows.gridProps} onKeyDown={gridRows.handleKey} onKeyDownCapture={onKeyCapture} aria-label={`${kind} line items`}>
         <div className="min-w-max">
           <div style={{ gridTemplateColumns: layout.template }} className="lg-th xl-head">
-            {layout.heads.map((h, i) => <span key={i} className={i === 0 ? "xl-rowhead" : RIGHT_HEAD.has(h) ? "text-right" : kind === "bill" && CENTER_HEAD.has(h) ? "text-center" : ""}>{h}</span>)}
+            {layout.heads.map((h, i) => <span key={i} className={i === 0 ? "xl-rowhead" : isRightHead(h) ? "text-right" : kind === "bill" && CENTER_HEAD.has(h) ? "text-center" : ""}>{h}</span>)}
           </div>
           {lines.map((l, i) => {
             const p = products.get(l.productId);

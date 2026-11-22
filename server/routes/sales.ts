@@ -8,7 +8,7 @@ import { whole, optWhole, q, companyOf, idOf, lockOverrideOf, actorOf, pick, row
 
 export const salesRouter = Router();
 const MAX_LINES = 500, MAX_TERMS = 100;
-const LINE = { productId: "int", altQty: "num", altUnitId: "int", qty: "num", unitId: "int", rate: "num" } as const satisfies Record<string, Kind>;
+const LINE = { productId: "int", altQty: "num", altUnitId: "int", qty: "num", unitId: "int", rate: "num", foreignRate: "num" } as const satisfies Record<string, Kind>;
 const TERM = { termId: "int", lineNumber: "int", calcType: ["PERCENT", "AMOUNT"], rate: "num", inputAmount: "num", isOverridden: "bool", overrideAmount: "num" } as const satisfies Record<string, Kind>;
 const HEAD = { invoiceNumber: "str", numberSeriesId: "int", invoiceDate: "date", invoiceType: ["LOCAL", "EXPORT"], salesType: ["GOODS_SALES", "SERVICE_SALES"], fiscalYear: "str", customerGLId: "int", subLedgerId: "int", agentId: "int", dueDays: "int", dueDate: "date", remarks: "str" } as const satisfies Record<string, Kind>;
 
@@ -22,10 +22,23 @@ async function owned(id: number, companyId: number) {
   if (!invoice) throw new HttpError(404, "Sales invoice not found in this company.");
   return invoice;
 }
+// the export block is a flat object of strings and numbers; the service checks each field
+function exportBlock(v: unknown) {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== "object" || Array.isArray(v)) throw new HttpError(400, "exportDetail must be an object.", "exportDetail");
+  const out: Record<string, string | number | null> = {};
+  for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+    if (x === null || x === undefined || x === "") continue;
+    if (typeof x !== "string" && typeof x !== "number") throw new HttpError(400, `exportDetail.${k} must be text or a number.`, "exportDetail");
+    out[k] = x;
+  }
+  return out;
+}
 const invoiceInput = (body: any, base: { companyId: number; branchId: number; id?: number }) => ({
   ...(pick(body, HEAD, "Sales invoice") as any),
   lines: rows(body?.lines, LINE, "lines", MAX_LINES, "Line") as any,
   terms: rows(body?.terms, TERM, "terms", MAX_TERMS, "Term") as any,
+  exportDetail: exportBlock(body?.exportDetail),
   ...base,
 });
 
