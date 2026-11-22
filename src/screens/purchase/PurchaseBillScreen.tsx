@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import { Copy, Pencil, Plus, RotateCcw, Save, Send, Trash2, X } from "lucide-react";
 import { purchaseApi, type PDoc, type PListRow, type PLookups } from "../../api";
 import { type ComboOption } from "../../components/Combobox";
-import { Dialog } from "../../components/Dialog";
+import { Dialog, useDialog } from "../../components/Dialog";
 import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
 import { COMMON_HELP, DocHeader, HINTS, Pill, formEnterKey, money } from "../../components/purchase/Bits";
 import { BillHeaderTable, HeaderTermsTable, ImportDetailsButton, ImportDetailsDialog, IMPORT_FIELDS, importFilled, LinkedCostsTable, VendorBillsTable, useVendorBills } from "../../components/purchase/BillTables";
@@ -105,7 +105,12 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
       if (f.importCostForBillId && !f.purchaseType.startsWith("SERVICE_PURCHASE_")) e.importCostForBillId = "Only a service purchase bill can be linked to a goods bill as a cost.";
       for (const k of IMPORT_FIELDS) if (f.invoiceType === "IMPORT" && k.kind === "date") { const m = dateErr(k.label, f.imp[k.key] ?? ""); if (m) e[`imp.${k.key}`] = m; }
       const live = f.lines.filter((l) => !isBlankLine(l)).length;
-      Object.assign(e, validateLines(f.lines, new Map(lk.products.map((x) => [String(x.id), x])), { rate: "required", tracking: true }));
+      f.lines.forEach((l, i) => { if (!isBlankLine(l) && !l.locationId && lk.products.find((x) => String(x.id) === l.productId)?.type === "STOCK") e[`L.${i}.more`] = `Line ${i + 1}: choose the location (More).`; });
+      // location, batch and dates are one "More" cell on a bill line
+      for (const [key, message] of Object.entries(validateLines(f.lines, new Map(lk.products.map((x) => [String(x.id), x])), { rate: "required", tracking: true }))) {
+        const more = key.replace(/^(L\.\d+)\.(lc|b|mf|ex)$/, "$1.more");
+        if (!e[more]) e[more] = message;
+      }
       Object.assign(e, validateTerms(f.terms, new Map(lk.terms.map((x) => [String(x.id), x])), live));
       return e;
     },
@@ -184,6 +189,19 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     window.setTimeout(() => document.querySelector<HTMLElement>(`[data-field="${first}"]`)?.focus(), 60);
   }, [s.errors]);
 
+  // What a confirmed challan gives a bill: vendor, agent, links and the lines still to be billed (nothing is saved).
+  const loadChallan = async (challanId: number) => {
+    const [b, c] = await Promise.all([purchaseApi.billFromChallan(p.companyId, challanId), purchaseApi.get("challans", challanId, p.companyId)]);
+    const prods = new Map(lk!.products.map((x) => [String(x.id), x]));
+    const lines: LineRow[] = (b.lines as any[]).map((l) => ({
+      ...blankLine({ productId: str(l.productId), qty: trimDec(l.qty), rate: trimDec(l.rate), locationId: str(l.locationId), batchNo: str(l.batchNo), manufactureDate: iso10(l.manufactureDate), expiryDate: iso10(l.expiryDate), purchaseOrderLineId: str(l.purchaseOrderLineId), challanLineId: str(l.challanLineId), link: "From challan" }),
+      unitId: prods.get(str(l.productId))?.baseUnitId ? "" : str(l.unitId),
+    }));
+    return {
+      number: String(c.challanNumber),
+      fields: { vendorGLId: str(b.vendorGLId), subLedgerId: str(b.subLedgerId), agentId: str(b.agentId), purchaseChallanId: str(b.purchaseChallanId), purchaseOrderId: str(b.purchaseOrderId), challanNo: str(c.challanNumber), orderNo: str(c.orderNumber), lines } satisfies Partial<BForm>,
+    };
+  };
   // start from a confirmed challan (the "Create Bill" button on the challan screen)
   const started = useRef(0);
   useEffect(() => {
@@ -191,20 +209,42 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     started.current = p.fromChallan.n;
     (async () => {
       try {
-        const b = await purchaseApi.billFromChallan(p.companyId, p.fromChallan!.id);
-        const c = await purchaseApi.get("challans", p.fromChallan!.id, p.companyId);
-        const prods = new Map(lk.products.map((x) => [String(x.id), x]));
-        const base = cfg.emptyForm(lk);
-        const lines: LineRow[] = (b.lines as any[]).map((l) => ({
-          ...blankLine({ productId: str(l.productId), qty: trimDec(l.qty), rate: trimDec(l.rate), locationId: str(l.locationId), batchNo: str(l.batchNo), manufactureDate: iso10(l.manufactureDate), expiryDate: iso10(l.expiryDate), purchaseOrderLineId: str(l.purchaseOrderLineId), challanLineId: str(l.challanLineId), link: "From challan" }),
-          unitId: prods.get(str(l.productId))?.baseUnitId ? "" : str(l.unitId),
-        }));
-        s.newDoc({ ...base, vendorGLId: str(b.vendorGLId), subLedgerId: str(b.subLedgerId), agentId: str(b.agentId), purchaseChallanId: str(b.purchaseChallanId), purchaseOrderId: str(b.purchaseOrderId), challanNo: str(c.challanNumber), orderNo: str(c.orderNumber), lines });
-        s.flash(`Bill started from challan ${c.challanNumber}: enter the vendor's invoice details and check the rates`, "info");
+        const r = await loadChallan(p.fromChallan!.id);
+        s.newDoc({ ...cfg.emptyForm(lk), ...r.fields });
+        s.flash(`Bill started from challan ${r.number}: enter the vendor's invoice details and check the rates`, "info");
       } catch (e) { s.flash((e as Error).message, "err"); }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.fromChallan, lk]);
+
+  // the Challan field of the header: confirmed challans a new goods bill can start from; picking one prefills the bill
+  const dialog = useDialog();
+  const [challans, setChallans] = useState<PListRow[]>([]);
+  useEffect(() => {
+    if (s.doc) return;
+    purchaseApi.list("challans", { companyId: p.companyId, branchId: p.branchId, fiscalYear: "", status: "CONFIRMED" }).then((r) => setChallans(r.rows)).catch(() => setChallans([]));
+  }, [p.companyId, p.branchId, s.doc?.id, s.mode, f?.purchaseChallanId]);
+  const challanOptions = useMemo<ComboOption[]>(() => {
+    const vendor = f?.vendorGLId ?? "";
+    const rows = challans.filter((c) => String(c.id) === f?.purchaseChallanId || !vendor || String(c.vendorGLId) === vendor);
+    return rows.map((c) => ({ value: String(c.id), label: `${c.challanNumber} — ${c.vendorName} (${String(c.challanDate ?? "").slice(0, 10)})${c.orderNumber ? ` · ${c.orderNumber}` : ""}` }));
+  }, [challans, f?.vendorGLId, f?.purchaseChallanId]);
+  const pickChallan = async (value: string) => {
+    if (!f) return;
+    if (!value) { // cleared: the lines stay, but they are no longer tied to a challan
+      s.patch({ purchaseChallanId: "", purchaseOrderId: "", challanNo: "", orderNo: "", lines: f.lines.map((l) => (l.challanLineId || l.purchaseOrderLineId || l.link ? { ...l, challanLineId: "", purchaseOrderLineId: "", link: "" } : l)) });
+      return;
+    }
+    if (value === f.purchaseChallanId) return;
+    if (f.lines.some((l) => !isBlankLine(l)) && !(await dialog.confirm("Replace the lines already entered with the lines of this challan?", { confirmLabel: "Replace" }))) return;
+    try {
+      const r = await loadChallan(Number(value));
+      s.patch(r.fields);
+      s.clearError("vendorGLId", "subLedgerId", "lines");
+      s.flash(`Filled from challan ${r.number}: check the rates`, "info");
+      window.setTimeout(() => document.querySelector<HTMLElement>('[data-field="invoiceDate"]')?.focus(), 60);
+    } catch (e) { s.flash((e as Error).message, "err"); }
+  };
 
   // posted goods bills that a service bill can be linked to as a cost
   const [mains, setMains] = useState<PListRow[]>([]);
@@ -308,7 +348,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
           <div className="shrink-0">
             <BillHeaderTable f={f} lk={lk} doc={doc} readOnly={ro} companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} calendar={p.calendar}
               err={s.err} patch={s.patch} clearError={s.clearError} costTargets={sourceTargetOpts} mains={mains} duplicate={vendorBills.duplicate}
-              onInvoiceType={(type) => { if (type !== "IMPORT") setImportDlg(null); }} />
+              onInvoiceType={(type) => { if (type !== "IMPORT") setImportDlg(null); }} challanOptions={challanOptions} onPickChallan={pickChallan} />
           </div>
           {f.invoiceType === "IMPORT" && (
             <div className="shrink-0">

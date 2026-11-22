@@ -3,17 +3,17 @@ import { createPortal } from "react-dom";
 import { DateInput } from "../DateInput";
 import { isValidAd } from "../../lib/nepaliDate";
 
-// The batch details of one bill line, in their own dialog: batch no, manufacture date and expiry date (whichever the product tracks).
-// The grid shows a single "Batch" cell, Yes when something is filled here and No when not. More batch fields can be added to this dialog later.
+// The "More" details of one bill line, in their own dialog: location, batch no, manufacture date and expiry date (whichever the product needs).
+// The grid shows a single "More" cell that summarises what is filled here.
 
-export interface BatchValues { batchNo: string; manufactureDate: string; expiryDate: string }
-type BatchField = "batchNo" | "manufactureDate" | "expiryDate";
+export interface BatchValues { locationId: string; batchNo: string; manufactureDate: string; expiryDate: string }
+type BatchField = "locationId" | "batchNo" | "manufactureDate" | "expiryDate";
 
-/** A line has batch details when any of the batch fields is filled. */
-export const hasBatch = (l: BatchValues) => !!(l.batchNo.trim() || l.manufactureDate || l.expiryDate);
+/** A line has "more" details when any of them is filled. */
+export const hasBatch = (l: BatchValues) => !!(l.locationId || l.batchNo.trim() || l.manufactureDate || l.expiryDate);
 
-export function BatchDialog({ title, product, tracksBatch, tracksExpiry, value, calendar, readOnly, onApply, onClose }: {
-  title: string; product: string; tracksBatch: boolean; tracksExpiry: boolean; value: BatchValues; calendar: "BS" | "AD"; readOnly: boolean;
+export function BatchDialog({ title, product, isStock, locations, tracksBatch, tracksExpiry, value, calendar, readOnly, onApply, onClose }: {
+  title: string; product: string; isStock: boolean; locations: { id: number; code: string; name: string; isActive: boolean }[]; tracksBatch: boolean; tracksExpiry: boolean; value: BatchValues; calendar: "BS" | "AD"; readOnly: boolean;
   onApply: (v: BatchValues) => void; onClose: () => void;
 }) {
   const [draft, setDraft] = useState<BatchValues>(value);
@@ -21,21 +21,24 @@ export function BatchDialog({ title, product, tracksBatch, tracksExpiry, value, 
   const [errorField, setErrorField] = useState<BatchField | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const fields: BatchField[] = [
+    ...(isStock ? ["locationId" as const] : []),
     ...(tracksBatch ? ["batchNo" as const] : []),
     ...(tracksExpiry ? ["manufactureDate" as const, "expiryDate" as const] : []),
   ];
   const set = (p: Partial<BatchValues>) => { setDraft((d) => ({ ...d, ...p })); setError(""); setErrorField(null); };
   const controlFor = (field: BatchField) => root.current?.querySelector<HTMLElement>(
-    field === "batchNo" ? '[data-batch-field="batchNo"]' : `[data-field="BD.${field === "manufactureDate" ? "mf" : "ex"}"]`,
+    field === "batchNo" || field === "locationId" ? `[data-batch-field="${field}"]` : `[data-field="BD.${field === "manufactureDate" ? "mf" : "ex"}"]`,
   ) ?? null;
   const fieldFor = (target: HTMLElement): BatchField | null => {
     if (target.dataset.batchField === "batchNo") return "batchNo";
+    if (target.dataset.batchField === "locationId") return "locationId";
     if (target.dataset.field === "BD.mf") return "manufactureDate";
     if (target.dataset.field === "BD.ex") return "expiryDate";
     return null;
   };
   const focusField = (field: BatchField) => window.requestAnimationFrame(() => controlFor(field)?.focus());
   const fieldError = (field: BatchField): string => {
+    if (field === "locationId" && isStock && !draft.locationId) return "Choose the location the stock is received into.";
     if (field === "batchNo" && tracksBatch && !draft.batchNo.trim()) return "This product is batch-tracked; enter the batch number.";
     if (field === "manufactureDate" && draft.manufactureDate && (draft.manufactureDate.startsWith("?") || !isValidAd(draft.manufactureDate))) return "Enter a valid manufacture date.";
     if (field === "expiryDate") {
@@ -62,7 +65,7 @@ export function BatchDialog({ title, product, tracksBatch, tracksExpiry, value, 
       const message = fieldError(field);
       if (message) { showFieldError(field, message); return; }
     }
-    onApply({ batchNo: draft.batchNo.trim(), manufactureDate: draft.manufactureDate, expiryDate: draft.expiryDate });
+    onApply({ locationId: draft.locationId, batchNo: draft.batchNo.trim(), manufactureDate: draft.manufactureDate, expiryDate: draft.expiryDate });
   };
 
   return createPortal(
@@ -107,6 +110,15 @@ export function BatchDialog({ title, product, tracksBatch, tracksExpiry, value, 
           <p className="text-[11px] text-slate-600">{product}</p>
         </div>
         <div className="grid grid-cols-2 gap-x-3 gap-y-3 p-3">
+          {isStock && (
+            <label className="col-span-2 block text-[12px] font-medium text-slate-700">Location <span className="text-rose-600">*</span>
+              <select data-batch-field="locationId" disabled={readOnly} aria-invalid={errorField === "locationId" || undefined} value={draft.locationId} onChange={(e) => set({ locationId: e.target.value })} className={`fld mt-1 h-8 ${errorField === "locationId" ? "fld-err" : ""} ${readOnly ? "bg-slate-100 text-slate-600" : ""}`}>
+                <option value="">Choose location…</option>
+                {locations.filter((l) => l.isActive || String(l.id) === draft.locationId).map((l) => <option key={l.id} value={String(l.id)}>{l.code} — {l.name}</option>)}
+              </select>
+            </label>
+          )}
+          {!fields.length && <p className="col-span-2 text-[12px] text-slate-600">Nothing more to enter for this product.</p>}
           {tracksBatch && (
             <label className="col-span-2 block text-[12px] font-medium text-slate-700">Batch no <span className="text-rose-600">*</span>
               <input data-batch-field="batchNo" disabled={readOnly} aria-invalid={errorField === "batchNo" || undefined} maxLength={50} autoComplete="off" value={draft.batchNo} onChange={(e) => set({ batchNo: e.target.value })} onFocus={(e) => e.currentTarget.select()} className={`fld mt-1 h-8 ${errorField === "batchNo" ? "fld-err" : ""} ${readOnly ? "bg-slate-100 text-slate-600" : ""}`} />

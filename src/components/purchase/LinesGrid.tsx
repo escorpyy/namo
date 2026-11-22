@@ -15,15 +15,15 @@ type Errs = Record<string, string | undefined>;
 const decOnly = (re: RegExp, set: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => { if (re.test(e.target.value)) set(e.target.value); };
 const QTY = /^\d{0,12}(\.\d{0,6})?$/, RATE = /^\d{0,12}(\.\d{0,6})?$/, INT = /^\d{0,9}$/;
 
-type ColKey = "n" | "p" | "aq" | "au" | "q" | "u" | "r" | "amt" | "terms" | "net" | "xd" | "lc" | "b" | "mf" | "ex" | "link" | "rm";
+type ColKey = "n" | "p" | "aq" | "au" | "q" | "u" | "r" | "amt" | "terms" | "net" | "more" | "xd" | "lc" | "b" | "mf" | "ex" | "link" | "rm";
 const COL_SIZE: Record<ColKey, string> = {
   n: "24px", p: "minmax(150px,1.6fr)", aq: "64px", au: "84px", q: "78px", u: "44px", r: "84px", amt: "100px",
-  terms: "92px", net: "104px",
+  terms: "92px", net: "104px", more: "190px",
   xd: "132px", lc: "120px", b: "112px", mf: "128px", ex: "128px", link: "minmax(130px,1fr)", rm: "30px",
 };
 const COL_HEAD: Record<ColKey, string> = {
   n: "#", p: "Product", aq: "Alt Qty", au: "Alt Unit", q: "Quantity", u: "Unit", r: "Rate", amt: "Amount",
-  terms: "Term Amount", net: "Net Amount",
+  terms: "Term Amount", net: "Net Amount", more: "More",
   xd: "Expected", lc: "Location", b: "Batch", mf: "Mfg Date", ex: "Expiry", link: "Linked to", rm: "",
 };
 const CENTER_HEAD = new Set(["Batch"]);
@@ -39,19 +39,17 @@ const lineNet = (basic: string, terms: string) => {
 
 function lineColumns(kind: LineKind, showAlt: boolean, showLoc: boolean, showBatch: boolean, showExpiry: boolean, showLink: boolean, showTerms: boolean): ColKey[] {
   const cols: ColKey[] = ["n", "p"];
-  if (showAlt) cols.push("aq", "au");
-  cols.push("q", "u", "r", "amt");
+  void showAlt; // the alternate qty and unit columns are always there (blank for a product without alternate units)
+  cols.push("aq", "au", "q", "u", "r", "amt");
   if (kind === "sales") { // product, quantity, rate, amount, then the line's terms and net when the screen offers them
     if (showTerms) cols.push("terms", "net");
     cols.push("rm");
     return cols;
   }
   if (kind === "bill") {
-    if (showTerms) cols.push("terms");
-    if (showLoc) cols.push("lc");
-    if (showBatch || showExpiry) cols.push("b");
+    if (showTerms) cols.push("terms", "net"); // line terms, then the net amount, then "More" (location, batch, expiry) which is always shown
+    cols.push("more");
     if (showLink) cols.push("link");
-    if (showTerms) cols.push("net");
     cols.push("rm");
     return cols;
   }
@@ -93,11 +91,11 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
   const hasTerms = (kind === "bill" || kind === "sales") && !!onOpenTerms; // a per-line "Term Amount" cell that opens the terms dialog
   const stockish = kind === "challan" || kind === "bill"; // order and sales lines have no location, batch or expiry columns
   const layout = useMemo(() => {
-    let showAlt = false, showLoc = false, showBatch = false, showExpiry = false, showLink = false;
+    const showAlt = true;
+    let showLoc = false, showBatch = false, showExpiry = false, showLink = false;
     for (const row of lines) {
       const p = products.get(row.productId);
       if (!p) continue;
-      if (p.alternateUnits?.length) showAlt = true;
       if (stockish && p.type === "STOCK") showLoc = true;
       if (stockish && p.tracksBatch) showBatch = true;
       if (stockish && p.tracksExpiry) showExpiry = true;
@@ -141,7 +139,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
   const fillCell = (i: number, col: string) => {
     const f = FIELD_OF[col], above = lines[i - 1];
     if (readOnly || !f || !above || (f === "productId" && lockProducts && lines[i].link)) return;
-    if (col === "b" && kind === "bill") { patch(i, { batchNo: above.batchNo, manufactureDate: above.manufactureDate, expiryDate: above.expiryDate }); return; }
+    if (col === "more" && kind === "bill") { patch(i, { locationId: above.locationId, batchNo: above.batchNo, manufactureDate: above.manufactureDate, expiryDate: above.expiryDate }); return; }
     if (f === "productId") { if (above.productId) pick(i, above.productId); return; }
     patch(i, { [f]: above[f] } as Partial<LineRow>);
   };
@@ -156,7 +154,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
     cellSelector: '[data-field^="L."]', fieldOf: (r, c) => `L.${r}.${c}`, endOfRow: "row",
     onAddRow: () => addRow(), lastRowBlank: () => isBlankLine(lines[lines.length - 1]), leave: (el, dir) => focusStep(el, dir),
     onCellEnter: (cell, el) => {
-      if (cell.col === "b" && kind === "bill") { setBatchFor(cell.row); return true; }
+      if (cell.col === "more" && kind === "bill") { setBatchFor(cell.row); return true; }
       if (cell.col === "terms" && hasTerms && onOpenTerms && lines[cell.row]?.productId) { onOpenTerms(cell.row, () => gridRows.stepFrom(el, 1)); return true; }
       return false;
     },
@@ -209,7 +207,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                 <div style={{ gridTemplateColumns: layout.template }} data-selected={rowSel === i} className="xl-row">
                   <button type="button" className="xl-rowhead" {...gridRows.rowHeadProps(i)}>{i + 1}</button>
                   <MasterReferencePicker fieldName={`L.${i}.p`} label="Product" required scopeKey="products" createMaster={{ key: "products" }} contextKey={contextKey} placeholder="Choose product…" value={l.productId} hasError={bad("p")} options={productOpts} disabled={off || (lockProducts && !!l.link)} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
-                  {layout.showAlt && (<><input data-field={`L.${i}.aq`} disabled={off || !p || altOpts.length === 0} inputMode="decimal" autoComplete="off" value={l.altQty} placeholder={altOpts.length ? "" : "—"} onChange={decOnly(QTY, (v) => patch(i, { altQty: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("aq", "text-right tabular-nums")} aria-label="Alternate quantity" /><MasterReferencePicker fieldName={`L.${i}.au`} label="Alternate unit" scopeKey="product-units" createMaster={{ key: "product-units" }} contextKey={contextKey} placeholder={altOpts.length ? "Choose unit" : "—"} value={l.altUnitId} hasError={bad("au")} options={altOpts} disabled={off || !p || altOpts.length === 0} onChange={(v) => patch(i, { altUnitId: v })} onCommit={afterCombo} /></>)}
+                  {layout.showAlt && (<><input data-field={`L.${i}.aq`} disabled={off || !p || altOpts.length === 0} inputMode="decimal" autoComplete="off" value={l.altQty} placeholder="" onChange={decOnly(QTY, (v) => patch(i, { altQty: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("aq", "text-right tabular-nums")} aria-label="Alternate quantity" /><MasterReferencePicker fieldName={`L.${i}.au`} label="Alternate unit" scopeKey="product-units" createMaster={{ key: "product-units" }} contextKey={contextKey} placeholder={altOpts.length ? "Choose unit" : ""} value={l.altUnitId} hasError={bad("au")} options={altOpts} disabled={off || !p || altOpts.length === 0} onChange={(v) => patch(i, { altUnitId: v })} onCommit={afterCombo} /></>)}
                   <input data-field={`L.${i}.q`} disabled={off || !p || useAlt} inputMode="decimal" autoComplete="off" value={useAlt ? trimDec(qtyShown) : l.qty} onChange={decOnly(QTY, (v) => patch(i, { qty: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("q", `text-right tabular-nums ${useAlt ? "bg-slate-100" : ""}`)} aria-label="Quantity" />
                   {p && !p.baseUnitId
                     ? <MasterReferencePicker fieldName={`L.${i}.u`} label="Unit" required scopeKey="product-units" createMaster={{ key: "product-units" }} contextKey={contextKey} placeholder="Choose unit" value={l.unitId} hasError={bad("u")} options={unitOpts} disabled={off} onChange={(v) => patch(i, { unitId: v })} onCommit={afterCombo} />
@@ -220,18 +218,24 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                     const summary = termSummary?.(i) ?? { amount: "0.00", count: 0 };
                     return <button type="button" data-field={`L.${i}.terms`} data-nav={`line-terms-${i}`} disabled={!l.productId} onClick={(event) => { const trigger = event.currentTarget; onOpenTerms(i, () => gridRows.stepFrom(trigger, 1)); }} title={`Edit terms for line ${i + 1}${summary.count ? ` · ${summary.count} term${summary.count === 1 ? "" : "s"}` : ""}`} className={`${kind === "bill" ? "h-7" : "h-8"} w-full px-1 text-right tabular-nums text-cobalt-700 underline decoration-cobalt-200 underline-offset-4 hover:bg-cobalt-50 disabled:text-slate-500 disabled:no-underline focus-visible:outline-2 focus-visible:outline-cobalt-700`}>{summary.amount.startsWith("-") ? `− ${money(summary.amount.slice(1))}` : money(summary.amount || "0")}{summary.count > 0 && <span className="ml-1 text-[10px] text-slate-500 no-underline">({summary.count})</span>}</button>;
                   })()}
+                  {hasTerms && <span data-readonly="true" className="text-right tabular-nums font-medium text-slate-700" title="Net amount (basic ± terms)">{lineNet(lineAmount(l, p), (termSummary?.(i) ?? { amount: "0.00" }).amount)}</span>}
                   {kind === "order" && (off
                     ? <input disabled className="fld h-8 bg-slate-100 text-right text-slate-600" value={l.expectedDate} aria-label="Expected date" />
                     : <DateInput fieldName={`L.${i}.xd`} value={l.expectedDate} onChange={(v) => patch(i, { expectedDate: v })} calendar={calendar} hasError={bad("xd")} onBlurField={() => {}} compact />)}
-                  {layout.showLoc && (
+                  {kind !== "bill" && layout.showLoc && (
                     <MasterReferencePicker fieldName={`L.${i}.lc`} label="Location" required={p?.type === "STOCK"} scopeKey="locations" createMaster={{ key: "locations" }} contextKey={contextKey} placeholder={p?.type === "STOCK" ? "Choose location" : "—"} value={l.locationId} hasError={bad("lc")} options={locOpts} disabled={off || p?.type !== "STOCK"} onChange={(v) => patch(i, { locationId: v })} onCommit={afterCombo} />
                   )}
-                  {kind === "bill" && (layout.showBatch || layout.showExpiry) && (() => {
-                    const tracked = !!(p?.tracksBatch || p?.tracksExpiry), yes = hasBatch(l);
+                  {kind === "bill" && (() => {
+                    // "More": location, batch and expiry of the line in one cell; Enter or a click opens the dialog (like the line's terms)
+                    const isStock = p?.type === "STOCK", tracked = !!p && (isStock || p.tracksBatch || p.tracksExpiry);
+                    const locCode = l.locationId ? lookups.locations.find((x) => String(x.id) === l.locationId)?.code ?? "" : "";
+                    const parts = [locCode, l.batchNo.trim(), l.expiryDate].filter(Boolean);
+                    const badMore = ["more", "lc", "b", "mf", "ex"].some(bad);
+                    const text = parts.join(" · ");
                     return (
-                      <button type="button" data-field={`L.${i}.b`} disabled={!tracked || (off && !yes)} onClick={() => setBatchFor(i)} aria-label={`Batch details: ${yes ? "yes" : "no"}`} title={tracked ? "Batch no, mfg and expiry (Enter)" : "This product has no batch"}
-                        className={`${cls("b", "")} text-center ${!tracked ? "bg-slate-100 text-slate-400" : yes ? "font-medium text-emerald-700" : bad("b") ? "text-rose-700" : "text-slate-500"}`}>
-                        {tracked ? (yes ? "Yes" : "No") : "—"}
+                      <button type="button" data-field={`L.${i}.more`} disabled={!tracked || (off && !hasBatch(l))} onClick={() => setBatchFor(i)} aria-label={`More details: ${text || "none"}`} title={tracked ? `${text || "Location, batch and expiry"} (Enter)` : "Nothing more for this product"}
+                        className={`${cls("more", "")} truncate text-left ${!tracked ? "bg-slate-50 text-slate-400" : badMore ? "text-rose-700" : text ? "font-medium text-slate-800" : "text-cobalt-700"}`}>
+                        {tracked ? (text || (isStock ? "Add location…" : "Add…")) : ""}
                       </button>
                     );
                   })()}
@@ -245,7 +249,6 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                     </>
                   )}
                   {layout.showLink && <span className="break-words text-[11px] leading-tight text-slate-600" title={l.link}>{l.link || "—"}</span>}
-                  {hasTerms && <span data-readonly="true" className="text-right tabular-nums font-medium text-slate-700" title="Net amount (basic ± terms)">{lineNet(lineAmount(l, p), (termSummary?.(i) ?? { amount: "0.00" }).amount)}</span>}
                   <button type="button" data-nav="remove-line" disabled={off} onClick={() => remove(i)} title="Remove line (Delete when the row is selected)" aria-label="Remove line" className={`${kind === "bill" ? "h-7 w-7" : "h-8 w-8"} grid place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-2 focus-visible:outline-cobalt-700 disabled:opacity-30`}><X size={14} /></button>
                 </div>
                 {errMsgs.length > 0 && <p className="px-3 pb-1 text-[12px] text-rose-700">{errMsgs[0]}</p>}
@@ -256,10 +259,10 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
       </div>
       {batchFor !== null && lines[batchFor] && (() => {
         const l = lines[batchFor], p = products.get(l.productId);
-        return <BatchDialog title={`Line ${batchFor + 1} batch`} product={p ? `${p.code} — ${p.description}` : ""} tracksBatch={!!p?.tracksBatch} tracksExpiry={!!p?.tracksExpiry} value={{ batchNo: l.batchNo, manufactureDate: l.manufactureDate, expiryDate: l.expiryDate }}
+        return <BatchDialog title={`Line ${batchFor + 1} — more details`} product={p ? `${p.code} — ${p.description}` : ""} isStock={p?.type === "STOCK"} locations={lookups.locations} tracksBatch={!!p?.tracksBatch} tracksExpiry={!!p?.tracksExpiry} value={{ locationId: l.locationId, batchNo: l.batchNo, manufactureDate: l.manufactureDate, expiryDate: l.expiryDate }}
           calendar={calendar} readOnly={readOnly}
-          onClose={() => { const i = batchFor; setBatchFor(null); requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-field="L.${i}.b"]`)?.focus()); }}
-          onApply={(v) => { const i = batchFor; patch(i, v); setBatchFor(null); requestAnimationFrame(() => { const el = document.querySelector<HTMLElement>(`[data-field="L.${i}.b"]`); if (el) gridRows.stepFrom(el, 1); }); }} />;
+          onClose={() => { const i = batchFor; setBatchFor(null); requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-field="L.${i}.more"]`)?.focus()); }}
+          onApply={(v) => { const i = batchFor; patch(i, v); setBatchFor(null); requestAnimationFrame(() => { const el = document.querySelector<HTMLElement>(`[data-field="L.${i}.more"]`); if (el) gridRows.stepFrom(el, 1); }); }} />;
       })()}
       {errors.lines && <p className="px-3 py-1.5 text-[12px] text-rose-700">{errors.lines}</p>}
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200 bg-slate-50 px-3 py-2.5">

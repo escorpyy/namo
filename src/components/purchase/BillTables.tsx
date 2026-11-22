@@ -96,6 +96,8 @@ export interface BillHeaderProps {
   /** goods bills a service bill can be linked to as a cost (already labelled) and the bills they come from */
   costTargets: ComboOption[]; mains: PListRow[];
   onInvoiceType: (type: BForm["invoiceType"]) => void;
+  /** confirmed challans a new goods bill can start from, and what happens when one is picked ("" = cleared) */
+  challanOptions: ComboOption[]; onPickChallan: (id: string) => void;
   /** an earlier bill of this vendor with the same vendor invoice number */
   duplicate?: PListRow;
 }
@@ -110,6 +112,13 @@ export function BillHeaderTable(p: BillHeaderProps) {
   return (
     <FormTable label="Bill header">
       <tr>
+        <FLabel title="A confirmed challan fills the vendor and the lines">Challan</FLabel>
+        <FCell error={err("purchaseChallanId")}>
+          {ro || doc || service
+            ? <input disabled className="fld" value={links} placeholder="—" aria-label="Linked documents" />
+            : <Combobox fieldName="purchaseChallanId" placeholder="— (none)" value={f.purchaseChallanId} hasError={!!err("purchaseChallanId")} options={p.challanOptions} allowClear
+                onChange={(value) => p.onPickChallan(value)} onCommit={(el, dir) => focusStep(el, dir)} />}
+        </FCell>
         <FLabel>Invoice No</FLabel>
         <FCell><NumberField bare label="Invoice No" documentType="PURCHASE_BILL" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.invoiceNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => patch(c)} /></FCell>
         <FLabel required>Invoice Date ({cal})</FLabel>
@@ -121,12 +130,11 @@ export function BillHeaderTable(p: BillHeaderProps) {
             clearError("invoiceDate");
           }} />
         </FCell>
-        <FLabel>Invoice Type</FLabel>
-        <FCell><SelectInput name="invoiceType" label="Invoice Type" disabled={ro} value={f.invoiceType} onChange={(v) => { patch({ invoiceType: v as BForm["invoiceType"] }); p.onInvoiceType(v as BForm["invoiceType"]); }}><option value="LOCAL">Local</option><option value="IMPORT">Import</option></SelectInput></FCell>
-        <FLabel>Purchase Type</FLabel>
-        <FCell><SelectInput name="purchaseType" label="Purchase Type" disabled={ro} value={f.purchaseType} onChange={(purchaseType) => { patch({ purchaseType, importCostForBillId: purchaseType.startsWith("SERVICE_PURCHASE_") ? f.importCostForBillId : "" }); clearError("importCostForBillId"); }}>{PURCHASE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</SelectInput></FCell>
+        <FLabel>Vendor Invoice No</FLabel>
+        <FCell error={err("vendorInvoiceNo")}><TextInput name="vendorInvoiceNo" label="Vendor Invoice No" value={f.vendorInvoiceNo} onChange={(v) => patch({ vendorInvoiceNo: v })} readOnly={ro} error={err("vendorInvoiceNo")} max={30} /></FCell>
       </tr>
       <tr>
+        <DateCell name="vendorInvoiceDate" label="Vendor Invoice Date" value={f.vendorInvoiceDate} onChange={(v) => { patch({ vendorInvoiceDate: v }); clearError("vendorInvoiceDate"); }} calendar={cal} readOnly={ro} error={err("vendorInvoiceDate")} />
         <FLabel required>Vendor</FLabel>
         <FCell error={err("vendorGLId")}>
           <VendorPicker vendors={vendors} vendorGLId={f.vendorGLId} readOnly={ro} error={err("vendorGLId")} lockVendor={!!f.purchaseChallanId} contextKey={ctx}
@@ -141,13 +149,12 @@ export function BillHeaderTable(p: BillHeaderProps) {
         <FCell error={err("subLedgerId")}><SubLedgerPicker subs={subs} requiresSubLedger={!!vendor?.requiresSubLedger} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} readOnly={ro} error={err("subLedgerId")} contextKey={ctx} onChange={(c) => patch(c)} /></FCell>
         <FLabel>Agent</FLabel>
         <FCell error={err("agentId")}><AgentPicker agents={agents} agentId={f.agentId} readOnly={ro} error={err("agentId")} contextKey={ctx} onChange={(c) => patch(c)} /></FCell>
-        <FLabel>Challan / Order</FLabel>
-        <FCell><input disabled className="fld" value={links} placeholder="—" aria-label="Linked documents" /></FCell>
       </tr>
       <tr>
-        <FLabel>Vendor Invoice No</FLabel>
-        <FCell error={err("vendorInvoiceNo")}><TextInput name="vendorInvoiceNo" label="Vendor Invoice No" value={f.vendorInvoiceNo} onChange={(v) => patch({ vendorInvoiceNo: v })} readOnly={ro} error={err("vendorInvoiceNo")} max={30} /></FCell>
-        <DateCell name="vendorInvoiceDate" label="Vendor Invoice Date" value={f.vendorInvoiceDate} onChange={(v) => { patch({ vendorInvoiceDate: v }); clearError("vendorInvoiceDate"); }} calendar={cal} readOnly={ro} error={err("vendorInvoiceDate")} />
+        <FLabel>Invoice Type</FLabel>
+        <FCell><SelectInput name="invoiceType" label="Invoice Type" disabled={ro} value={f.invoiceType} onChange={(v) => { patch({ invoiceType: v as BForm["invoiceType"] }); p.onInvoiceType(v as BForm["invoiceType"]); }}><option value="LOCAL">Local</option><option value="IMPORT">Import</option></SelectInput></FCell>
+        <FLabel>Purchase Type</FLabel>
+        <FCell><SelectInput name="purchaseType" label="Purchase Type" disabled={ro} value={f.purchaseType} onChange={(purchaseType) => { patch({ purchaseType, importCostForBillId: purchaseType.startsWith("SERVICE_PURCHASE_") ? f.importCostForBillId : "" }); clearError("importCostForBillId"); }}>{PURCHASE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</SelectInput></FCell>
         <FLabel>Due Days</FLabel>
         <FCell error={err("dueDays")}>
           <TextInput name="dueDays" label="Due Days" value={f.dueDays} readOnly={ro} error={err("dueDays")} max={4} onChange={(v) => {
