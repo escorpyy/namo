@@ -1,58 +1,38 @@
-import { NarrationInput } from "../../components/NarrationInput";
-import { NumberField } from "../../components/purchase/NumberField";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { ArrowRight, ChevronDown, ChevronRight, Copy, Pencil, Plus, RotateCcw, Save, Send, Trash2, X } from "lucide-react";
+import { Copy, Pencil, Plus, RotateCcw, Save, Send, Trash2, X } from "lucide-react";
 import { purchaseApi, type PDoc, type PListRow, type PLookups } from "../../api";
-import { Combobox, type ComboOption } from "../../components/Combobox";
+import { type ComboOption } from "../../components/Combobox";
 import { Dialog } from "../../components/Dialog";
 import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
-import { COMMON_HELP, DocHeader, Field, FormSection, HINTS, Pill, focusStep, formEnterKey, money } from "../../components/purchase/Bits";
-import { EmptyPanel, HeaderSummary, SidePanel, VendorPanel, usePanelState } from "../../components/purchase/BillPanels";
-import { DateField, TextField, VendorFields } from "../../components/purchase/HeadFields";
+import { COMMON_HELP, DocHeader, HINTS, Pill, formEnterKey, money } from "../../components/purchase/Bits";
+import { BillHeaderTable, HeaderTermsTable, ImportDetailsTable, IMPORT_FIELDS, LinkedCostsTable, VendorBillsTable, useVendorBills } from "../../components/purchase/BillTables";
 import { LinesGrid } from "../../components/purchase/LinesGrid";
 import { useTermsDialog } from "../../components/purchase/TermsDialog";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
 import {
-  addDaysIso, alwaysShowTerms, blankLine, copyBillForm, dateErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
+  alwaysShowTerms, blankLine, copyBillForm, dateErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
   type LineRow, type TermRow,
 } from "../../lib/purchaseForm";
 import { parseDec } from "../../../shared/decimal";
 import { isForeign, nprRate } from "../../lib/foreignRate";
 import { previewPurchase } from "../../../shared/purchase-preview";
-import { formatImportCost } from "../../../shared/import-costing";
-import { toMicro } from "../../../shared/purchase-calculation";
 import type { PurchaseScreenProps } from "./PurchaseOrderScreen";
 import { useDocScreen, type DocConfig, type DocSnapshot, type Errors } from "./useDocScreen";
 
-const IMPORT_FIELDS: { key: string; label: string; kind: "text" | "date" | "mode"; max?: number }[] = [
-  { key: "customsDeclarationNo", label: "Customs Declaration No", kind: "text", max: 30 }, { key: "customsDeclarationDate", label: "Declaration Date", kind: "date" },
-  { key: "customsOffice", label: "Customs Office", kind: "text", max: 100 }, { key: "countryOfOrigin", label: "Country of Origin", kind: "text", max: 50 },
-  { key: "lcNo", label: "LC No", kind: "text", max: 30 }, { key: "lcDate", label: "LC Date", kind: "date" }, { key: "lcBankName", label: "LC Bank", kind: "text", max: 100 },
-  { key: "transportMode", label: "Transport Mode", kind: "mode" }, { key: "blAwbNo", label: "BL / AWB No", kind: "text", max: 30 }, { key: "blAwbDate", label: "BL / AWB Date", kind: "date" },
-  { key: "transporterName", label: "Transporter", kind: "text", max: 100 }, { key: "vehicleNo", label: "Vehicle No", kind: "text", max: 30 }, { key: "lrNo", label: "LR No", kind: "text", max: 30 }, { key: "lrDate", label: "LR Date", kind: "date" },
-  { key: "importPermitNo", label: "Import Permit No", kind: "text", max: 30 }, { key: "importPermitDate", label: "Permit Date", kind: "date" },
-  // Optional foreign currency: amounts on the bill stay in NPR; these record how they were converted.
-  { key: "currencyCode", label: "Invoice Currency (e.g. USD; blank = NPR)", kind: "text", max: 3 }, { key: "exchangeRate", label: "Exchange Rate (NPR per 1 unit)", kind: "text", max: 20 }, { key: "foreignInvoiceAmount", label: "Invoice Total in Foreign Currency", kind: "text", max: 20 },
-];
-const PURCHASE_TYPES = [
-  { value: "GOODS_PURCHASE_OTHERS", label: "Goods — Others" }, { value: "GOODS_PURCHASE_CAPITAL", label: "Goods — Capital" },
-  { value: "SERVICE_PURCHASE_OTHERS", label: "Service — Others" }, { value: "SERVICE_PURCHASE_CAPITAL", label: "Service — Capital" },
-];
 export const STATE_TONE: Record<string, "slate" | "green" | "amber" | "blue"> = { DRAFT: "slate", POSTED: "green", REVERSED: "amber", REVERSAL: "blue" };
 export const OPTIONS = [{ value: "DRAFT", label: "Draft" }, { value: "POSTED", label: "Posted" }, { value: "REVERSED", label: "Reversed" }, { value: "REVERSAL", label: "Reversal bills" }];
 const TAB_ONLY = new Set(["Alt+4", "F4 / /", "Ctrl+↑ / Ctrl+↓", "Alt+1 / Alt+2 / Alt+3", "F3 / Ctrl+N", "Esc"]);
 const HELP: [string, string][] = [
   ...COMMON_HELP.filter(([key]) => !TAB_ONLY.has(key)),
   ["F3 / Ctrl+N", "New bill in a new tab"],
-  ["Ctrl+S (new bill, header open)", "Finish the header and go to the lines"],
+  ["F6", "Add a line"],
   ["Esc", "Cancel editing; in the terms dialog, close it"],
-  ["Alt+[ / Alt+]", "Collapse / expand the header panel (left) / vendor panel (right)"],
   ["Alt+, / Alt+.", "Previous / next tab"],
   ["Alt+W", "Close this tab"],
   ["Alt+1 / Alt+2", "Sidebar / the form"],
   ["Post", "Writes the journal voucher; a posted bill cannot be edited, only reversed"],
 ];
-const BILL_HINTS = [...HINTS.filter((h) => !h.startsWith("F4")), "Alt+[ ]: Side panels"];
+const BILL_HINTS = HINTS.filter((h) => !h.startsWith("F4"));
 
 export interface BForm {
   numberSeriesId: string; docNumber: string; invoiceDate: string; invoiceType: "LOCAL" | "IMPORT"; purchaseType: string; vendorGLId: string; subLedgerId: string; agentId: string; vendorInvoiceNo: string; vendorInvoiceDate: string;
@@ -60,11 +40,8 @@ export interface BForm {
   lines: LineRow[]; terms: TermRow[]; imp: Record<string, string>;
 }
 const iso10 = (v: unknown) => (v ? String(v).slice(0, 10) : "");
-export type Stage = "header" | "lines";
-// Errors of the header form: everything that is not a line, a term or the "lines" / "terms" summary.
-const isHeaderKey = (key: string) => !/^(L\.|T\.)/.test(key) && key !== "lines" && key !== "terms";
-
 // One bill, open in one tab of the purchase bill workspace. The workspace owns the lookups, the list and the tabs; this screen owns the document.
+// The whole bill is one screen of tables: header, lines, terms, totals.
 export interface BillEntryProps extends PurchaseScreenProps {
   tabId: number;
   lookups: PLookups;
@@ -72,7 +49,6 @@ export interface BillEntryProps extends PurchaseScreenProps {
   initialForm?: BForm;
   fromChallan: { id: number; n: number } | null;
   hookSnapRef: MutableRefObject<DocSnapshot<BForm> | null>;
-  stageRef: MutableRefObject<Stage | null>;
   onMeta: (tabId: number, meta: { title: string; dirty: boolean; docId: number | null }) => void;
   onNew: (prefill?: BForm) => void;
   onClose: (tabId: number) => void;
@@ -139,15 +115,11 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   const lkRef = useMemo(() => ({ current: null as ReturnType<typeof useDocScreen>["lookups"] }), []);
   const restored = useRef(p.hookSnapRef.current);
   const localDirty = useRef(false);
-  const beforeSave = useRef<() => boolean>(() => true);
   const s = useDocScreen<BForm>(cfg, { companyId: p.companyId, branchId: p.branchId, fyCode: p.fyCode, userId: p.userId, calendar: p.calendar }, {
     setStatus: p.setStatus, dirtyRef: localDirty, externalMessage: p.externalMessage, hints: BILL_HINTS,
     sharedLookups: p.lookups, skipList: true, initialDocId: p.docId, initialForm: p.initialForm, restore: restored.current, snapshotRef: p.hookSnapRef,
-    onNew: () => p.onNew(), onDeleted: () => p.onClose(p.tabId), onListChanged: p.onListChanged, beforeSave: () => beforeSave.current(),
+    onNew: () => p.onNew(), onDeleted: () => p.onClose(p.tabId), onListChanged: p.onListChanged,
   });
-  const [stage, setStage] = useState<Stage>(() => p.stageRef.current ?? (p.docId ? "lines" : "header"));
-  const [leftCollapsed, toggleLeft] = usePanelState("purchase-bill-left-collapsed");
-  const [rightCollapsed, toggleRight] = usePanelState("purchase-bill-right-collapsed");
   lkRef.current = s.lookups;
   const f = s.form, lk = s.lookups, doc = s.doc, ro = s.readOnly;
   const products = useMemo(() => new Map((lk?.products ?? []).map((x) => [String(x.id), x])), [lk]);
@@ -184,8 +156,6 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   }, [f, lk?.terms, products, foreignOn]);
 
   const liveLines = f ? f.lines.filter((line) => !isBlankLine(line)).length : 0;
-  const impFilled = f ? Object.values(f.imp).filter((v) => String(v ?? "").trim() !== "").length : 0;
-  const headerReady = stage === "lines" || !!doc;
   const T = useTermsDialog({
     lines: f?.lines ?? [], terms: f?.terms ?? [], lookups: lk, products, masters, readOnly: ro, saved: !!doc, preview: invoicePreview,
     savedBasic: doc ? str(doc.basicAmount) : undefined, savedNet: doc ? str(doc.totalAmount) : undefined,
@@ -194,69 +164,25 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   const updateBillLines = (nextLines: LineRow[]) => T.updateLines(nextLines, (change) => s.patch(change));
   useEffect(() => {
     const onShortcut = (event: KeyboardEvent) => {
-      if (event.key !== "F6" || T.isOpen || !f || ro || stage !== "lines") return;
+      if (event.key !== "F6" || T.isOpen || !f || ro) return;
       event.preventDefault();
       document.querySelector<HTMLElement>('[data-grid="lines"] [data-nav="add-line"]')?.click();
     };
     window.addEventListener("keydown", onShortcut);
     return () => window.removeEventListener("keydown", onShortcut);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [T.isOpen, f, ro, stage]);
+  }, [T.isOpen, f, ro]);
 
-  // ---- tab state: title / unsaved mark for the tab strip, stage of the entry (header form first, then the lines) ----
-  useEffect(() => { p.stageRef.current = stage; });
+  // ---- tab state: title / unsaved mark for the tab strip (Alt+, / Alt+. move between tabs, Alt+W closes this one; the workspace handles those) ----
   useEffect(() => { p.onMeta(p.tabId, { title: doc ? String(doc.invoiceNumber) : "New bill", dirty: s.dirty, docId: doc?.id ?? null }); }, [doc?.invoiceNumber, doc?.id, s.dirty, p.tabId]);
-  // a saved or reopened bill is never "waiting for its header"
-  useEffect(() => { if (doc && s.mode === "view") setStage("lines"); }, [doc?.id, s.mode]);
-  // an error from a save sends the user to the part of the form that holds it
+  // A save that found a problem in the (collapsed) import details opens them and puts the cursor on the field; every other field is already on screen
+  // and useDocScreen moves the cursor to it.
   useEffect(() => {
-    const keys = Object.keys(s.errors).filter((key) => s.errors[key]);
-    if (!keys.length) return;
-    const inHeader = keys.some(isHeaderKey);
-    if (inHeader && stage === "lines") {
-      setStage("header");
-      const first = keys.find(isHeaderKey)!;
-      window.setTimeout(() => document.querySelector<HTMLElement>(`[data-field="${first}"]`)?.focus(), 60);
-    } else if (!inHeader && stage === "header") setStage("lines");
-    if (keys.some((key) => key.startsWith("imp."))) setImportOpen(true);
+    const first = Object.keys(s.errors).find((key) => s.errors[key] && key.startsWith("imp."));
+    if (!first) return;
+    setImportOpen(true);
+    window.setTimeout(() => document.querySelector<HTMLElement>(`[data-field="${first}"]`)?.focus(), 60);
   }, [s.errors]);
-
-  // Finish the header: check only the header fields, then show its summary on the left, the vendor on the right and the lines in the middle.
-  const confirmHeader = () => {
-    if (!f || !lk) return false;
-    const found = Object.entries(cfg.validate(f, lk)).filter(([key, message]) => message && isHeaderKey(key));
-    s.setErrors((current) => ({ ...Object.fromEntries(Object.entries(current).filter(([key]) => !isHeaderKey(key))), ...Object.fromEntries(found) }));
-    if (found.length) {
-      const [first, message] = found[0];
-      if (first.startsWith("imp.")) setImportOpen(true);
-      s.flash(message!, "warn");
-      window.setTimeout(() => document.querySelector<HTMLElement>(`[data-field="${first}"]`)?.focus(), 30);
-      return false;
-    }
-    setStage("lines");
-    s.flash(doc ? "Header checked" : "Header complete — enter the lines", "info");
-    window.setTimeout(() => document.querySelector<HTMLElement>('[data-field="L.0.p"]:not(:disabled)')?.focus(), 60);
-    return true;
-  };
-  // Ctrl+S on a new bill whose header is still open means "header done", not "save an empty bill".
-  beforeSave.current = () => { if (stage === "header" && !doc) { confirmHeader(); return false; } return true; };
-  const editHeader = () => {
-    setStage("header");
-    window.setTimeout(() => document.querySelector<HTMLElement>('[data-zone=form] [data-field]:not(:disabled)')?.focus(), 40);
-  };
-
-  // ---- side panels and tabs: Alt+[ / Alt+] fold the panels, Alt+, / Alt+. move between tabs (Alt+W closes this one; the workspace handles those) ----
-  const panelKeys = useRef({ toggleLeft, toggleRight });
-  panelKeys.current = { toggleLeft, toggleRight };
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (!event.altKey || event.ctrlKey || event.metaKey || T.isOpen) return;
-      if (event.code === "BracketLeft") { event.preventDefault(); panelKeys.current.toggleLeft(); }
-      else if (event.code === "BracketRight") { event.preventDefault(); panelKeys.current.toggleRight(); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [T.isOpen]);
 
   // start from a confirmed challan (the "Create Bill" button on the challan screen)
   const started = useRef(0);
@@ -311,14 +237,11 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     if (!doc) landedAutoOpened.current = false;
   }, [doc?.id, doc?.importCostSources?.length]);
 
+  // the vendor's other bills: shown in a table, and the source of the "vendor invoice number already used" warning in the header
+  const vendorBills = useVendorBills(p.companyId, p.branchId, f?.vendorGLId ?? "", doc?.id, f?.vendorInvoiceNo ?? "");
+
   const state = doc?.state as string | undefined;
   const reversible = !!doc && state === "POSTED";
-  const includedSources = (doc?.importCostSources ?? []).filter((source: any) => source.includedInCIF);
-  const cifSources = includedSources.filter((source: any) => source.importCostTreatment === "CIF");
-  const landedOnlySources = includedSources.filter((source: any) => source.importCostTreatment === "LANDED_ONLY");
-  const cifSourceAmount = cifSources.reduce((sum: bigint, source: any) => sum + toMicro(source.basicAmount), 0n);
-  const landedOnlyAmount = landedOnlySources.reduce((sum: bigint, source: any) => sum + toMicro(source.basicAmount), 0n);
-  const cifTotal = doc?.invoiceType === "IMPORT" ? formatImportCost(toMicro(doc.basicAmount) + cifSourceAmount, 2) : null;
   // A new draft from this bill (any state): same vendor, lines and charges, dated today, without the vendor invoice no., links or declaration no.
   const canCopy = !!doc && !!lk && state !== "REVERSAL" && !doc.mainBillId;
   const copyBill = () => { if (doc && lk) p.onNew(copyBillForm(cfg.toForm(doc, lk), cfg.emptyForm(lk).invoiceDate)); };
@@ -363,214 +286,61 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     );
   }
 
-  // The lines grid starts as one blank line and grows with every product. `fill` caps it at the height of the lines stage (the rows then scroll inside).
-  const linesGrid = (fill: boolean) => (
-    <LinesGrid fill={fill} kind="bill" currency={foreignOn ? f.imp.currencyCode.trim().toUpperCase() : undefined} lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
-      onOpenTerms={(index, continueAfterApply) => T.open({ scope: "line", lineNumber: T.lineNumberAt(index), lineIndex: index, continueAfterApply })} termSummary={T.lineSummary} />
-  );
-
   return (
     <>
       <section data-purchase-document className="flex min-h-0 min-w-0 flex-1 flex-col">
         <DocHeader title="Purchase bill" number={doc ? String(doc.invoiceNumber) : undefined} pill={state ? <Pill text={state} tone={STATE_TONE[state]} /> : undefined}
           branchName={p.branchName} fyCode={p.fyCode} dirty={s.dirty}
-          steps={doc ? undefined : { labels: ["Header", "Lines"], current: stage === "header" ? 0 : 1 }}
           right={<span className="text-[12px] text-slate-500">F1 help</span>} />
         {notice && <div className="shrink-0 px-5 pt-3">{notice}</div>}
 
-        <div className="flex min-h-0 flex-1">
-          <SidePanel side="left" title="Header" collapsed={leftCollapsed} onToggle={toggleLeft} shortcut="Alt+[">
-            {headerReady
-              ? <HeaderSummary form={f} invoiceNumber={doc ? String(doc.invoiceNumber) : undefined} calendar={p.calendar} readOnly={ro} onEdit={editHeader} />
-              : <EmptyPanel>The header you enter in the middle appears here.</EmptyPanel>}
-          </SidePanel>
-
-          <div data-zone="form" onKeyDown={formEnterKey} className={`min-w-0 flex-1 px-5 py-4 ${stage === "header" ? "lg-scroll overflow-y-auto" : "flex min-h-0 flex-col gap-3 overflow-hidden"}`}>
-            {stage === "header" ? (
-              <div className="mx-auto max-w-[1080px] space-y-4">
-          <FormSection title="Bill Header" hint="Invoice, supplier, payment and document links">
-            <div className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3.5 xl:grid-cols-3 2xl:grid-cols-4">
-              <NumberField label="Invoice No" documentType="PURCHASE_BILL" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.invoiceNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => s.patch(c)} />
-              <DateField label="Invoice Date" name="invoiceDate" value={f.invoiceDate} onChange={(v) => {
-                // with due days entered, the due date follows the invoice date
-                const due = f.dueDays ? addDaysIso(v, Number(f.dueDays)) : "";
-                s.patch(due ? { invoiceDate: v, dueDate: due } : { invoiceDate: v });
-                s.clearError("invoiceDate");
-              }} calendar={p.calendar} readOnly={ro} error={s.err("invoiceDate")} required />
-              <Field label="Invoice Type">
-                <select data-field="invoiceType" disabled={ro} value={f.invoiceType} onChange={(e) => { s.patch({ invoiceType: e.target.value as BForm["invoiceType"] }); if (e.target.value !== "IMPORT") setImportOpen(false); }} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}><option value="LOCAL">Local</option><option value="IMPORT">Import</option></select>
-              </Field>
-              <Field label="Purchase Type">
-                <select data-field="purchaseType" disabled={ro} value={f.purchaseType} onChange={(e) => { const purchaseType = e.target.value; s.patch({ purchaseType, importCostForBillId: purchaseType.startsWith("SERVICE_PURCHASE_") ? f.importCostForBillId : "" }); s.clearError("importCostForBillId"); }} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}>{PURCHASE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select>
-              </Field>
-              <VendorFields lookups={lk} contextKey={String(p.companyId)} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors} lockVendor={!!f.purchaseChallanId}
-                onChange={(c) => {
-                  // a new vendor brings its payment term days, unless due days are already filled
-                  const days = c.vendorGLId && c.vendorGLId !== f.vendorGLId && !f.dueDays ? lk.vendors.find((v) => String(v.id) === c.vendorGLId)?.paymentTermDays : null;
-                  s.patch(days ? { ...c, dueDays: String(days), dueDate: f.invoiceDate ? addDaysIso(f.invoiceDate, days) : f.dueDate } : c);
-                  s.clearError("vendorGLId", "subLedgerId");
-                }} />
-              <TextField label="Vendor Invoice No" name="vendorInvoiceNo" value={f.vendorInvoiceNo} onChange={(v) => s.patch({ vendorInvoiceNo: v })} readOnly={ro} error={s.err("vendorInvoiceNo")} max={30} />
-              <DateField label="Vendor Invoice Date" name="vendorInvoiceDate" value={f.vendorInvoiceDate} onChange={(v) => { s.patch({ vendorInvoiceDate: v }); s.clearError("vendorInvoiceDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("vendorInvoiceDate")} />
-              <TextField label="Due Days" name="dueDays" value={f.dueDays} onChange={(v) => {
-                if (!/^\d{0,4}$/.test(v)) return;
-                // typing the days sets the due date from the invoice date; a due date typed afterwards still wins
-                const due = v ? addDaysIso(f.invoiceDate, Number(v)) : "";
-                s.patch(due ? { dueDays: v, dueDate: due } : { dueDays: v });
-                if (due) s.clearError("dueDate");
-              }} readOnly={ro} error={s.err("dueDays")} max={4} />
-              <DateField label="Due Date" name="dueDate" value={f.dueDate} onChange={(v) => { s.patch({ dueDate: v }); s.clearError("dueDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("dueDate")} />
-              {f.purchaseType.startsWith("SERVICE_PURCHASE_") && (
-                <>
-                  <Field label="Cost of goods bill" error={s.err("importCostForBillId")}>
-                    <Combobox fieldName="importCostForBillId" placeholder="— (not linked: stays an expense)" value={f.importCostForBillId} hasError={!!s.err("importCostForBillId")} options={sourceTargetOpts} disabled={ro} allowClear onChange={(value) => { const target = mains.find((x) => String(x.id) === value); s.patch({ importCostForBillId: value, ...(value && target && target.invoiceType !== "IMPORT" ? { importCostTreatment: "LANDED_ONLY" as const } : {}) }); s.clearError("importCostForBillId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
-                  </Field>
-                  <Field label="Source allocation basis">
-                    <select data-field="importCostAllocationBasis" disabled={ro || !f.importCostForBillId} value={f.importCostAllocationBasis} onChange={(e) => s.patch({ importCostAllocationBasis: e.target.value as BForm["importCostAllocationBasis"] })} className={`fld ${ro || !f.importCostForBillId ? "bg-slate-100 text-slate-600" : ""}`}>
-                      <option value="VALUE">By goods value</option><option value="QUANTITY">By quantity</option>
-                    </select>
-                  </Field>
-                  <Field label="Cost treatment">
-                    <select data-field="importCostTreatment" disabled={ro || !f.importCostForBillId} value={f.importCostTreatment} onChange={(e) => s.patch({ importCostTreatment: e.target.value as BForm["importCostTreatment"] })} className={`fld ${ro || !f.importCostForBillId ? "bg-slate-100 text-slate-600" : ""}`}>
-                      <option value="CIF">CIF input (pre-customs)</option><option value="LANDED_ONLY">Landed only (post-CIF)</option>
-                    </select>
-                  </Field>
-                </>
-              )}
-              <Field label="Challan / Order"><input disabled className="fld bg-slate-100 text-slate-600" value={[f.challanNo && `Challan ${f.challanNo}`, f.orderNo && `Order ${f.orderNo}`].filter(Boolean).join(" · ")} placeholder="—" aria-label="Linked documents" /></Field>
-            </div>
-          </FormSection>
-
-          {f.invoiceType === "IMPORT" && (
-            <section className="lg-card">
-              <button type="button" className="flex min-h-[42px] w-full items-center gap-2 px-4 py-2 text-left hover:bg-slate-50" onClick={() => setImportOpen((v) => !v)} aria-expanded={importOpen}>
-                {importOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                <span className="lg-card-title">Import details</span>
-                <span className="lg-card-hint">{impFilled ? `${impFilled} field${impFilled === 1 ? "" : "s"} filled` : "Optional — expand to enter customs, LC, transport, FX"}</span>
-              </button>
-              {importOpen && (
-                <div className="border-t border-slate-100 px-4 py-3.5">
-                  <p className="mb-3 text-[12px] text-slate-600">Customs declaration number is needed to post an import bill. Other fields are optional.</p>
-                  <div className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-3.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-                    {IMPORT_FIELDS.map((k) => k.kind === "date"
-                      ? <DateField key={k.key} label={k.label} name={`imp.${k.key}`} value={f.imp[k.key] ?? ""} onChange={(v) => { s.patch({ imp: { ...f.imp, [k.key]: v } }); s.clearError(`imp.${k.key}`); }} calendar={p.calendar} readOnly={ro} error={s.err(`imp.${k.key}`)} />
-                      : k.kind === "mode"
-                        ? <Field key={k.key} label={k.label}><select data-field={`imp.${k.key}`} disabled={ro} value={f.imp[k.key] ?? ""} onChange={(e) => s.patch({ imp: { ...f.imp, [k.key]: e.target.value } })} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}><option value="">—</option><option value="ROAD">Road</option><option value="AIR">Air</option><option value="RAIL">Rail</option><option value="OTHER">Other</option></select></Field>
-                        : <TextField key={k.key} label={k.label} name={`imp.${k.key}`} value={f.imp[k.key] ?? ""} onChange={(v) => s.patch({ imp: { ...f.imp, [k.key]: v } })} readOnly={ro} max={k.max ?? 60} error={s.err(`imp.${k.key}`)} />)}
-                  </div>
-                  {Number(f.imp.exchangeRate) > 0 && Number(f.imp.foreignInvoiceAmount) > 0 && <p className="mt-1 text-[11px] text-slate-600">{(f.imp.currencyCode ?? "").toUpperCase()} {f.imp.foreignInvoiceAmount} × {f.imp.exchangeRate} = NPR <b>{(Math.round(Number(f.imp.foreignInvoiceAmount) * Number(f.imp.exchangeRate) * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}</b>. Enter line rates in NPR (foreign rate × exchange rate).</p>}
-                </div>
-              )}
-            </section>
-          )}
-                <div className="flex justify-end pb-2">
-                  <button type="button" data-nav="header-continue" className="btn btn-primary" onClick={confirmHeader}>
-                    {doc ? "Done — back to lines" : "Header done"} <ArrowRight size={14} />{!doc && <span className="kbd">Ctrl+S</span>}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <section className="lg-card flex min-h-0 flex-col">
-                  <header className="lg-card-head">
-                    <h2 className="lg-card-title">Lines</h2>
-                    <p className="lg-card-hint">Product, quantity and rate. Click a line's term amount to assess its terms.</p>
-                  </header>
-                  <div className="flex min-h-0 flex-col">
-                    {linesGrid(true)}
-                  </div>
-                </section>
-          <section className="lg-card flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3" aria-label="Header terms and conditions">
-            <div className="min-w-0 flex-1">
-              <h2 className="lg-card-title">Header terms and conditions</h2>
-              <p className="lg-card-hint mt-0.5">Document-level charges, discounts and taxes. Product-specific charges are available from each line.</p>
-            </div>
-            <span className="lg-chip">{f.terms.filter((term) => !isBlankTerm(term) && !masters.get(term.termId)?.isProductwise).length} terms</span>
-            <b className="min-w-[100px] text-right text-[15px] font-semibold tabular-nums">{T.header.amount.startsWith("-") ? `− ${money(T.header.amount.slice(1))}` : (money(T.header.amount) || "0.00")}</b>
-            <button type="button" data-nav="header-terms" className="btn" onClick={() => T.open({ scope: "header" })}>
-              {ro ? "View terms" : "Assess terms"}
-            </button>
-            {s.err("terms") && <p className="w-full text-[12px] text-rose-700" role="alert">{s.err("terms")}</p>}
-          </section>
-          {ro && doc && doc.lines.some((l) => Number(l.landedAmount) !== 0) && (
-            <p className="text-[12px] text-slate-600">Landed cost per line: {doc.lines.map((l) => `${l.lineNumber}: ${money(l.landedAmount)}`).join(" · ")}</p>
-          )}
-                <div className="max-h-[35%] shrink-0 overflow-y-auto">
-          {!!doc && String(doc.purchaseType ?? "").startsWith("GOODS_PURCHASE_") && (
-            <section className="lg-card shrink-0 border-sky-200 bg-sky-50/50">
-              <button type="button" className="flex min-h-[42px] w-full items-center gap-2 px-4 py-2 text-left hover:bg-sky-50" onClick={() => setLandedOpen((v) => !v)} aria-expanded={landedOpen}>
-                {landedOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                <span className="lg-card-title">Linked service costs and landed value</span>
-                <span className="lg-card-hint">{(doc.importCostSources ?? []).length ? `${(doc.importCostSources ?? []).length} linked` : "No service invoices linked yet"}</span>
-              </button>
-              {landedOpen && (
-                <div className="px-3 py-2">
-                  <p className="text-[12px] text-slate-700">Only posted, unreversed service bills are included. Tax-exclusive basic amount is allocated; the service bill&apos;s tax stays on its own term. CIF = before customs; Landed only = after CIF.</p>
-                  <div className="mt-1 grid grid-cols-1 gap-2 text-[12px] sm:grid-cols-2 xl:grid-cols-4">
-                    <p>Goods basic: <b>{money(doc.basicAmount)}</b></p>
-                    <p>CIF service costs: <b>{money(formatImportCost(cifSourceAmount, 2))}</b></p>
-                    <p>Landed-only costs: <b>{money(formatImportCost(landedOnlyAmount, 2))}</b></p>
-                    <p>CIF base: <b>{money(cifTotal ?? "0")}</b></p>
-                  </div>
-                  {(doc.importCostSources ?? []).length > 0 ? (
-                    <div className="mt-2 overflow-x-auto">
-                      <table className="xl-table min-w-[560px] text-left text-[12px]">
-                        <thead><tr className="border-b border-sky-200 text-slate-600"><th className="py-1 pr-3">Service invoice</th><th className="py-1 pr-3">Vendor</th><th className="py-1 pr-3">Source basis</th><th className="py-1 pr-3">Treatment</th><th className="py-1 pr-3 text-right">Basic amount</th><th className="py-1 text-left">Cost status</th></tr></thead>
-                        <tbody>{doc.importCostSources.map((source: any) => <tr key={source.id} className="border-b border-sky-100 last:border-0">
-                          <td className="py-1 pr-3 font-mono">{source.invoiceNumber}{source.vendorInvoiceNo ? ` · ${source.vendorInvoiceNo}` : ""}</td>
-                          <td className="py-1 pr-3">{source.vendorName}</td>
-                          <td className="py-1 pr-3">{source.importCostAllocationBasis === "QUANTITY" ? "Quantity" : "Goods value"}</td>
-                          <td className="py-1 pr-3">{source.importCostTreatment === "LANDED_ONLY" ? "Landed only" : "CIF"}</td>
-                          <td className="py-1 pr-3 text-right tabular-nums">{money(source.basicAmount)}</td>
-                          <td className="py-1 text-left">{source.includedInCIF ? "Included" : source.state.toLowerCase()}</td>
-                        </tr>)}</tbody>
-                      </table>
-                    </div>
-                  ) : <p className="mt-1 text-[12px] text-slate-600">No service purchase invoices are linked yet.</p>}
-                </div>
-              )}
-            </section>
-          )}
-
-                </div>
-                <section className="lg-card shrink-0 px-4 py-2.5" aria-label="Remarks">
-                  <label className="flex items-start gap-3">
-                    <span className="mt-1.5 w-[64px] shrink-0 text-[12px] font-semibold text-slate-700">Remarks</span>
-                    <span className="min-w-0 flex-1">
-                      <NarrationInput multiline companyId={p.companyId} data-field="remarks" maxLength={1024} disabled={ro} value={f.remarks} onText={(v) => s.patch({ remarks: v })}
-                        placeholder="Optional note for this bill…" className={`fld h-14 min-h-14 resize-y py-1.5 ${s.err("remarks") ? "fld-err" : ""}`} aria-label="Remarks" />
-                      {s.err("remarks") && <span className="mt-1 block text-[12px] text-rose-700">{s.err("remarks")}</span>}
-                    </span>
-                  </label>
-                </section>
-              </>
-            )}
+        {/* One screen of tables: header, (import details,) lines, then terms | vendor's bills | totals. It scrolls only when the window is too short for the lines' minimum height. */}
+        <div data-zone="form" onKeyDown={formEnterKey} className="lg-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-auto px-5 py-3">
+          <div className="shrink-0">
+            <BillHeaderTable f={f} lk={lk} doc={doc} readOnly={ro} companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} calendar={p.calendar}
+              err={s.err} patch={s.patch} clearError={s.clearError} costTargets={sourceTargetOpts} mains={mains} duplicate={vendorBills.duplicate}
+              onInvoiceType={(type) => { if (type !== "IMPORT") setImportOpen(false); }} />
           </div>
+          {f.invoiceType === "IMPORT" && (
+            <div className="shrink-0">
+              <ImportDetailsTable f={f} readOnly={ro} calendar={p.calendar} err={s.err} patch={s.patch} clearError={s.clearError} open={importOpen} onToggle={() => setImportOpen((v) => !v)} />
+            </div>
+          )}
 
-          <SidePanel side="right" title="Vendor" collapsed={rightCollapsed} onToggle={toggleRight} shortcut="Alt+]">
-            {headerReady
-              ? <VendorPanel lookups={lk} companyId={p.companyId} branchId={p.branchId} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} vendorInvoiceNo={f.vendorInvoiceNo} docId={doc?.id} calendar={p.calendar} userId={p.userId} doc={doc ? { id: doc.id, number: String(doc.invoiceNumber), state: String(doc.state), fiscalYear: String(doc.fiscalYear) } : null} />
-              : <EmptyPanel>The vendor's details appear here once the header is complete.</EmptyPanel>}
-          </SidePanel>
+          {/* the lines take whatever height is left */}
+          <section aria-label="Lines" className="flex min-h-[240px] flex-1 flex-col [&>.lg-card]:min-h-0 [&>.lg-card]:flex-1">
+            <LinesGrid fill kind="bill" lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
+              onOpenTerms={(index, continueAfterApply) => T.open({ scope: "line", lineNumber: T.lineNumberAt(index), lineIndex: index, continueAfterApply })} termSummary={T.lineSummary} />
+          </section>
+
+          {!!doc && String(doc.purchaseType ?? "").startsWith("GOODS_PURCHASE_") && (
+            <div className="shrink-0"><LinkedCostsTable doc={doc} open={landedOpen} onToggle={() => setLandedOpen((v) => !v)} /></div>
+          )}
+          {ro && doc && doc.lines.some((l) => Number(l.landedAmount) !== 0) && (
+            <p className="shrink-0 text-[12px] text-slate-600">Landed cost per line: {doc.lines.map((l) => `${l.lineNumber}: ${money(l.landedAmount)}`).join(" · ")}</p>
+          )}
+
+          <div className="grid shrink-0 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)_minmax(260px,300px)]">
+            <HeaderTermsTable terms={f.terms} masters={masters} signedOf={T.signedOf} total={T.header.amount} readOnly={ro} error={s.err("terms")} onOpen={() => T.open({ scope: "header" })} />
+            <VendorBillsTable lookups={lk} vendorGLId={f.vendorGLId} vendorBills={vendorBills} doc={doc} companyId={p.companyId} userId={p.userId} calendar={p.calendar} />
+            <PurchaseInvoiceTotals table preview={invoicePreview} savedDoc={doc} readOnly={ro} hasLines={liveLines > 0} />
+          </div>
         </div>
 
-        <footer className="tape flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2.5 px-5 py-3">
-          <div className="min-w-0 flex-1"><PurchaseInvoiceTotals compact preview={invoicePreview} savedDoc={doc} readOnly={ro} hasLines={liveLines > 0} /></div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {!ro ? (
-              <>
-                <button data-nav className="btn btn-primary" disabled={s.saving || (stage === "header" && !doc)} title={stage === "header" && !doc ? "Finish the header first (Header done)" : undefined} onClick={() => void s.save()}><Save size={14} /> {s.mode === "edit" ? "Update" : "Save"} <span className="kbd">Ctrl+S</span></button>
-                <button data-nav className="btn" onClick={() => (doc ? s.cancel() : s.guard(() => p.onClose(p.tabId)))}><X size={14} /> Cancel {doc && <span className="kbd">Esc</span>}</button>
-              </>
-            ) : (
-              <>
-                <button data-nav className="btn" onClick={() => p.onNew()}><Plus size={14} /> New <span className="kbd">F3</span></button>
-                <button data-nav className="btn" disabled={!doc || !cfg.editable(doc)} onClick={s.edit}><Pencil size={14} /> Edit <span className="kbd">F2</span></button>
-                <button data-nav className="btn" disabled={!doc || !cfg.deletable(doc)} onClick={s.askDelete}><Trash2 size={14} /> Delete <span className="kbd">Ctrl+Del</span></button>
-                {actions && <><span className="tape-sep mx-1" />{actions}</>}
-              </>
-            )}
-          </div>
+        <footer className="tape flex shrink-0 flex-wrap items-center justify-end gap-2 px-5 py-3">
+          {!ro ? (
+            <>
+              <button data-nav className="btn btn-primary" disabled={s.saving} onClick={() => void s.save()}><Save size={14} /> {s.mode === "edit" ? "Update" : "Save"} <span className="kbd">Ctrl+S</span></button>
+              <button data-nav className="btn" onClick={() => (doc ? s.cancel() : s.guard(() => p.onClose(p.tabId)))}><X size={14} /> Cancel {doc && <span className="kbd">Esc</span>}</button>
+            </>
+          ) : (
+            <>
+              <button data-nav className="btn" onClick={() => p.onNew()}><Plus size={14} /> New <span className="kbd">F3</span></button>
+              <button data-nav className="btn" disabled={!doc || !cfg.editable(doc)} onClick={s.edit}><Pencil size={14} /> Edit <span className="kbd">F2</span></button>
+              <button data-nav className="btn" disabled={!doc || !cfg.deletable(doc)} onClick={s.askDelete}><Trash2 size={14} /> Delete <span className="kbd">Ctrl+Del</span></button>
+              {actions && <><span className="tape-sep mx-1" />{actions}</>}
+            </>
+          )}
         </footer>
       </section>
 

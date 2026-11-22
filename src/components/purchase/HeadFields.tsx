@@ -11,31 +11,62 @@ type Errs = Record<string, string | undefined>;
 // Ctrl+M on the Vendor field: a vendor is a Party of type VENDOR, and the option value is its ledger, not the party row.
 const VENDOR_PARTY: CreateMasterSpec = { key: "party", defaults: { glType: "VENDOR" }, valueFrom: (r) => String(r.generalLedgerId ?? r.id) };
 
-// Vendor ledger, its sub-ledger (when the ledger needs one) and the agent: the same three fields on every purchase document.
-export function VendorFields({ lookups, vendorGLId, subLedgerId, agentId, onChange, readOnly, errors, lockVendor, contextKey }: {
-  lookups: PLookups; vendorGLId: string; subLedgerId: string; agentId: string; readOnly: boolean; errors: Errs; lockVendor?: boolean; contextKey: string;
-  onChange: (p: { vendorGLId?: string; subLedgerId?: string; agentId?: string }) => void;
-}) {
+type VendorChange = { vendorGLId?: string; subLedgerId?: string; agentId?: string };
+
+// The vendor ledger the bill is from, with the pick-lists the three pickers below need.
+export function useVendorOptions(lookups: PLookups, vendorGLId: string) {
   const vendor = lookups.vendors.find((v) => String(v.id) === vendorGLId);
   const vendors = useMemo<ReferenceOption[]>(() => lookups.vendors.map((v) => ({ value: String(v.id), label: `${v.code} — ${v.name}`, code: v.code, name: v.name, detail: v.requiresSubLedger ? "Requires sub ledger" : "Vendor ledger", isActive: v.isActive })), [lookups.vendors]);
   const subs = useMemo<ReferenceOption[]>(() => lookups.subLedgers.filter((s) => String(s.generalLedgerId) === vendorGLId).map((s) => ({ value: String(s.id), label: `${s.code} — ${s.name}`, code: s.code, name: s.name, detail: vendor?.name ? `For ${vendor.name}` : "Sub ledger", isActive: s.isActive })), [lookups.subLedgers, vendorGLId, vendor?.name]);
   const agents = useMemo<ReferenceOption[]>(() => lookups.agents.map((a) => ({ value: String(a.id), label: `${a.code} — ${a.name}`, code: a.code, name: a.name, isActive: a.isActive })), [lookups.agents]);
+  return { vendor, vendors, subs, agents };
+}
+
+// The three pickers without a label around them, for a screen that lays them out itself (a table cell, say).
+export function VendorPicker({ vendors, vendorGLId, onChange, readOnly, error, lockVendor, contextKey }: {
+  vendors: ReferenceOption[]; vendorGLId: string; onChange: (p: VendorChange) => void; readOnly: boolean; error?: string; lockVendor?: boolean; contextKey: string;
+}) {
+  return (
+    <MasterReferencePicker fieldName="vendorGLId" label="Vendor ledger" scopeKey="vendor-ledgers" contextKey={contextKey} placeholder="Choose vendor ledger…" required value={vendorGLId} hasError={!!error} options={vendors} disabled={readOnly || lockVendor} createMaster={VENDOR_PARTY}
+      onChange={(v) => onChange({ vendorGLId: v, subLedgerId: "" })} onCommit={(el, dir) => focusStep(el, dir)} />
+  );
+}
+export function SubLedgerPicker({ subs, requiresSubLedger, vendorGLId, subLedgerId, onChange, readOnly, error, contextKey }: {
+  subs: ReferenceOption[]; requiresSubLedger: boolean; vendorGLId: string; subLedgerId: string; onChange: (p: VendorChange) => void; readOnly: boolean; error?: string; contextKey: string;
+}) {
+  return (
+    <MasterReferencePicker fieldName="subLedgerId" label="Sub Ledger" scopeKey="sub-ledger" contextKey={`${contextKey}:${vendorGLId || "none"}`} placeholder={subs.length ? "Choose sub ledger…" : requiresSubLedger ? "None yet — Ctrl+M to create" : "—"} value={subLedgerId} hasError={!!error} options={subs}
+      disabled={readOnly || (subs.length === 0 && !requiresSubLedger)}
+      createMaster={requiresSubLedger ? { key: "sub-ledger", defaults: { generalLedgerId: vendorGLId } } : undefined}
+      required={requiresSubLedger}
+      onChange={(v) => onChange({ subLedgerId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
+  );
+}
+export function AgentPicker({ agents, agentId, onChange, readOnly, error, contextKey }: {
+  agents: ReferenceOption[]; agentId: string; onChange: (p: VendorChange) => void; readOnly: boolean; error?: string; contextKey: string;
+}) {
+  return (
+    <MasterReferencePicker fieldName="agentId" label="Agent" scopeKey="agents" contextKey={contextKey} placeholder="Agent (optional)" value={agentId} hasError={!!error} options={agents} disabled={readOnly} createMaster={{ key: "agents" }}
+      onChange={(v) => onChange({ agentId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
+  );
+}
+
+// Vendor ledger, its sub-ledger (when the ledger needs one) and the agent: the same three fields on every purchase document.
+export function VendorFields({ lookups, vendorGLId, subLedgerId, agentId, onChange, readOnly, errors, lockVendor, contextKey }: {
+  lookups: PLookups; vendorGLId: string; subLedgerId: string; agentId: string; readOnly: boolean; errors: Errs; lockVendor?: boolean; contextKey: string;
+  onChange: (p: VendorChange) => void;
+}) {
+  const { vendor, vendors, subs, agents } = useVendorOptions(lookups, vendorGLId);
   return (
     <>
       <Field label="Vendor" required error={errors.vendorGLId} className="col-span-1 sm:col-span-2">
-        <MasterReferencePicker fieldName="vendorGLId" label="Vendor ledger" scopeKey="vendor-ledgers" contextKey={contextKey} placeholder="Choose vendor ledger…" required value={vendorGLId} hasError={!!errors.vendorGLId} options={vendors} disabled={readOnly || lockVendor} createMaster={VENDOR_PARTY}
-          onChange={(v) => onChange({ vendorGLId: v, subLedgerId: "" })} onCommit={(el, dir) => focusStep(el, dir)} />
+        <VendorPicker vendors={vendors} vendorGLId={vendorGLId} onChange={onChange} readOnly={readOnly} error={errors.vendorGLId} lockVendor={lockVendor} contextKey={contextKey} />
       </Field>
       <Field label={vendor?.requiresSubLedger ? "Sub Ledger" : "Sub Ledger (not needed)"} required={!!vendor?.requiresSubLedger} error={errors.subLedgerId}>
-        <MasterReferencePicker fieldName="subLedgerId" label="Sub Ledger" scopeKey="sub-ledger" contextKey={`${contextKey}:${vendorGLId || "none"}`} placeholder={subs.length ? "Choose sub ledger…" : vendor?.requiresSubLedger ? "None yet — Ctrl+M to create" : "—"} value={subLedgerId} hasError={!!errors.subLedgerId} options={subs}
-          disabled={readOnly || (subs.length === 0 && !vendor?.requiresSubLedger)}
-          createMaster={vendor?.requiresSubLedger ? { key: "sub-ledger", defaults: { generalLedgerId: vendorGLId } } : undefined}
-          required={!!vendor?.requiresSubLedger}
-          onChange={(v) => onChange({ subLedgerId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
+        <SubLedgerPicker subs={subs} requiresSubLedger={!!vendor?.requiresSubLedger} vendorGLId={vendorGLId} subLedgerId={subLedgerId} onChange={onChange} readOnly={readOnly} error={errors.subLedgerId} contextKey={contextKey} />
       </Field>
       <Field label="Agent" error={errors.agentId}>
-        <MasterReferencePicker fieldName="agentId" label="Agent" scopeKey="agents" contextKey={contextKey} placeholder="Agent (optional)" value={agentId} hasError={!!errors.agentId} options={agents} disabled={readOnly} createMaster={{ key: "agents" }}
-          onChange={(v) => onChange({ agentId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
+        <AgentPicker agents={agents} agentId={agentId} onChange={onChange} readOnly={readOnly} error={errors.agentId} contextKey={contextKey} />
       </Field>
     </>
   );

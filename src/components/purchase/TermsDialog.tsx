@@ -210,5 +210,5 @@ export function useTermsDialog(o: Opts) {
       </div>
     );
   }
-  return { open, node, isOpen: !!dlg, header, lineSummary, lineNumberAt, updateLines };
+  return { open, node, isOpen: !!dlg, header, lineSummary, lineNumberAt, updateLines, signedOf };
 }

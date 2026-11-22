@@ -10,7 +10,7 @@ import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
 import { useOnMasterChanged } from "../../lib/masterEvents";
 import { adToBs } from "../../lib/nepaliDate";
 import type { MsgKind } from "../../types";
-import PurchaseBillEntry, { OPTIONS, STATE_TONE, type BForm, type Stage } from "./PurchaseBillScreen";
+import PurchaseBillEntry, { OPTIONS, STATE_TONE, type BForm } from "./PurchaseBillScreen";
 import type { PurchaseScreenProps } from "./PurchaseOrderScreen";
 import type { DocSnapshot } from "./useDocScreen";
 
@@ -19,7 +19,7 @@ import type { DocSnapshot } from "./useDocScreen";
 
 interface EntryTab { id: number; docId: number | null; title: string; dirty: boolean; initialForm?: BForm; fromChallan: { id: number; n: number } | null }
 type Active = "list" | number;
-interface TabSnap { hook: MutableRefObject<DocSnapshot<BForm> | null>; stage: MutableRefObject<Stage | null> }
+interface TabSnap { hook: MutableRefObject<DocSnapshot<BForm> | null> }
 
 const LIST_HINTS = ["F3: New bill", "Enter: Open", "Del: Delete draft", "/: Search", "Alt+, Alt+.: Tabs", "F1: Help"];
 const LIST_HELP: [string, string][] = [
@@ -87,7 +87,7 @@ export default function PurchaseBillWorkspace(p: PurchaseScreenProps & { fromCha
   const snaps = useRef(new Map<number, TabSnap>());
   const snapOf = (id: number): TabSnap => {
     let s = snaps.current.get(id);
-    if (!s) { s = { hook: { current: null }, stage: { current: null } }; snaps.current.set(id, s); }
+    if (!s) { s = { hook: { current: null } }; snaps.current.set(id, s); }
     return s;
   };
 
@@ -194,7 +194,7 @@ export default function PurchaseBillWorkspace(p: PurchaseScreenProps & { fromCha
         : !lookups ? <p className="p-5 text-slate-500">Loading…</p>
         : activeTab ? (
           <PurchaseBillEntry key={activeTab.id} {...p} externalMessage={note} tabId={activeTab.id} lookups={lookups} docId={activeTab.docId} initialForm={activeTab.initialForm} fromChallan={activeTab.fromChallan}
-            hookSnapRef={snapOf(activeTab.id).hook} stageRef={snapOf(activeTab.id).stage} onMeta={onMeta} onNew={openNew} onClose={(id) => closeTab(id, true)} onListChanged={() => void loadList()} />
+            hookSnapRef={snapOf(activeTab.id).hook} onMeta={onMeta} onNew={openNew} onClose={(id) => closeTab(id, true)} onListChanged={() => void loadList()} />
         ) : (
           <section data-purchase-document className="flex min-h-0 flex-1 flex-col gap-4 px-6 py-5">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">

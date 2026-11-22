@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { numberSeriesApi, type AvailableSeries } from "../../api";
 import { Field } from "./Bits";
 import { NumberSeriesDialog } from "../NumberSeriesDialog";
@@ -11,9 +11,11 @@ interface Props {
   label: string; documentType: string; companyId: number; branchId: number; fyCode: string; userId: number;
   existingNumber?: string; readOnly: boolean;
   seriesId: string; number: string; onChange: (p: { numberSeriesId: string; docNumber: string }) => void;
+  /** no label of its own (a table cell next to a header cell carries it); `label` is then only the accessible name */
+  bare?: boolean;
 }
 
-export function NumberField({ label, documentType, companyId, branchId, fyCode, userId, existingNumber, readOnly, seriesId, number, onChange }: Props) {
+export function NumberField({ label, documentType, companyId, branchId, fyCode, userId, existingNumber, readOnly, seriesId, number, onChange, bare }: Props) {
   const [list, setList] = useState<AvailableSeries[]>([]);
   const [asking, setAsking] = useState(false);
   const isNew = existingNumber === undefined;
@@ -37,14 +39,16 @@ export function NumberField({ label, documentType, companyId, branchId, fyCode, 
   const chosen = seriesId || String(list[0]?.id ?? "");
   const cur = list.find((x) => String(x.id) === chosen);
   const dialog = asking && <NumberSeriesDialog title={`${label.replace(/ No$/, "")} numbering`} items={list} onPick={(id) => { setAsking(false); onChange({ numberSeriesId: String(id), docNumber: "" }); }} />;
+  // a plain function, not a component: a component type made inside render would remount the input on every keystroke
+  const wrap = (children: ReactNode, required?: boolean) => (bare ? children : <Field label={label} required={required}>{children}</Field>);
   if (!isNew || !list.length || readOnly) {
-    return <Field label={label}><input disabled className="fld bg-slate-100 text-slate-600" value={existingNumber ?? ""} placeholder="(next number)" aria-label={label} /></Field>;
+    return <>{wrap(<input disabled className="fld bg-slate-100 text-slate-600" value={existingNumber ?? ""} placeholder="(next number)" aria-label={label} />)}</>;
   }
   const auto = cur?.mode === "AUTOMATIC";
   return (
     <div className="min-w-0">
       {dialog}
-      <Field label={label} required={cur?.mode === "MANUAL"}>
+      {wrap(
         <div className="flex gap-1">
           {list.length > 1 && (
             <select className="fld w-[42%] min-w-0" aria-label={`${label} series`} value={chosen} onChange={(e) => onChange({ numberSeriesId: e.target.value, docNumber: "" })}>
@@ -56,8 +60,9 @@ export function NumberField({ label, documentType, companyId, branchId, fyCode, 
             value={auto ? cur?.next ?? "" : number} placeholder={cur?.mode === "MANUAL" ? "type the number" : cur?.next ?? ""}
             onChange={(e) => onChange({ numberSeriesId: seriesId, docNumber: e.target.value })}
           />
-        </div>
-      </Field>
+        </div>,
+        cur?.mode === "MANUAL",
+      )}
       {cur?.problem && <p className="mt-1 text-[12px] text-rose-700">{cur.problem}</p>}
       {!cur?.problem && cur?.left !== null && cur?.left !== undefined && cur.left <= 10 && <p className="mt-1 text-[12px] text-amber-700">Only {cur.left} number(s) left in this series.</p>}
     </div>

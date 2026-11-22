@@ -16,6 +16,8 @@ interface Props {
   hasLines: boolean;
   /** One centred line for the fixed footer of the bill entry screen; the explanation moves into a tooltip and only a problem is spelled out. */
   compact?: boolean;
+  /** The totals as a small two-column table (label | amount) for a screen that is laid out in tables. */
+  table?: boolean;
   /** what the document is called in the explanations ("bill" by default; "invoice" for a sales invoice) */
   noun?: string;
 }
@@ -26,7 +28,7 @@ const signedMoney = (value: unknown) => {
   return text.startsWith("-") ? `− ${money(text.slice(1))}` : money(text);
 };
 
-export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, hasLines, compact, noun = "bill" }: Props) {
+export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, hasLines, compact, table, noun = "bill" }: Props) {
   const showSaved = readOnly && !!savedDoc;
   let savedAdditions = "0.00";
   let savedDeductions = "0.00";
@@ -61,6 +63,30 @@ export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, hasLines, c
     : !hasLines ? "Add invoice lines to begin the live calculation."
       : preview.status === "ready" ? `Live preview · follows the same calculation rules used when saving the ${noun}.`
         : preview.message ?? `Complete the ${noun} inputs to calculate totals.`;
+
+  if (table) {
+    const note = calculationAlert || (!showSaved && hasLines && preview.status !== "ready");
+    return (
+      <section aria-label="Purchase invoice totals" title={message} className="lg-card">
+        <table className="xl-table table-fixed [&>tbody>tr:last-child>*]:border-b-0 [&_tr>:first-child]:border-l-0 [&_tr>:last-child]:border-r-0 [&_tbody_tr:hover]:bg-transparent">
+          <colgroup><col /><col style={{ width: "150px" }} /></colgroup>
+          <thead><tr><th colSpan={2} className="text-left">Totals</th></tr></thead>
+          <tbody>
+            {entries.map((entry) => (
+              <tr key={entry.label} className={entry.total ? "bg-cobalt-50" : ""}>
+                <th scope="row" className={`text-left text-[12px] ${entry.total ? "font-semibold text-ink" : "font-medium text-slate-600"}`}>{entry.label}</th>
+                <td aria-live={entry.total ? "polite" : undefined} aria-atomic={entry.total ? true : undefined} title={entry.value}
+                  className={`truncate text-right tabular-nums ${entry.total ? "text-[15px] font-semibold text-ink" : "font-medium text-slate-800"}`}>
+                  <span key={entry.value} className={entry.total ? "lg-settle inline-block" : undefined}>{entry.value}</span>
+                </td>
+              </tr>
+            ))}
+            {note && <tr><td colSpan={2} role={calculationAlert ? "alert" : "status"} className={`text-left text-[12px] ${calculationAlert ? "bg-amber-50 text-amber-900" : "text-slate-600"}`}>{message}</td></tr>}
+          </tbody>
+        </table>
+      </section>
+    );
+  }
 
   if (compact) {
     return (
