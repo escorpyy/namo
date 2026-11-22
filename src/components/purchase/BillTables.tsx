@@ -25,7 +25,7 @@ export const IMPORT_FIELDS: { key: string; label: string; short?: string; kind: 
   { key: "transporterName", label: "Transporter", kind: "text", max: 100 }, { key: "vehicleNo", label: "Vehicle No", kind: "text", max: 30 }, { key: "lrNo", label: "LR No", kind: "text", max: 30 }, { key: "lrDate", label: "LR Date", kind: "date" },
   { key: "importPermitNo", label: "Import Permit No", kind: "text", max: 30 }, { key: "importPermitDate", label: "Permit Date", kind: "date" },
   // Optional foreign currency: amounts on the bill stay in NPR; these record how they were converted.
-  { key: "currencyCode", label: "Foreign Currency (optional, e.g. USD)", short: "Foreign Currency", kind: "text", max: 3 }, { key: "exchangeRate", label: "Exchange Rate (NPR per 1 unit)", short: "Exchange Rate", kind: "text", max: 20 }, { key: "foreignInvoiceAmount", label: "Invoice Total in Foreign Currency", short: "Foreign Invoice Total", kind: "text", max: 20 },
+  { key: "currencyCode", label: "Invoice Currency (optional, e.g. USD; blank = NPR)", short: "Foreign Currency", kind: "text", max: 3 }, { key: "exchangeRate", label: "Exchange Rate (NPR per 1 unit)", short: "Exchange Rate", kind: "text", max: 20 }, { key: "foreignInvoiceAmount", label: "Invoice Total in Foreign Currency", short: "Foreign Invoice Total", kind: "text", max: 20 },
 ];
 export const PURCHASE_TYPES = [
   { value: "GOODS_PURCHASE_OTHERS", label: "Goods — Others" }, { value: "GOODS_PURCHASE_CAPITAL", label: "Goods — Capital" },
@@ -72,12 +72,12 @@ function DateCell({ name, label, value, onChange, calendar, readOnly, error, hin
   );
 }
 
-// Eight columns: four label | value pairs. Rows that need fewer pairs fill the rest with a quiet cell.
-function FormTable({ label, children, className = "" }: { label: string; children: ReactNode; className?: string }) {
+// Four label | value pairs (the bill header uses five). Rows that need fewer pairs fill the rest with a quiet cell.
+function FormTable({ label, children, className = "", pairs = 4 }: { label: string; children: ReactNode; className?: string; pairs?: number }) {
   return (
     <div className={`lg-grid min-w-0 border border-slate-200 bg-white [&_.fld:disabled]:text-slate-700 [&_select:disabled]:[-webkit-text-fill-color:#334155] ${className}`}>
-      <table aria-label={label} className={`xl-table min-w-[960px] table-fixed ${FRAME} ${NO_HOVER}`}>
-        <colgroup>{[0, 1, 2, 3].map((i) => <Fragment key={i}><col style={{ width: "128px" }} /><col /></Fragment>)}</colgroup>
+      <table aria-label={label} className={`xl-table ${pairs >= 5 ? "min-w-[1180px]" : pairs > 1 ? "min-w-[960px]" : ""} table-fixed ${FRAME} ${NO_HOVER}`}>
+        <colgroup>{Array.from({ length: pairs }, (_, i) => i).map((i) => <Fragment key={i}><col style={{ width: "128px" }} /><col /></Fragment>)}</colgroup>
         <tbody>{children}</tbody>
       </table>
     </div>
@@ -110,7 +110,7 @@ export function BillHeaderTable(p: BillHeaderProps) {
   const noCost = ro || !f.importCostForBillId;
   const links = [f.challanNo && `Challan ${f.challanNo}`, f.orderNo && `Order ${f.orderNo}`].filter(Boolean).join(" · ");
   return (
-    <FormTable label="Bill header">
+    <FormTable label="Bill header" pairs={5}>
       <tr>
         <FLabel title="A confirmed challan fills the vendor and the lines">Challan</FLabel>
         <FCell error={err("purchaseChallanId")}>
@@ -132,11 +132,11 @@ export function BillHeaderTable(p: BillHeaderProps) {
         </FCell>
         <FLabel>Vendor Invoice No</FLabel>
         <FCell error={err("vendorInvoiceNo")}><TextInput name="vendorInvoiceNo" label="Vendor Invoice No" value={f.vendorInvoiceNo} onChange={(v) => patch({ vendorInvoiceNo: v })} readOnly={ro} error={err("vendorInvoiceNo")} max={30} /></FCell>
+        <DateCell name="vendorInvoiceDate" label="Vendor Invoice Date" value={f.vendorInvoiceDate} onChange={(v) => { patch({ vendorInvoiceDate: v }); clearError("vendorInvoiceDate"); }} calendar={cal} readOnly={ro} error={err("vendorInvoiceDate")} />
       </tr>
       <tr>
-        <DateCell name="vendorInvoiceDate" label="Vendor Invoice Date" value={f.vendorInvoiceDate} onChange={(v) => { patch({ vendorInvoiceDate: v }); clearError("vendorInvoiceDate"); }} calendar={cal} readOnly={ro} error={err("vendorInvoiceDate")} />
         <FLabel required>Vendor</FLabel>
-        <FCell error={err("vendorGLId")}>
+        <FCell colSpan={3} error={err("vendorGLId")}>
           <VendorPicker vendors={vendors} vendorGLId={f.vendorGLId} readOnly={ro} error={err("vendorGLId")} lockVendor={!!f.purchaseChallanId} contextKey={ctx}
             onChange={(c) => {
               // a new vendor brings its payment term days, unless due days are already filled
@@ -146,11 +146,11 @@ export function BillHeaderTable(p: BillHeaderProps) {
             }} />
         </FCell>
         <FLabel required={!!vendor?.requiresSubLedger}>{vendor?.requiresSubLedger ? "Sub Ledger" : "Sub Ledger (not needed)"}</FLabel>
-        <FCell error={err("subLedgerId")}><SubLedgerPicker subs={subs} requiresSubLedger={!!vendor?.requiresSubLedger} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} readOnly={ro} error={err("subLedgerId")} contextKey={ctx} onChange={(c) => patch(c)} /></FCell>
-        <FLabel>Agent</FLabel>
-        <FCell error={err("agentId")}><AgentPicker agents={agents} agentId={f.agentId} readOnly={ro} error={err("agentId")} contextKey={ctx} onChange={(c) => patch(c)} /></FCell>
+        <FCell colSpan={5} error={err("subLedgerId")}><SubLedgerPicker subs={subs} requiresSubLedger={!!vendor?.requiresSubLedger} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} readOnly={ro} error={err("subLedgerId")} contextKey={ctx} onChange={(c) => patch(c)} /></FCell>
       </tr>
       <tr>
+        <FLabel>Agent</FLabel>
+        <FCell error={err("agentId")}><AgentPicker agents={agents} agentId={f.agentId} readOnly={ro} error={err("agentId")} contextKey={ctx} onChange={(c) => patch(c)} /></FCell>
         <FLabel>Invoice Type</FLabel>
         <FCell><SelectInput name="invoiceType" label="Invoice Type" disabled={ro} value={f.invoiceType} onChange={(v) => { patch({ invoiceType: v as BForm["invoiceType"] }); p.onInvoiceType(v as BForm["invoiceType"]); }}><option value="LOCAL">Local</option><option value="IMPORT">Import</option></SelectInput></FCell>
         <FLabel>Purchase Type</FLabel>
@@ -169,7 +169,7 @@ export function BillHeaderTable(p: BillHeaderProps) {
       </tr>
       {p.duplicate && (
         <tr>
-          <td colSpan={8} role="alert" className="bg-amber-50 text-left text-[12px] text-amber-900">
+          <td colSpan={10} role="alert" className="bg-amber-50 text-left text-[12px] text-amber-900">
             Vendor invoice <b>{f.vendorInvoiceNo.trim()}</b> is already on bill <b className="font-mono">{p.duplicate.invoiceNumber}</b>. A repeated vendor invoice number is refused on save.
           </td>
         </tr>
@@ -189,13 +189,21 @@ export function BillHeaderTable(p: BillHeaderProps) {
           <FCell><SelectInput name="importCostAllocationBasis" label="Source allocation basis" disabled={noCost} value={f.importCostAllocationBasis} onChange={(v) => patch({ importCostAllocationBasis: v as BForm["importCostAllocationBasis"] })}><option value="VALUE">By goods value</option><option value="QUANTITY">By quantity</option></SelectInput></FCell>
           <FLabel>Cost treatment</FLabel>
           <FCell><SelectInput name="importCostTreatment" label="Cost treatment" disabled={noCost} value={f.importCostTreatment} onChange={(v) => patch({ importCostTreatment: v as BForm["importCostTreatment"] })}><option value="CIF">CIF input (pre-customs)</option><option value="LANDED_ONLY">Landed only (post-CIF)</option></SelectInput></FCell>
-          <Filler pairs={1} />
+          <Filler pairs={2} />
         </tr>
       )}
+    </FormTable>
+  );
+}
+
+/** Remarks: a one-row table that sits right under the lines grid. */
+export function BillRemarksTable({ f, readOnly: ro, companyId, err, patch }: { f: BForm; readOnly: boolean; companyId: number; err: (k: string) => string | undefined; patch: (c: Partial<BForm>) => void }) {
+  return (
+    <FormTable label="Remarks" pairs={1}>
       <tr>
         <FLabel>Remarks</FLabel>
-        <FCell colSpan={7} error={err("remarks")}>
-          <NarrationInput multiline rows={1} companyId={p.companyId} data-field="remarks" maxLength={1024} disabled={ro} value={f.remarks} onText={(v) => patch({ remarks: v })}
+        <FCell error={err("remarks")}>
+          <NarrationInput multiline rows={1} companyId={companyId} data-field="remarks" maxLength={1024} disabled={ro} value={f.remarks} onText={(v) => patch({ remarks: v })}
             placeholder="Optional note for this bill…" className={`fld min-h-8 resize-y py-1.5 ${err("remarks") ? "fld-err" : ""}`} aria-label="Remarks" />
         </FCell>
       </tr>

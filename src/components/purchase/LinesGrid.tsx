@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
 import type { PLookups } from "../../api";
 import { blankLine, blankTerm, derivedQty, isBlankLine, isBlankTerm, lineAmount, pickableTerms, trimDec, type LineKind, type LineRow, type Product, type Term, type TermRow } from "../../lib/purchaseForm";
 import { fmtPaise, toPaise } from "../../lib/money";
@@ -37,7 +37,7 @@ const lineNet = (basic: string, terms: string) => {
   return new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format((toPaise(basic || "0") + signedTerms) / 100);
 };
 
-function lineColumns(kind: LineKind, showAlt: boolean, showLoc: boolean, showBatch: boolean, showExpiry: boolean, showLink: boolean, showTerms: boolean): ColKey[] {
+function lineColumns(kind: LineKind, showAlt: boolean, showLoc: boolean, showBatch: boolean, showExpiry: boolean, showLink: boolean, showTerms: boolean, expanded = true): ColKey[] {
   const cols: ColKey[] = ["n", "p"];
   void showAlt; // the alternate qty and unit columns are always there (blank for a product without alternate units)
   cols.push("aq", "au", "q", "u", "r", "amt");
@@ -48,8 +48,7 @@ function lineColumns(kind: LineKind, showAlt: boolean, showLoc: boolean, showBat
   }
   if (kind === "bill") {
     if (showTerms) cols.push("terms", "net"); // line terms, then the net amount, then "More" (location, batch, expiry) which is always shown
-    cols.push("more");
-    if (showLink) cols.push("link");
+    if (expanded) { cols.push("more"); if (showLink) cols.push("link"); } // "More" and "Linked to" fold away behind the arrow at the right edge
     cols.push("rm");
     return cols;
   }
@@ -82,14 +81,21 @@ interface Props {
   onOpenTerms?: (index: number, continueAfterApply?: () => void) => void;
   termSummary?: (index: number) => { amount: string; count: number };
   fill?: boolean;
+  /** bill lines: start with the "More" and "Linked to" columns open when this browser has no saved choice (default: folded) */
+  defaultMoreOpen?: boolean;
 }
 
-export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, errors, calendar, clearError, contextKey, lockProducts, onOpenTerms, termSummary, fill, currency }: Props) {
+export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, errors, calendar, clearError, contextKey, lockProducts, onOpenTerms, termSummary, fill, currency, defaultMoreOpen }: Props) {
   const unitCode = useMemo(() => new Map(lookups.units.map((u) => [u.id, u.code])), [lookups.units]);
   const productOpts = useMemo<ReferenceOption[]>(() => lookups.products.map((p) => ({ value: String(p.id), label: `${p.code} — ${p.description}`, code: p.code, name: p.description, detail: p.type.replaceAll("_", " "), searchText: `${p.type} ${p.tracksBatch ? "batch" : ""} ${p.tracksExpiry ? "expiry" : ""}`, isActive: p.isActive, badge: p.type === "STOCK" ? undefined : p.type.replace("_", " ").toLowerCase() })), [lookups.products]);
   const locOpts = useMemo<ReferenceOption[]>(() => lookups.locations.map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, isActive: l.isActive })), [lookups.locations]);
   const hasTerms = (kind === "bill" || kind === "sales") && !!onOpenTerms; // a per-line "Term Amount" cell that opens the terms dialog
   const stockish = kind === "challan" || kind === "bill"; // order and sales lines have no location, batch or expiry columns
+  // bill lines: the "More" and "Linked to" columns are folded away until the arrow at the right edge opens them (remembered in this browser)
+  const [moreOpen, setMoreOpen] = useState(() => { try { const saved = localStorage.getItem("namo.bill.lines.more"); return saved === null ? !!defaultMoreOpen : saved === "1"; } catch { return !!defaultMoreOpen; } });
+  const toggleMore = () => setMoreOpen((open) => { try { localStorage.setItem("namo.bill.lines.more", open ? "0" : "1"); } catch { /* storage is optional */ } return !open; });
+  // a problem inside a folded column must be visible: open it
+  useEffect(() => { if (kind === "bill" && !moreOpen && Object.keys(errors).some((k) => errors[k] && k.endsWith(".more"))) setMoreOpen(true); }, [errors]); // eslint-disable-line react-hooks/exhaustive-deps
   const layout = useMemo(() => {
     const showAlt = true;
     let showLoc = false, showBatch = false, showExpiry = false, showLink = false;
@@ -102,9 +108,9 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
       if (stockish && row.link) showLink = true;
     }
     if (stockish && lines.some((row) => row.link)) showLink = true;
-    const cols = lineColumns(kind, showAlt, showLoc, showBatch, showExpiry, showLink, hasTerms);
+    const cols = lineColumns(kind, showAlt, showLoc, showBatch, showExpiry, showLink, hasTerms, moreOpen);
     return { cols, showAlt, showLoc, showBatch, showExpiry, showLink, template: cols.map((c) => COL_SIZE[c]).join(" "), heads: cols.map((c) => (currency && (c === "r" || c === "amt") ? `${COL_HEAD[c]} (${currency})` : COL_HEAD[c])) };
-  }, [kind, lines, products, onOpenTerms, currency]);
+  }, [kind, lines, products, onOpenTerms, currency, moreOpen]);
 
   const patch = (i: number, p: Partial<LineRow>) => { onChange(lines.map((l, k) => (k === i ? { ...l, ...p } : l))); clearError(...Object.keys(errors).filter((k) => k.startsWith(`L.${i}.`)), "lines"); };
   const pick = (i: number, id: string) => {
@@ -179,7 +185,13 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
   const live = lines.filter((l) => !isBlankLine(l)).length;
 
   return (
-    <div className={`lg-card lg-grid ${fill ? "flex min-h-0 flex-col" : ""}`}>
+    <div className={`lg-card lg-grid group relative ${fill ? "flex min-h-0 flex-col" : ""}`}>
+      {kind === "bill" && (
+        <button type="button" tabIndex={-1} onClick={toggleMore} aria-expanded={moreOpen} aria-label={moreOpen ? "Hide More and Linked to columns" : "Show More and Linked to columns"} title={moreOpen ? "Hide More / Linked to" : "Show More / Linked to"}
+          className="absolute right-0 top-0 z-[60] grid h-8 w-6 place-items-center border-l border-slate-200 bg-slate-100/90 text-slate-600 opacity-0 transition-opacity hover:bg-cobalt-50 hover:text-cobalt-700 focus-visible:opacity-100 group-hover:opacity-100">
+          {moreOpen ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+        </button>
+      )}
       <div className={`${fill ? "min-h-0 overflow-auto" : "overflow-x-auto"} lg-scroll outline-none`} data-grid="lines" data-nav="lines-grid" {...gridRows.gridProps} onKeyDown={gridRows.handleKey} onKeyDownCapture={onKeyCapture} aria-label={`${kind} line items`}>
         <div className="min-w-max">
           <div style={{ gridTemplateColumns: layout.template }} className="lg-th xl-head">
@@ -225,7 +237,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                   {kind !== "bill" && layout.showLoc && (
                     <MasterReferencePicker fieldName={`L.${i}.lc`} label="Location" required={p?.type === "STOCK"} scopeKey="locations" createMaster={{ key: "locations" }} contextKey={contextKey} placeholder={p?.type === "STOCK" ? "Choose location" : "—"} value={l.locationId} hasError={bad("lc")} options={locOpts} disabled={off || p?.type !== "STOCK"} onChange={(v) => patch(i, { locationId: v })} onCommit={afterCombo} />
                   )}
-                  {kind === "bill" && (() => {
+                  {kind === "bill" && layout.cols.includes("more") && (() => {
                     // "More": location, batch and expiry of the line in one cell; Enter or a click opens the dialog (like the line's terms)
                     const isStock = p?.type === "STOCK", tracked = !!p && (isStock || p.tracksBatch || p.tracksExpiry);
                     const locCode = l.locationId ? lookups.locations.find((x) => String(x.id) === l.locationId)?.code ?? "" : "";
@@ -248,7 +260,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                       <DateInput fieldName={`L.${i}.ex`} value={l.expiryDate} onChange={(v) => patch(i, { expiryDate: v })} calendar={calendar} hasError={bad("ex")} onBlurField={() => {}} compact disabled={off || !p?.tracksExpiry} />
                     </>
                   )}
-                  {layout.showLink && <span className="break-words text-[11px] leading-tight text-slate-600" title={l.link}>{l.link || "—"}</span>}
+                  {layout.cols.includes("link") && <span className="break-words text-[11px] leading-tight text-slate-600" title={l.link}>{l.link || "—"}</span>}
                   <button type="button" data-nav="remove-line" disabled={off} onClick={() => remove(i)} title="Remove line (Delete when the row is selected)" aria-label="Remove line" className={`${kind === "bill" ? "h-7 w-7" : "h-8 w-8"} grid place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-2 focus-visible:outline-cobalt-700 disabled:opacity-30`}><X size={14} /></button>
                 </div>
                 {errMsgs.length > 0 && <p className="px-3 pb-1 text-[12px] text-rose-700">{errMsgs[0]}</p>}

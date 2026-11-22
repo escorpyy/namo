@@ -5,7 +5,7 @@ import { type ComboOption } from "../../components/Combobox";
 import { Dialog, useDialog } from "../../components/Dialog";
 import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
 import { COMMON_HELP, DocHeader, HINTS, Pill, formEnterKey, money } from "../../components/purchase/Bits";
-import { BillHeaderTable, HeaderTermsTable, ImportDetailsButton, ImportDetailsDialog, IMPORT_FIELDS, importFilled, LinkedCostsTable, VendorBillsTable, useVendorBills } from "../../components/purchase/BillTables";
+import { BillHeaderTable, BillRemarksTable, HeaderTermsTable, ImportDetailsButton, ImportDetailsDialog, IMPORT_FIELDS, importFilled, LinkedCostsTable, VendorBillsTable, useVendorBills } from "../../components/purchase/BillTables";
 import { LinesGrid } from "../../components/purchase/LinesGrid";
 import { useTermsDialog } from "../../components/purchase/TermsDialog";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
@@ -358,9 +358,10 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
 
           {/* the lines take whatever height is left */}
           <section aria-label="Lines" className="flex min-h-[240px] flex-1 flex-col [&>.lg-card]:min-h-0 [&>.lg-card]:flex-1">
-            <LinesGrid fill kind="bill" lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
+            <LinesGrid fill kind="bill" currency={foreignOn ? f.imp.currencyCode.trim().toUpperCase() : undefined} lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
               onOpenTerms={(index, continueAfterApply) => T.open({ scope: "line", lineNumber: T.lineNumberAt(index), lineIndex: index, continueAfterApply })} termSummary={T.lineSummary} />
           </section>
+          <div className="shrink-0"><BillRemarksTable f={f} readOnly={ro} companyId={p.companyId} err={s.err} patch={s.patch} /></div>
 
           {!!doc && String(doc.purchaseType ?? "").startsWith("GOODS_PURCHASE_") && (
             <div className="shrink-0"><LinkedCostsTable doc={doc} open={landedOpen} onToggle={() => setLandedOpen((v) => !v)} /></div>
