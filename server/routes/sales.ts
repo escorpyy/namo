@@ -10,7 +10,7 @@ export const salesRouter = Router();
 const MAX_LINES = 500, MAX_TERMS = 100;
 const LINE = { productId: "int", altQty: "num", altUnitId: "int", qty: "num", unitId: "int", rate: "num" } as const satisfies Record<string, Kind>;
 const TERM = { termId: "int", lineNumber: "int", calcType: ["PERCENT", "AMOUNT"], rate: "num", inputAmount: "num", isOverridden: "bool", overrideAmount: "num" } as const satisfies Record<string, Kind>;
-const HEAD = { invoiceNumber: "str", numberSeriesId: "int", invoiceDate: "date", fiscalYear: "str", customerGLId: "int", subLedgerId: "int", agentId: "int", dueDays: "int", dueDate: "date", remarks: "str" } as const satisfies Record<string, Kind>;
+const HEAD = { invoiceNumber: "str", numberSeriesId: "int", invoiceDate: "date", invoiceType: ["LOCAL", "EXPORT"], salesType: ["GOODS_SALES", "SERVICE_SALES"], fiscalYear: "str", customerGLId: "int", subLedgerId: "int", agentId: "int", dueDays: "int", dueDate: "date", remarks: "str" } as const satisfies Record<string, Kind>;
 
 const filterOf = (req: Request): SI.SalesListFilter => ({
   companyId: companyOf(req), branchId: optWhole(q(req, "branchId"), "branchId"), fiscalYear: q(req, "fiscalYear")?.slice(0, 15),

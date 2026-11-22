@@ -361,12 +361,12 @@ export interface SalesLookups {
 }
 export type SalesInvoiceState = "DRAFT" | "POSTED" | "REVERSED" | "REVERSAL";
 export interface SalesInvoiceRow {
-  id: number; branchId: number; invoiceNumber: string; invoiceDate: string; fiscalYear: string; customerGLId: number;
+  id: number; branchId: number; invoiceNumber: string; invoiceDate: string; fiscalYear: string; invoiceType: "LOCAL" | "EXPORT"; salesType: "GOODS_SALES" | "SERVICE_SALES"; customerGLId: number;
   customerCode: string; customerName: string; dueDate: string | null; isPosted: boolean; reversalOfId: number | null;
   basicAmount: string; termAmount: string; totalAmount: string; state: SalesInvoiceState;
 }
 export interface SalesInvoiceDoc {
-  id: number; companyId: number; branchId: number; invoiceNumber: string; invoiceDate: string; fiscalYear: string;
+  id: number; companyId: number; branchId: number; invoiceNumber: string; invoiceDate: string; fiscalYear: string; invoiceType: "LOCAL" | "EXPORT"; salesType: "GOODS_SALES" | "SERVICE_SALES";
   customerGLId: number; customerCode: string; customerName: string; subLedgerId: number | null; agentId: number | null;
   dueDays: number; dueDate: string | null; remarks: string | null; isPosted: boolean; state: SalesInvoiceState;
   reversalOfId: number | null; reversedBy: { id: number; invoiceNumber: string } | null;

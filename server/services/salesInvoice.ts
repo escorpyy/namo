@@ -9,6 +9,7 @@ import { fmt, toMicro, ZERO } from "./purchase/money";
 import { assertMandatorySalesTerms, recalcSalesTerms, saveSalesTerms, type SalesTermInput } from "./salesInvoiceTerms";
 import { mergeRows, writeVoucher, type JvRow } from "./voucherWriter";
 import { assertGlEntryAllowed } from "./glEntryControl";
+import { assertLinesMatchSalesType, type SalesType } from "./salesTypes";
 
 type SaveInput = {
   id?: number;
@@ -17,6 +18,8 @@ type SaveInput = {
   invoiceNumber?: string;
   numberSeriesId?: number | null;
   invoiceDate: string | Date;
+  invoiceType?: "LOCAL" | "EXPORT";
+  salesType?: SalesType;
   fiscalYear?: string;
   customerGLId: number;
   subLedgerId?: number | null;
@@ -152,7 +155,7 @@ export async function listSalesInvoices(f: SalesListFilter) {
   }
   return inTx(f.tx, async (tx) => {
     const [{ count }] = await tx.select({ count: sql<number>`count(*)::int` }).from(I).innerJoin(G, eq(G.id, I.customerGLId)).where(and(...where));
-    const rows = await tx.select({ id: I.id, branchId: I.branchId, invoiceNumber: I.invoiceNumber, invoiceDate: I.invoiceDate, fiscalYear: I.fiscalYear,
+    const rows = await tx.select({ id: I.id, branchId: I.branchId, invoiceNumber: I.invoiceNumber, invoiceDate: I.invoiceDate, fiscalYear: I.fiscalYear, invoiceType: I.invoiceType, salesType: I.salesType,
       customerGLId: I.customerGLId, customerCode: G.code, customerName: G.name, dueDate: I.dueDate, isPosted: I.isPosted,
       reversalOfId: I.reversalOfId, reversed: reversedSql(I.id), basicAmount: I.basicAmount, termAmount: I.termAmount, totalAmount: I.totalAmount })
       .from(I).innerJoin(G, eq(G.id, I.customerGLId)).where(and(...where)).orderBy(desc(I.invoiceDate), desc(I.id)).limit(Math.max(1, Math.min(f.limit ?? 100, 500)));
@@ -188,7 +191,7 @@ export function getSalesInvoice(id: number, companyId: number) {
     const reversed = reversedBy.length > 0;
     return {
       id: invoice.id, companyId: invoice.companyId, branchId: invoice.branchId, invoiceNumber: invoice.invoiceNumber, numberSeriesId: invoice.numberSeriesId,
-      invoiceDate: iso(invoice.invoiceDate), fiscalYear: invoice.fiscalYear, customerGLId: invoice.customerGLId, customerCode: customer[0]?.code ?? "", customerName: customer[0]?.name ?? "",
+      invoiceDate: iso(invoice.invoiceDate), fiscalYear: invoice.fiscalYear, invoiceType: invoice.invoiceType, salesType: invoice.salesType, customerGLId: invoice.customerGLId, customerCode: customer[0]?.code ?? "", customerName: customer[0]?.name ?? "",
       subLedgerId: invoice.subLedgerId, subLedgerCode: sub[0]?.code ?? null, subLedgerName: sub[0]?.name ?? null, agentId: invoice.agentId, agentCode: agent[0]?.code ?? null, agentName: agent[0]?.name ?? null,
       dueDays: invoice.dueDays, dueDate: iso(invoice.dueDate), remarks: invoice.remarks, isPosted: invoice.isPosted, postedAt: invoice.postedAt,
       reversalOfId: invoice.reversalOfId, reversalOf: reversalOf[0] ?? null, reversedBy: reversedBy[0] ?? null, state: stateOf(invoice.isPosted, invoice.reversalOfId, reversed),
@@ -207,6 +210,10 @@ export async function saveSalesInvoice(input: SaveInput, actor: Actor, opts: Wri
   const dueDays = input.dueDays === undefined ? 0 : Number(input.dueDays);
   if (!Number.isInteger(dueDays) || dueDays < 0 || dueDays > 3650) throw new HttpError(400, "Due days must be a whole number from 0 to 3650.", "dueDays");
   const dueDate = input.dueDate ? optDate(input.dueDate, "dueDate") : (dueDays ? addDays(invoiceDate, dueDays) : null);
+  const invoiceType = input.invoiceType ?? "LOCAL";
+  if (invoiceType !== "LOCAL" && invoiceType !== "EXPORT") throw new HttpError(400, "Invoice type must be Local or Export.", "invoiceType");
+  const salesType = input.salesType ?? "GOODS_SALES";
+  if (salesType !== "GOODS_SALES" && salesType !== "SERVICE_SALES") throw new HttpError(400, "Sales type must be Goods sales or Service sales.", "salesType");
   const remarks = input.remarks?.trim() || null;
   if (remarks && remarks.length > 1024) throw new HttpError(400, "Remarks can be up to 1024 characters.", "remarks");
   return inActorTx({ ...actor, reason: opts.reason }, opts.tx, async (tx) => {
@@ -227,6 +234,7 @@ export async function saveSalesInvoice(input: SaveInput, actor: Actor, opts: Wri
     const fy = await resolveFiscalYear(tx, input.companyId, invoiceDate, input.fiscalYear);
     const prepared = await resolveLines(tx, input.companyId, input.lines, { allowZeroQty: false });
     if (prepared.some((l) => l.productType === "FIXED_ASSET" || l.productType === "BUNDLE")) throw new HttpError(400, "Direct sales invoices support stock, non-stock and service items only.", "lines");
+    assertLinesMatchSalesType(salesType, prepared);
     const numbering = await numberForSave(tx, {
       companyId: input.companyId, userId: actor.userId, documentType: "SALES_INVOICE", seriesId: input.numberSeriesId,
       typed: input.invoiceNumber, branchId: input.branchId, fiscalYear: fy.code,
@@ -235,7 +243,7 @@ export async function saveSalesInvoice(input: SaveInput, actor: Actor, opts: Wri
     let id = existing?.id ?? 0;
     const values = {
       companyId: input.companyId, branchId: input.branchId, documentType: "SALES_INVOICE" as const,
-      invoiceNumber: numbering.number, numberSeriesId: numbering.seriesId, invoiceDate, fiscalYear: fy.code,
+      invoiceNumber: numbering.number, numberSeriesId: numbering.seriesId, invoiceDate, fiscalYear: fy.code, invoiceType, salesType,
       customerGLId: customerGL, subLedgerId, agentId, dueDays, dueDate, remarks,
     };
     if (existing) {
@@ -361,7 +369,7 @@ export function reverseSalesInvoice(id: number, actor: Actor, opts: WriteOpts & 
     }
     const [reversal] = await tx.insert(S.salesInvoice).values({
       companyId: original.companyId, branchId: original.branchId, documentType: "SALES_INVOICE", invoiceNumber, numberSeriesId: null,
-      invoiceDate: date, fiscalYear: fy.code, customerGLId: original.customerGLId, subLedgerId: original.subLedgerId, agentId: original.agentId,
+      invoiceDate: date, fiscalYear: fy.code, invoiceType: original.invoiceType, salesType: original.salesType, customerGLId: original.customerGLId, subLedgerId: original.subLedgerId, agentId: original.agentId,
       dueDays: 0, dueDate: null, basicAmount: original.basicAmount, termAmount: original.termAmount, totalAmount: original.totalAmount,
       remarks: `Reversal of ${original.invoiceNumber}: ${reason}`.slice(0, 1024), reversalOfId: original.id, journalVoucherId,
       isPosted: true, postedAt: new Date(), postedBy: actor.userId, createdBy: actor.userId,

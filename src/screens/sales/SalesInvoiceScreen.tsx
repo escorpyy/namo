@@ -34,7 +34,7 @@ export interface SalesScreenProps {
 }
 
 export interface SForm {
-  numberSeriesId: string; docNumber: string; invoiceDate: string; customerGLId: string; subLedgerId: string; agentId: string;
+  numberSeriesId: string; docNumber: string; invoiceDate: string; invoiceType: "LOCAL" | "EXPORT"; salesType: "GOODS_SALES" | "SERVICE_SALES"; customerGLId: string; subLedgerId: string; agentId: string;
   dueDays: string; dueDate: string; remarks: string; lines: LineRow[]; terms: TermRow[];
 }
 
@@ -86,13 +86,13 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
   const cfg = useMemo<DocConfig<SForm>>(() => ({
     kind: "sales-invoice", api, title: "Sales Invoice", singular: "Invoice", statusOptions: STATE_OPTIONS,
     emptyForm: (lk) => ({
-      numberSeriesId: "", docNumber: "", invoiceDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), customerGLId: "", subLedgerId: "", agentId: "", dueDays: "", dueDate: "", remarks: "",
+      numberSeriesId: "", docNumber: "", invoiceDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), invoiceType: "LOCAL", salesType: "GOODS_SALES", customerGLId: "", subLedgerId: "", agentId: "", dueDays: "", dueDate: "", remarks: "",
       lines: [blankLine()], terms: alwaysShowTerms(lk.terms),
     }),
     toForm: (d: PDoc, lk) => {
       const prods = new Map(lk.products.map((x) => [String(x.id), x]));
       return {
-        numberSeriesId: str(d.numberSeriesId), docNumber: str(d.invoiceNumber), invoiceDate: str(d.invoiceDate), customerGLId: str(d.customerGLId), subLedgerId: str(d.subLedgerId), agentId: str(d.agentId),
+        numberSeriesId: str(d.numberSeriesId), docNumber: str(d.invoiceNumber), invoiceDate: str(d.invoiceDate), invoiceType: d.invoiceType === "EXPORT" ? "EXPORT" : "LOCAL", salesType: d.salesType === "SERVICE_SALES" ? "SERVICE_SALES" : "GOODS_SALES", customerGLId: str(d.customerGLId), subLedgerId: str(d.subLedgerId), agentId: str(d.agentId),
         dueDays: d.dueDays ? str(d.dueDays) : "", dueDate: str(d.dueDate), remarks: str(d.remarks),
         lines: d.lines.length ? d.lines.map((l) => lineFromDoc(l, prods.get(str(l.productId)))) : [blankLine()], terms: (d.terms ?? []).map(termFromDoc),
       };
@@ -102,7 +102,7 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
       const masters = new Map(lookupsRef.current!.terms.map((x) => [String(x.id), x]));
       const nn = (s: string) => (s.trim() === "" ? null : s.trim());
       return {
-        invoiceDate: f.invoiceDate, fiscalYear: p.fyCode, customerGLId: Number(f.customerGLId), subLedgerId: f.subLedgerId ? Number(f.subLedgerId) : null, agentId: f.agentId ? Number(f.agentId) : null,
+        invoiceDate: f.invoiceDate, invoiceType: f.invoiceType, salesType: f.salesType, fiscalYear: p.fyCode, customerGLId: Number(f.customerGLId), subLedgerId: f.subLedgerId ? Number(f.subLedgerId) : null, agentId: f.agentId ? Number(f.agentId) : null,
         dueDays: f.dueDays ? Number(f.dueDays) : 0, dueDate: f.dueDate || null, remarks: nn(f.remarks),
         ...(doc ? { invoiceNumber: doc.invoiceNumber, numberSeriesId: doc.numberSeriesId ?? null } : { invoiceNumber: nn(f.docNumber), numberSeriesId: f.numberSeriesId ? Number(f.numberSeriesId) : null }),
         lines: f.lines.filter((l) => !isBlankLine(l)).map((l) => lineToPayload(l, prods.get(l.productId), "sales")),
@@ -221,6 +221,12 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
                 <NumberField label="Invoice No" documentType="SALES_INVOICE" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.invoiceNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => s.patch(c)} />
                 <DateField label="Invoice Date" name="invoiceDate" value={f.invoiceDate} calendar={p.calendar} readOnly={ro} error={s.err("invoiceDate")} required
                   onChange={(v) => { const due = f.dueDays ? addDaysIso(v, Number(f.dueDays)) : ""; s.patch(due ? { invoiceDate: v, dueDate: due } : { invoiceDate: v }); s.clearError("invoiceDate"); }} />
+                <Field label="Invoice Type">
+                  <select data-field="invoiceType" disabled={ro} value={f.invoiceType} onChange={(e) => s.patch({ invoiceType: e.target.value as SForm["invoiceType"] })} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}><option value="LOCAL">Local</option><option value="EXPORT">Export</option></select>
+                </Field>
+                <Field label="Sales Type" error={s.err("salesType")}>
+                  <select data-field="salesType" disabled={ro} value={f.salesType} onChange={(e) => { s.patch({ salesType: e.target.value as SForm["salesType"] }); s.clearError("salesType"); }} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}><option value="GOODS_SALES">Goods sales</option><option value="SERVICE_SALES">Service sales</option></select>
+                </Field>
                 <Field label="Customer" required error={s.err("customerGLId")} className="col-span-2">
                   <MasterReferencePicker fieldName="customerGLId" label="Customer ledger" scopeKey="customer-ledgers" contextKey={String(p.companyId)} placeholder="Choose customer ledger…" required value={f.customerGLId} hasError={!!s.err("customerGLId")} options={customers} disabled={ro}
                     createMaster={{ key: "party", defaults: { glType: "CUSTOMER" }, valueFrom: (r) => String(r.generalLedgerId ?? r.id) }}

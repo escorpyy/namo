@@ -14,7 +14,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { createdAt, money, updatedAt } from "./_helpers";
-import { documentTypeEnum } from "./enums";
+import { documentTypeEnum, salesInvoiceTypeEnum, salesTypeEnum } from "./enums";
 import { branch, company, user } from "./core";
 import { numberSeries } from "./numberSeries";
 import { generalLedger, subLedger } from "./accounting";
@@ -53,6 +53,10 @@ export const salesInvoice = pgTable(
       .references(() => branch.id, { onDelete: "restrict" }),
 
     documentType: documentTypeEnum().notNull().default("SALES_INVOICE"),
+
+    // Domestic (LOCAL) or EXPORT, and goods or service: the VAT sales-book classification.
+    invoiceType: salesInvoiceTypeEnum().notNull().default("LOCAL"),
+    salesType: salesTypeEnum().notNull().default("GOODS_SALES"),
 
     // Numbering restarts every fiscal year, so unique per branch + fiscal year.
     invoiceNumber: varchar({ length: 30 }).notNull(),

@@ -51,7 +51,7 @@ describe.skipIf(!DB_READY)("sales invoice service layer", () => {
       companyId, code: code("VAT10"), name: "Sales tax", category: "GENERAL", nature: "ADDITIVE", isMandatory: true,
       defaultCalcType: "PERCENT", defaultValue: 10, calcBase: "ITEM_VALUE", generalLedgerId: taxGLId, updatedAt: NOW,
     });
-    return { companyId, branchId, customerGLId, salesGLId, taxGLId, productId, unitId, termId };
+    return { companyId, branchId, customerGLId, salesGLId, purchaseGLId, taxGLId, productId, unitId, termId };
   }
 
   const run = async (body: (tx: any, w: Awaited<ReturnType<typeof world>>) => Promise<void>) => {
@@ -134,6 +134,30 @@ describe.skipIf(!DB_READY)("sales invoice service layer", () => {
       await expect((async () => svc.reverseSalesInvoice(saved.id, ACTOR, { tx, date: "2025-10-20", reason: "ab" }))()).rejects.toMatchObject({ status: 400 });
       await expect((async () => svc.reverseSalesInvoice(saved.id, ACTOR, { tx, date: "2025-10-20", reason: "   " }))()).rejects.toMatchObject({ status: 400 });
       await expect((async () => svc.reverseSalesInvoice(saved.id, ACTOR, { tx, date: "2025-10-20", reason: "Not posted yet" }))()).rejects.toMatchObject({ status: 409 });
+    });
+  });
+
+  it("keeps the invoice type and sales type, and refuses lines that do not belong on the chosen sales type", async () => {
+    await run(async (tx, w) => {
+      const tag = uniq();
+      const svcId = await ins(tx, "Product", { companyId: w.companyId, code: `SV${tag}`.slice(0, 10), description: "Service", type: "SERVICE", productSubGroupId: (await tx.execute(sql`select "productSubGroupId" as id from "Product" where id = ${w.productId}`))[0].id, updatedAt: NOW });
+      await ins(tx, "ServiceDetail", { productId: svcId, unitId: w.unitId, salesGLId: w.salesGLId, purchaseGLId: w.purchaseGLId, updatedAt: NOW });
+      const svcLine = { productId: svcId, qty: 1, unitId: w.unitId, rate: 100 };
+
+      const exp = await svc.saveSalesInvoice(draftInput(w, { invoiceType: "EXPORT" }), ACTOR, { tx });
+      const typesOf = async (id: number) => (await rows(tx, sql`select "invoiceType", "salesType" from "SalesInvoice" where id = ${id}`))[0];
+      expect(await typesOf(exp.id)).toMatchObject({ invoiceType: "EXPORT", salesType: "GOODS_SALES" });
+
+      const sv = await svc.saveSalesInvoice(draftInput(w, { salesType: "SERVICE_SALES", lines: [svcLine] }), ACTOR, { tx });
+      expect(await typesOf(sv.id)).toMatchObject({ invoiceType: "LOCAL", salesType: "SERVICE_SALES" });
+
+      await expect(svc.saveSalesInvoice(draftInput(w, { lines: [svcLine] }), ACTOR, { tx })).rejects.toMatchObject({ status: 400 }); // a service on a goods invoice
+      await expect(svc.saveSalesInvoice(draftInput(w, { invoiceType: "ABROAD" as any }), ACTOR, { tx })).rejects.toMatchObject({ status: 400 });
+
+      // the reversal keeps the type of the invoice it reverses
+      await svc.postSalesInvoice(exp.id, ACTOR, { tx });
+      const rev = await svc.reverseSalesInvoice(exp.id, ACTOR, { tx, date: "2025-10-20", reason: "type check" });
+      expect(await typesOf(rev.id)).toMatchObject({ invoiceType: "EXPORT", salesType: "GOODS_SALES" });
     });
   });
 
