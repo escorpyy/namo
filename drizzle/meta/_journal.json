@@ -253,6 +253,13 @@
       "when": 1795251919905,
       "tag": "0035_term_ledger_correction",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1795330000000,
+      "tag": "0036_drop_term_ledger_correction",
+      "breakpoints": true
     }
   ]
 }

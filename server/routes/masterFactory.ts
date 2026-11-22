@@ -5,6 +5,7 @@ import { db } from "../db";
 import { HttpError, idParam, sameCompany, wrap } from "./_util";
 import { actorOf } from "./_input";
 import { inActorTx } from "../services/purchase/common";
+import { propagateTermLedger } from "../services/termLedgerPropagate";
 import type { FieldDef, MasterDef } from "../../shared/masters";
 
 type CountSrc = { table: any; column: string };
@@ -196,7 +197,16 @@ export function masterRouter(def: MasterDef, cfg: ServerCfg) {
       throw new HttpError(400, `${def.parent!.label} must belong to the same company.`, def.parent!.field);
     await cfg.validate?.(data, { companyId, id });
     await assertUnique(data, global ? null : companyId, id);
-    await inActorTx(await actorOf(req), undefined, (tx) => tx.update(t).set(toDb(def, data)).where(eq(t.id, id)));
+    const termKind = def.key === "purchase-terms" ? "PURCHASE" : def.key === "sales-terms" ? "SALES" : null;
+    const oldLedger = termKind ? (existing.generalLedgerId as number | null) : null;
+    const newLedger = termKind ? ((data.generalLedgerId as number | null | undefined) ?? null) : null;
+    const moved = termKind && oldLedger && newLedger && oldLedger !== newLedger;
+    const actor = await actorOf(req);
+    // A term's ledger changed: the posted bills / invoices that used it move to the new ledger in the same transaction (audited, with this reason)
+    await inActorTx(moved ? { ...actor, reason: `Ledger of term "${existing.name}" changed in the master` } : actor, undefined, async (tx) => {
+      await tx.update(t).set(toDb(def, data)).where(eq(t.id, id));
+      if (moved) await propagateTermLedger(tx, companyId, termKind, id, oldLedger, newLedger);
+    });
     await cfg.afterWrite?.(data, id);
     res.json((await selectRows({ id }))[0]);
   }));

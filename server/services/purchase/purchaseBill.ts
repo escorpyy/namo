@@ -1,4 +1,3 @@
-import { correctionMirrorRows } from "../termLedgerCorrection";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { withInitialPostedChildInsert } from "../../db/audit";
 import * as S from "../../db/schema";
@@ -539,7 +538,6 @@ export function reversePurchaseBill(id: number, actor: Actor, opts: Opts & LockO
     const ojl = await tx.select().from(S.journalVoucherLine).where(eq(S.journalVoucherLine.journalVoucherId, ojv.id)).orderBy(asc(S.journalVoucherLine.lineNumber));
     await assertGlEntryAllowed(tx, orig.companyId, ojl.map((line) => line.generalLedgerId), "PURCHASE_BILL");
     const swapped: JvRow[] = ojl.map((l) => ({ generalLedgerId: l.generalLedgerId, debit: toMicro(l.credit), credit: toMicro(l.debit), narration: `Reversal: ${l.narration ?? ""}`.slice(0, 500), agentId: l.agentId }));
-    swapped.push(...await correctionMirrorRows(tx, "PURCHASE_BILL", orig.id)); // what a term ledger correction moved comes back too
     const rvNumber = `R-${ojv.voucherNumber}`.length <= 30 ? `R-${ojv.voucherNumber}` : `R-${ojv.id}`;
     const rjv = await writeVoucher(tx, { companyId: orig.companyId, branchId: orig.branchId, voucherNumber: rvNumber, voucherDate: date, fiscalYear: fy.code, remarks: `Reversal of purchase bill ${orig.invoiceNumber}${opts.reason ? `: ${opts.reason}` : ""}`.slice(0, 1024), reversalOfId: ojv.id }, swapped, actor);
 

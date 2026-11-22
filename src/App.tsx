@@ -21,7 +21,6 @@ import PurchaseOrderWorkspace from "./screens/purchase/PurchaseOrderWorkspace";
 import PurchaseChallanWorkspace from "./screens/purchase/PurchaseChallanWorkspace";
 import ImportCostAssessmentWorkspace from "./screens/purchase/ImportCostAssessmentWorkspace";
 import GLSetupScreen from "./screens/GLSetupScreen";
-import TermCorrectionScreen from "./screens/TermCorrectionScreen";
 import KeyboardShortcutsScreen from "./screens/KeyboardShortcutsScreen";
 import { READY_SCREEN_OPTIONS } from "./components/Sidebar";
 import {
@@ -45,7 +44,6 @@ export default function App() {
   const [calendar, setCalendar] = useState<"BS" | "AD">(() => (localStorage.getItem("cal") as "BS" | "AD") ?? "BS");
   const [status, setStatus] = useState<StatusInfo>({ mode: "new", count: 0, shown: 0, message: "Loading…", kind: "info" });
   const [note, setNote] = useState<{ text: string; n: number } | null>(null);
-  const [termCorr, setTermCorr] = useState<{ kind: "PURCHASE" | "SALES"; termId: number; fromLedgerId: number; toLedgerId: number; n: number } | null>(null);
   const [openReq, setOpenReq] = useState<(OpenRequest & { screen: string }) | null>(null);
   const [fromChallan, setFromChallan] = useState<{ id: number; n: number } | null>(null);
   const dirtyRef = useRef(false);
@@ -200,8 +198,6 @@ export default function App() {
             : <PurchaseBillWorkspace key={k} {...pp} fromChallan={fromChallan} />;
         })() : screen === "gl-setup" ? (
           <GLSetupScreen key={`${screen}:${companyId}`} companyId={companyId} userId={ctx.user.id} setStatus={setStatus} dirtyRef={dirtyRef} />
-        ) : screen === "term-correction" ? (
-          <TermCorrectionScreen key={`${screen}:${companyId}:${termCorr?.n ?? 0}`} initial={termCorr} companyId={companyId} userId={ctx.user.id} setStatus={setStatus} dirtyRef={dirtyRef} />
         ) : screen === "journal" ? (
           <JournalVoucherWorkspace
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} userId={ctx.user.id} companyName={co.name}
@@ -249,7 +245,7 @@ export default function App() {
             setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note}
           />
         ) : (
-        <MasterScreen key={`${screen}:${companyId}`} onCorrectTerm={(c) => { setTermCorr({ ...c, n: Date.now() }); dirtyRef.current = false; setScreen("term-correction"); }} def={MASTERS[screen]} companyId={companyId} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} calendar={calendar} onContextChanged={refreshCtx} userId={ctx.user.id} />
+        <MasterScreen key={`${screen}:${companyId}`} def={MASTERS[screen]} companyId={companyId} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} calendar={calendar} onContextChanged={refreshCtx} userId={ctx.user.id} />
         )}
       </div>
       <StatusBar

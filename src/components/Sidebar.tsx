@@ -17,7 +17,6 @@ import {
     "purchase-challans",
     "purchase-bills",
     "journal",
-    "term-correction",
     "purchase-import-assessments",
     "sales-invoices",
     "rpt-outstanding",
@@ -64,7 +63,6 @@ const sections: Section[] = [
     items: [
       { id: "cash-bank", label: "Cash / Bank Voucher" },
       { id: "journal", label: "Journal Voucher" },
-      { id: "term-correction", label: "Term Ledger Correction" },
       { id: "purchase-orders", label: "Purchase Order" },
       { id: "purchase-challans", label: "Purchase Challan" },
       { id: "purchase-bills", label: "Purchase Bill" },

@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import { DB_READY, startApi, uniq, type Res } from "./helpers";
 
 // A term was posted to the wrong ledger on many bills: ONE correcting voucher moves the amounts; documents are not rewritten; reversal stays clean.
-describe.skipIf(!DB_READY)("Term ledger correction (API)", () => {
+describe.skipIf(!DB_READY)("Changing a term's ledger in the master moves posted vouchers (API)", () => {
   let call: (m: string, p: string, b?: unknown) => Promise<Res>;
   let close: () => Promise<void>;
   let db: any;
@@ -57,7 +57,6 @@ describe.skipIf(!DB_READY)("Term ledger correction (API)", () => {
         const byDoc = (child: string, fk: string, parent: string) => tx.execute(sql`delete from ${sql.identifier(child)} where ${sql.identifier(fk)} in (select id from ${sql.identifier(parent)} where "companyId" = ${co})`);
         for (const t of ["NumberCounter", "NumberSeriesUser", "NumberSeriesBranch"]) await byDoc(t, "seriesId", "NumberSeries");
         await tx.execute(sql`delete from "NumberSeries" where "companyId" = ${co}`);
-        await tx.execute(sql`delete from "TermLedgerCorrection" where "companyId" = ${co}`);
         await tx.execute(sql`delete from "PurchaseDocumentTermAllocation" where "documentTermId" in (select id from "PurchaseDocumentTerm" where "companyId" = ${co})`);
         await tx.execute(sql`delete from "PurchaseDocumentTerm" where "companyId" = ${co}`);
         await byDoc("PurchaseBillImportDetail", "purchaseBillId", "PurchaseBill");
@@ -78,44 +77,33 @@ describe.skipIf(!DB_READY)("Term ledger correction (API)", () => {
     await close();
   });
 
-  it("moves every posted bill of the term with ONE voucher, never twice, and a reversal leaves no residue", async () => {
+  it("moves every posted bill of the term (and a reversed one stays at zero), with no extra voucher", async () => {
     const b1 = await mkBill("2025-10-14", 1), b2 = await mkBill("2025-11-14", 2), b3 = await mkBill("2025-12-14", 3);
-    // each bill: 10 x 100 = 1000, discount 10% = 100 on Cr of the wrong ledger
+    // each bill: purchase Dr 1000, discount Cr 100 - both on the wrong ledger (the junior picked Purchase for Trade Discount)
     expect(await bal(W.wrong)).toBe(3000 - 300);
-    expect(await bal(W.right)).toBe(0);
+    const vouchersBefore = (await rows(sql`select count(*)::int as n from "JournalVoucher" where "companyId" = ${W.co}`))[0].n;
+    // b2 is reversed BEFORE the master is fixed: its pair must stay at zero afterwards
+    expect((await act(b2, "reverse", { date: "2025-12-15", reason: "returned" })).status).toBe(200);
 
-    const pre = await call("GET", `/api/term-ledger-correction/preview?${q("&dateTo=2025-11-30")}`);
-    expect(pre.status, JSON.stringify(pre.body)).toBe(200);
-    expect(pre.body).toMatchObject({ count: 2, documents: 2, total: "200.00" });
-    expect(pre.body.rows.every((r: any) => r.side === "CR" && r.amount === "100.00")).toBe(true);
-    expect((await call("GET", `/api/term-ledger-correction/count?companyId=${W.co}&kind=PURCHASE&termId=${W.tDisc}&ledgerId=${W.wrong}`)).body).toMatchObject({ documents: 3 });
+    const fix = await call("PUT", `/api/masters/purchase-terms/${W.tDisc}?companyId=${W.co}&userId=1`, { code: c("DISC10"), name: "Trade Discount", category: "GENERAL", nature: "DEDUCTIVE", isProductwise: false, isMandatory: false, isEditable: true, sequence: 10, defaultCalcType: "PERCENT", defaultValue: 10, calcBase: "ITEM_VALUE", baseTermId: null, distributeToLines: false, affectsStockValue: false, defaultAgainstLedgerId: null, isActive: true, generalLedgerId: W.right });
+    expect(fix.status, JSON.stringify(fix.body)).toBe(200);
 
-    const apply = (extra: Record<string, unknown> = {}) => call("POST", "/api/term-ledger-correction/apply", { companyId: W.co, kind: "PURCHASE", termId: W.tDisc, fromLedgerId: W.wrong, toLedgerId: W.right, date: "2025-12-20", reason: "wrong ledger picked", ...extra });
-    expect((await apply({ reason: "" })).status).toBe(400);
-    expect((await apply({ toLedgerId: W.wrong })).status).toBe(400);
-    const done = await apply({ dateTo: "2025-11-30" });
-    expect(done.status, JSON.stringify(done.body)).toBe(201);
-    expect(done.body).toMatchObject({ count: 2, documents: 2 });
-    expect(done.body.vouchers).toHaveLength(1);
-    // two bills moved: wrong ledger is back to 3000 - 100, right ledger holds 200 Cr
-    expect(await bal(W.wrong)).toBe(3000 - 100);
+    // b1 and b3 discount (Cr 100 each) moved to the right ledger; b2 and its reversal netted to zero on both
     expect(await bal(W.right)).toBe(-200);
+    expect(await bal(W.wrong)).toBe(2000);
+    // the bills now remember the new ledger, and no correcting voucher was created (only b2's own reversal voucher exists)
+    expect((await rows(sql`select count(*)::int as n from "PurchaseDocumentTerm" where "companyId" = ${W.co} and "generalLedgerId" = ${W.wrong}`))[0].n).toBe(0);
+    expect((await rows(sql`select count(*)::int as n from "JournalVoucher" where "companyId" = ${W.co}`))[0].n).toBe(vouchersBefore + 1);
+    // every voucher still balances
+    expect((await rows(sql`select v.id from "JournalVoucher" v join "JournalVoucherLine" l on l."journalVoucherId" = v.id where v."companyId" = ${W.co} group by v.id having sum(l.debit) <> sum(l.credit)`)).length).toBe(0);
+    // the old and new lines are in the audit trail with the reason
+    const au = await rows(sql`select count(*)::int as n from "AuditLog" where "tableName" = 'JournalVoucherLine' and reason like 'Ledger of term%'`);
+    expect(au[0].n).toBeGreaterThan(0);
 
-    // already corrected: only the third bill is still on the wrong ledger; running the same range again finds nothing
-    expect((await apply({ dateTo: "2025-11-30" })).status).toBe(409);
-    expect((await call("GET", `/api/term-ledger-correction/preview?${q()}`)).body).toMatchObject({ count: 1 });
-
-    // the correction voucher is not editable or reversible by hand
-    const jv = done.body.vouchers[0].journalVoucherId;
-    expect((await call("POST", `/api/journal-vouchers/${jv}/reverse?companyId=${W.co}`, { reason: "x" })).status).toBe(409);
-
-    // reversing a corrected bill cancels the original AND the correction: nothing is left on either ledger for it
+    // a bill posted afterwards, and the reversal of b1, both use the new ledger consistently
+    await mkBill("2025-12-20", 4);
     expect((await act(b1, "reverse", { date: "2025-12-21", reason: "returned" })).status).toBe(200);
-    // b1: purchase Dr 1000 undone, discount Cr 100 undone, and the correction (Cr right 100) undone too -> right keeps only b2's 100
-    expect(await bal(W.wrong)).toBe(2900 - 1000 + 100 - 100);
-    expect(await bal(W.right)).toBe(-100);
-    // a reversed bill is no longer offered for correction
-    expect((await call("GET", `/api/term-ledger-correction/preview?${q()}`)).body).toMatchObject({ count: 1 });
-    void b2; void b3;
+    expect(await bal(W.right)).toBe(-200 + 100 - 100); // b4 adds -100, b1's reversal gives +100 back
+    void b3;
   });
 });

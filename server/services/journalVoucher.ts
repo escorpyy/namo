@@ -61,8 +61,6 @@ async function sourceOf(tx: Tx, id: number): Promise<string | null> {
   const [a] = await tx.select({ n: S.purchaseImportAssessment.assessmentNumber }).from(S.purchaseImportAssessment)
     .where(or(eq(S.purchaseImportAssessment.journalVoucherId, id), eq(S.purchaseImportAssessment.reversalVoucherId, id))).limit(1);
   if (a) return `Import cost assessment ${a.n}`;
-  const [c] = await tx.select({ id: S.termLedgerCorrection.id }).from(S.termLedgerCorrection).where(eq(S.termLedgerCorrection.journalVoucherId, id)).limit(1);
-  if (c) return "a term ledger correction (undo it by reversing the documents it corrected)";
   return null;
 }
 
