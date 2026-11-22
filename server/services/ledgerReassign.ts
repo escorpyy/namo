@@ -3,7 +3,7 @@ import { db } from "../db";
 import * as S from "../db/schema";
 import { HttpError } from "../routes/_util";
 import { inActorTx, type Tx } from "./purchase/common";
-import { moveOnVoucher, propagateTermLedger, type TermKind } from "./termLedgerPropagate";
+import { moveOnVoucher, propagateAssessmentTerm, propagateTermLedger, type TermKind } from "./termLedgerPropagate";
 
 // Background move of already-posted transactions when the ledger of a master is changed (see schema/ledgerReassignJob.ts).
 export type JobKind = "PURCHASE_TERM" | "SALES_TERM" | "PRODUCT_PURCHASE" | "PRODUCT_SALES";
@@ -24,6 +24,13 @@ export async function termImpact(companyId: number, kind: "PURCHASE_TERM" | "SAL
     select count(distinct b.id)::int as documents, count(distinct b.id) filter (where b."isPosted")::int as posted, count(*)::int as lines
       from ${sql.identifier(t.term)} d join ${sql.identifier(t.bill)} b on b.id = d."documentId" and d."documentType" = ${t.type}
      where b."companyId" = ${companyId} and d."termId" = ${termId} and d."generalLedgerId" = ${ledgerId}`)) as unknown as { documents: number; posted: number; lines: number }[];
+  if (kind === "PURCHASE_TERM") {
+    const [a] = (await db.execute(sql`
+      select count(distinct a.id)::int as documents, count(distinct a.id) filter (where a."isPosted")::int as posted, count(*)::int as lines
+        from "PurchaseImportAssessmentTerm" d join "PurchaseImportAssessment" a on a.id = d."assessmentId"
+       where a."companyId" = ${companyId} and d."termId" = ${termId} and d."generalLedgerId" = ${ledgerId}`)) as unknown as { documents: number; posted: number; lines: number }[];
+    return { documents: r.documents + a.documents, posted: r.posted + a.posted, lines: r.lines + a.lines };
+  }
   return r;
 }
 
@@ -169,6 +176,17 @@ export async function runJob(id: number): Promise<void> {
       const res = await inActorTx({ userId: job.createdBy, reason: `Ledger of term "${job.masterName}" reassigned (job #${id})` }, undefined,
         (tx) => propagateTermLedger(tx, job.companyId, kindOf(kind), job.masterId, job.fromLedgerId, job.toLedgerId, ids));
       await db.update(S.ledgerReassignJob).set({ processed: sql`${S.ledgerReassignJob.processed} + ${res.documents}`, skipped: sql`${S.ledgerReassignJob.skipped} + ${res.skipped}` }).where(eq(S.ledgerReassignJob.id, id));
+    }
+    if (kind === "PURCHASE_TERM") {
+      for (;;) {
+        const ids = ((await db.execute(sql`
+          select distinct a.id from "PurchaseImportAssessmentTerm" d join "PurchaseImportAssessment" a on a.id = d."assessmentId"
+           where a."companyId" = ${job.companyId} and d."termId" = ${job.masterId} and d."generalLedgerId" = ${job.fromLedgerId} order by a.id limit ${BATCH}`)) as unknown as { id: number }[]).map((r) => r.id);
+        if (!ids.length) break;
+        const res = await inActorTx({ userId: job.createdBy, reason: `Ledger of term "${job.masterName}" reassigned (job #${id})` }, undefined,
+          (tx) => propagateAssessmentTerm(tx, job.companyId, job.masterId, job.fromLedgerId, job.toLedgerId, ids));
+        await db.update(S.ledgerReassignJob).set({ processed: sql`${S.ledgerReassignJob.processed} + ${res.documents}`, skipped: sql`${S.ledgerReassignJob.skipped} + ${res.skipped}` }).where(eq(S.ledgerReassignJob.id, id));
+      }
     }
     await db.update(S.ledgerReassignJob).set({ status: "DONE", finishedAt: new Date() }).where(eq(S.ledgerReassignJob.id, id));
   } catch (e) {

@@ -375,6 +375,15 @@ export async function applyImportAssessment(id: number, companyId: number, actor
     await guardPeriod(tx, companyId, [doc.assessmentDate], opts.lockOverride, "assessmentDate");
     const bill = await importBill(tx, companyId, doc.branchId, doc.importBillId, true);
     const terms = await tx.select().from(S.purchaseImportAssessmentTerm).where(eq(S.purchaseImportAssessmentTerm.assessmentId, id)).orderBy(asc(S.purchaseImportAssessmentTerm.sequence), asc(S.purchaseImportAssessmentTerm.id));
+    // A draft keeps the ledger its term had when it was saved; the master may have been corrected since. The master's current ledger is what posts.
+    const masterGl = await tx.select({ id: S.purchaseTerm.id, gl: S.purchaseTerm.generalLedgerId }).from(S.purchaseTerm).where(inArray(S.purchaseTerm.id, terms.map((t) => t.termId)));
+    for (const t of terms) {
+      const gl = masterGl.find((m) => m.id === t.termId)?.gl;
+      if (!gl || gl === t.generalLedgerId) continue;
+      if (t.againstLedgerId === gl) throw new HttpError(409, `Charge ${t.code}: the term's ledger now is the against ledger chosen here. Choose another against ledger.`, "terms");
+      await tx.update(S.purchaseImportAssessmentTerm).set({ generalLedgerId: gl }).where(eq(S.purchaseImportAssessmentTerm.id, t.id));
+      t.generalLedgerId = gl;
+    }
     // Product-wise amounts typed by hand are stored as draft allocation rows: read them before the rows are rebuilt.
     const typed = await tx.select({ assessmentTermId: S.purchaseImportAssessmentAllocation.assessmentTermId, purchaseBillLineId: S.purchaseImportAssessmentAllocation.purchaseBillLineId, allocatedAmount: S.purchaseImportAssessmentAllocation.allocatedAmount })
       .from(S.purchaseImportAssessmentAllocation).where(eq(S.purchaseImportAssessmentAllocation.assessmentId, id));

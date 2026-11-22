@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { HttpError } from "../routes/_util";
 import * as S from "../db/schema";
 import type { Tx } from "./purchase/common";
 
@@ -67,4 +68,29 @@ export async function propagateTermLedger(tx: Tx, companyId: number, kind: TermK
     await tx.execute(sql`update ${sql.identifier(termTbl)} set "generalLedgerId" = ${newLedger} where id = ${r.termRowId}`);
   }
   return { documents: new Set(rows.map((r) => r.billId)).size, terms: rows.length, skipped };
+}
+
+// Cost / import assessments carry their own copy of a purchase term (PurchaseImportAssessmentTerm): the charge posts Dr its own ledger (ADDITIVE) or
+// Cr (DEDUCTIVE) against the "against" ledger; the reversal voucher of a reversed assessment is the mirror image. Both follow a ledger change.
+export async function propagateAssessmentTerm(tx: Tx, companyId: number, termId: number, oldLedger: number, newLedger: number, only?: number[]) {
+  const rows = (await tx.execute(sql`
+    select d.id as "termRowId", d.nature, d."finalAmount" as amount, d."againstLedgerId" as against, a.id as "assessmentId", a."assessmentNumber" as "number", a."isPosted", a."journalVoucherId" as jv, a."reversalVoucherId" as rjv
+      from "PurchaseImportAssessmentTerm" d join "PurchaseImportAssessment" a on a.id = d."assessmentId"
+     where a."companyId" = ${companyId} and d."termId" = ${termId} and d."generalLedgerId" = ${oldLedger}
+       ${only ? sql`and a.id in (${sql.join(only.map((i) => sql`${i}`), sql`, `)})` : sql``}
+     order by a.id, d.id
+     for update of d`)) as unknown as { termRowId: number; nature: string; amount: string; against: number | null; assessmentId: number; number: string; isPosted: boolean; jv: number | null; rjv: number | null }[];
+  let skipped = 0;
+  await tx.execute(sql`select set_config('namo.ledger_reassign', 'on', true)`); // the one change an applied assessment's rows allow (migration 0039)
+  for (const r of rows) {
+    if (r.against === newLedger) throw new HttpError(409, `Cost assessment ${r.number} uses the new ledger as the against ledger of this charge, so the charge cannot be moved there. Change the against ledger on that assessment first.`);
+    if (r.isPosted && r.jv && Number(r.amount) > 0) {
+      const side = r.nature === "ADDITIVE" ? "DR" : "CR";
+      let ok = await moveOnVoucher(tx, r.jv, side, r.amount, oldLedger, newLedger);
+      if (ok && r.rjv) ok = await moveOnVoucher(tx, r.rjv, side === "DR" ? "CR" : "DR", r.amount, oldLedger, newLedger);
+      if (!ok) skipped++;
+    }
+    await tx.execute(sql`update "PurchaseImportAssessmentTerm" set "generalLedgerId" = ${newLedger} where id = ${r.termRowId}`);
+  }
+  return { documents: new Set(rows.map((r) => r.assessmentId)).size, terms: rows.length, skipped };
 }

@@ -270,4 +270,40 @@ describe.skipIf(!DB_READY)("Import cost assessment (API)", () => {
     expect(await landed()).toEqual(["1000.00", "1000.00"]);
     expect(await eligible()).toContain(goods.id);
   });
+
+  it("changing a term's ledger in the master moves applied assessments (and their reversal vouchers) and drafts post to the new ledger", async () => {
+    const goods = await createBill({ invoiceType: "IMPORT", purchaseType: "GOODS_PURCHASE_OTHERS", importDetail: { customsDeclarationNo: "CUS-LEDGER" }, lines: [{ productId: W.goods, qty: 10, rate: 100 }] });
+    expect((await action(goods.id, "post")).status).toBe(200);
+    const terms = [{ termId: W.duty, calcType: "PERCENT", rate: "10", allocationBasis: "VALUE", capitalizable: true, againstLedgerId: W.bank }];
+    const make = async (ref: string) => (await call("POST", api("import-assessments"), { companyId: W.co, branchId: W.br, fiscalYear: "2082/83", importBillId: goods.id, assessmentDate: "2025-10-16", referenceNo: ref, userId, terms })).body.document.id as number;
+    const applied = await make("LEDGER-A"), reversed = await make("LEDGER-B"), draft = await make("LEDGER-C");
+    expect((await call("POST", `${api("import-assessments")}/${applied}/apply?companyId=${W.co}`, { userId })).status).toBe(200);
+    expect((await call("POST", `${api("import-assessments")}/${reversed}/apply?companyId=${W.co}`, { userId })).status).toBe(200);
+    expect((await call("POST", `${api("import-assessments")}/${reversed}/reverse?companyId=${W.co}`, { userId, reason: "Wrong charge basis", date: "2025-10-20" })).status).toBe(200);
+
+    const oldGl = (await rows(sql`select "generalLedgerId" as g from "PurchaseTerm" where id = ${W.duty}`))[0].g as number;
+    const newGl = await ins("GeneralLedger", { companyId: W.co, code: c("DUTY2"), name: "Duty 2", accountSubGroupId: (await rows(sql`select "accountSubGroupId" as g from "GeneralLedger" where id = ${oldGl}`))[0].g, normalBalance: "DEBIT", updatedAt: NOW });
+    const bal = async (gl: number) => Number((await rows(sql`select coalesce(sum(l.debit - l.credit), 0) as b from "JournalVoucherLine" l join "JournalVoucher" v on v.id = l."journalVoucherId" where v."companyId" = ${W.co} and l."generalLedgerId" = ${gl}`))[0].b);
+    const before = await bal(oldGl);
+    expect(before).toBeGreaterThanOrEqual(100); // the applied assessment: Dr duty 100 (the reversed one nets to zero)
+
+    const cur = (await call("GET", `/api/masters/purchase-terms?companyId=${W.co}`)).body.find((x: any) => x.id === W.duty);
+    const put = await call("PUT", `/api/masters/purchase-terms/${W.duty}?companyId=${W.co}&userId=${userId}&reassign=ALL`, { ...cur, defaultValue: Number(cur.defaultValue), generalLedgerId: newGl });
+    expect(put.status, JSON.stringify(put.body)).toBe(200);
+    let job: any;
+    for (let i = 0; i < 100; i++) {
+      job = (await call("GET", `/api/ledger-reassign/jobs?companyId=${W.co}`)).body.find((j: any) => j.id === put.body.ledgerJob.id);
+      if (job?.status === "DONE" || job?.status === "FAILED") break;
+      await new Promise((x) => setTimeout(x, 100));
+    }
+    expect(job, JSON.stringify(job)).toMatchObject({ status: "DONE", skipped: 0 });
+    // the applied assessment's 100 is now on the new ledger, the reversed pair nets to zero on both, nothing of this term stays on the old ledger
+    const moved = await bal(newGl); // the applied assessment (100) and the bills of the earlier tests that used the term; the old ledger also holds other postings, so it is checked by difference
+    expect(moved).toBeGreaterThanOrEqual(100);
+    expect(await bal(oldGl)).toBe(before - moved);
+    // the draft remembers the new ledger and posts there
+    expect((await call("POST", `${api("import-assessments")}/${draft}/apply?companyId=${W.co}`, { userId })).status).toBe(200);
+    expect(await bal(newGl)).toBe(moved + 100);
+    expect((await rows(sql`select v.id from "JournalVoucher" v join "JournalVoucherLine" l on l."journalVoucherId" = v.id where v."companyId" = ${W.co} group by v.id having sum(l.debit) <> sum(l.credit)`)).length).toBe(0);
+  });
 });
