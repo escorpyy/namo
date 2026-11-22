@@ -57,6 +57,7 @@ describe.skipIf(!DB_READY)("Changing a term's ledger in the master moves posted 
         const byDoc = (child: string, fk: string, parent: string) => tx.execute(sql`delete from ${sql.identifier(child)} where ${sql.identifier(fk)} in (select id from ${sql.identifier(parent)} where "companyId" = ${co})`);
         for (const t of ["NumberCounter", "NumberSeriesUser", "NumberSeriesBranch"]) await byDoc(t, "seriesId", "NumberSeries");
         await tx.execute(sql`delete from "NumberSeries" where "companyId" = ${co}`);
+        await tx.execute(sql`delete from "LedgerReassignJob" where "companyId" = ${co}`);
         await tx.execute(sql`delete from "PurchaseDocumentTermAllocation" where "documentTermId" in (select id from "PurchaseDocumentTerm" where "companyId" = ${co})`);
         await tx.execute(sql`delete from "PurchaseDocumentTerm" where "companyId" = ${co}`);
         await byDoc("PurchaseBillImportDetail", "purchaseBillId", "PurchaseBill");
@@ -85,8 +86,30 @@ describe.skipIf(!DB_READY)("Changing a term's ledger in the master moves posted 
     // b2 is reversed BEFORE the master is fixed: its pair must stay at zero afterwards
     expect((await act(b2, "reverse", { date: "2025-12-15", reason: "returned" })).status).toBe(200);
 
-    const fix = await call("PUT", `/api/masters/purchase-terms/${W.tDisc}?companyId=${W.co}&userId=1`, { code: c("DISC10"), name: "Trade Discount", category: "GENERAL", nature: "DEDUCTIVE", isProductwise: false, isMandatory: false, isEditable: true, sequence: 10, defaultCalcType: "PERCENT", defaultValue: 10, calcBase: "ITEM_VALUE", baseTermId: null, distributeToLines: false, affectsStockValue: false, defaultAgainstLedgerId: null, isActive: true, generalLedgerId: W.right });
+    // "Upcoming only": the master changes, posted bills keep the old ledger
+    const body = { code: c("DISC10"), name: "Trade Discount", category: "GENERAL", nature: "DEDUCTIVE", isProductwise: false, isMandatory: false, isEditable: true, sequence: 10, defaultCalcType: "PERCENT", defaultValue: 10, calcBase: "ITEM_VALUE", baseTermId: null, distributeToLines: false, affectsStockValue: false, defaultAgainstLedgerId: null, isActive: true };
+    const imp = await call("GET", `/api/ledger-reassign/impact?companyId=${W.co}&kind=PURCHASE_TERM&masterId=${W.tDisc}`);
+    expect(imp.body).toMatchObject({ ledgerId: W.wrong, documents: 4, posted: 4 }); // b1, b2, b3 and b2's reversal bill
+    const upcoming = await call("PUT", `/api/masters/purchase-terms/${W.tDisc}?companyId=${W.co}&userId=1`, { ...body, generalLedgerId: W.right });
+    expect(upcoming.status, JSON.stringify(upcoming.body)).toBe(200);
+    expect(upcoming.body.ledgerJob).toBeUndefined();
+    expect(await bal(W.right)).toBe(0);
+    expect(await bal(W.wrong)).toBe(2 * (1000 - 100)); // b1 and b3; b2 and its reversal net to zero
+    // back to the old ledger, then "All till date"
+    expect((await call("PUT", `/api/masters/purchase-terms/${W.tDisc}?companyId=${W.co}&userId=1`, { ...body, generalLedgerId: W.wrong })).status).toBe(200);
+    const fix = await call("PUT", `/api/masters/purchase-terms/${W.tDisc}?companyId=${W.co}&userId=1&reassign=ALL`, { ...body, generalLedgerId: W.right });
     expect(fix.status, JSON.stringify(fix.body)).toBe(200);
+    expect(fix.body.ledgerJob).toMatchObject({ total: 4 });
+    // the move runs in the background: wait for the job, then look
+    let job: any;
+    for (let i = 0; i < 100; i++) {
+      job = (await call("GET", `/api/ledger-reassign/jobs?companyId=${W.co}`)).body.find((j: any) => j.id === fix.body.ledgerJob.id);
+      if (job?.status === "DONE" || job?.status === "FAILED") break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(job).toMatchObject({ status: "DONE", processed: 4, skipped: 0 });
+    expect((await call("POST", `/api/ledger-reassign/jobs/${job.id}/seen?companyId=${W.co}`)).status).toBe(200);
+    expect((await call("GET", `/api/ledger-reassign/jobs?companyId=${W.co}`)).body.find((j: any) => j.id === job.id)).toBeUndefined();
 
     // b1 and b3 discount (Cr 100 each) moved to the right ledger; b2 and its reversal netted to zero on both
     expect(await bal(W.right)).toBe(-200);

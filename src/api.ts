@@ -50,7 +50,7 @@ export const masterApi = (key: string) => {
     // userId (optional) is who is making the change: the audit trail of the masters that decide where amounts post records it
     create: (companyId: number, v: Record<string, unknown>, userId?: number) =>
       edited(req<Row>(`/api/masters/${key}?companyId=${companyId}${userId ? `&userId=${userId}` : ""}`, { method: "POST", body: JSON.stringify(v) })),
-    update: (id: number, companyId: number, v: Record<string, unknown>, userId?: number) => edited(req<Row>(`/api/masters/${key}/${id}?companyId=${companyId}${userId ? `&userId=${userId}` : ""}`, { method: "PUT", body: JSON.stringify(v) })),
+    update: (id: number, companyId: number, v: Record<string, unknown>, userId?: number, reassign?: "ALL" | "UPCOMING") => edited(req<Row & { ledgerJob?: { id: number; total: number } }>(`/api/masters/${key}/${id}?companyId=${companyId}${userId ? `&userId=${userId}` : ""}${reassign ? `&reassign=${reassign}` : ""}`, { method: "PUT", body: JSON.stringify(v) })),
     remove: (id: number, companyId: number, userId?: number) => edited(req<{ ok: true }>(`/api/masters/${key}/${id}?companyId=${companyId}${userId ? `&userId=${userId}` : ""}`, { method: "DELETE" })),
   };
 };
@@ -85,6 +85,17 @@ export const glSetupApi = {
   get: (companyId: number) => req<{ roles: GLSetupRole[]; ledgers: GLSetupLedger[] }>(`/api/gl-setup?companyId=${companyId}`),
   save: (companyId: number, userId: number, roles: GLSetupRole[]) =>
     req<{ roles: GLSetupRole[]; ledgers: GLSetupLedger[] }>("/api/gl-setup", { method: "PUT", body: JSON.stringify({ companyId, userId, roles }) }),
+};
+
+// Ledger change on a master: how many transactions already carry the old ledger, and the background job that moves them
+export type LedgerJobKind = "PURCHASE_TERM" | "SALES_TERM";
+export type LedgerImpact = { masterName: string; ledgerId: number | null; documents: number; posted: number; lines: number };
+export type LedgerJob = { id: number; kind: LedgerJobKind; masterName: string; status: "QUEUED" | "RUNNING" | "DONE" | "FAILED"; total: number; processed: number; skipped: number; message: string | null };
+export const ledgerReassignApi = {
+  impact: (companyId: number, kind: LedgerJobKind, masterId: number) => req<LedgerImpact>(`/api/ledger-reassign/impact?companyId=${companyId}&kind=${kind}&masterId=${masterId}`),
+  jobs: (companyId: number, userId?: number) => req<LedgerJob[]>(`/api/ledger-reassign/jobs?companyId=${companyId}${userId ? `&userId=${userId}` : ""}`),
+  seen: (companyId: number, id: number) => req<{ ok: true }>(`/api/ledger-reassign/jobs/${id}/seen?companyId=${companyId}`, { method: "POST" }),
+  retry: (companyId: number, id: number) => req<{ ok: true }>(`/api/ledger-reassign/jobs/${id}/retry?companyId=${companyId}`, { method: "POST" }),
 };
 
 // Opening Balance: grid screen ka alag API (company + branch + fiscal year ke saare ledgers)

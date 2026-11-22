@@ -1,11 +1,10 @@
 import { sql } from "drizzle-orm";
 import * as S from "../db/schema";
-import { HttpError } from "../routes/_util";
 import type { Tx } from "./purchase/common";
 
 // A billing term's General Ledger was changed in the master. Every bill / invoice that used the old ledger for this term follows: its voucher lines
 // move to the new ledger (and so do the reversal vouchers of those bills, so a reversed bill still nets to zero). The audit trail keeps the old
-// and the new lines. Runs inside the master's own transaction: either everything moves, or the master change itself fails.
+// and the new lines. Called per batch of documents (`only`) by the background job; each batch is one transaction.
 //   Purchase: ADDITIVE sits on Dr of the term ledger, DEDUCTIVE on Cr.  Sales: the other way round.  A reversal bill has the opposite side.
 export type TermKind = "PURCHASE" | "SALES";
 
@@ -14,7 +13,7 @@ const sideOf = (kind: TermKind, nature: string, reversal: boolean): "DR" | "CR" 
   return dr !== reversal ? "DR" : "CR";
 };
 
-export async function propagateTermLedger(tx: Tx, companyId: number, kind: TermKind, termId: number, oldLedger: number, newLedger: number) {
+export async function propagateTermLedger(tx: Tx, companyId: number, kind: TermKind, termId: number, oldLedger: number, newLedger: number, only?: number[]) {
   const bill = kind === "PURCHASE" ? "PurchaseBill" : "SalesInvoice";
   const termTbl = kind === "PURCHASE" ? "PurchaseDocumentTerm" : "SalesDocumentTerm";
   const type = kind === "PURCHASE" ? "PURCHASE_BILL" : "SALES_INVOICE";
@@ -23,9 +22,11 @@ export async function propagateTermLedger(tx: Tx, companyId: number, kind: TermK
       from ${sql.identifier(termTbl)} t
       join ${sql.identifier(bill)} b on b.id = t."documentId" and t."documentType" = ${type}
      where b."companyId" = ${companyId} and t."termId" = ${termId} and t."generalLedgerId" = ${oldLedger}
+       ${only ? sql`and b.id in (${sql.join(only.map((i) => sql`${i}`), sql`, `)})` : sql``}
      order by b.id, t.id
      for update of t`)) as unknown as { termRowId: number; nature: string; amount: string; billId: number; number: string; isPosted: boolean; reversal: boolean; jv: number | null }[];
 
+  let skipped = 0;
   for (const r of rows) {
     if (r.isPosted && r.jv && Number(r.amount) > 0) {
       const side = sideOf(kind, r.nature, r.reversal);
@@ -34,7 +35,13 @@ export async function propagateTermLedger(tx: Tx, companyId: number, kind: TermK
         select id, ${sql.identifier(col)} as amt from "JournalVoucherLine"
          where "journalVoucherId" = ${r.jv} and "generalLedgerId" = ${oldLedger} and ${sql.identifier(col)} >= ${r.amount}
          order by ${sql.identifier(col)} desc limit 1`)) as unknown as { id: number; amt: string }[];
-      if (!line) throw new HttpError(409, `${kind === "PURCHASE" ? "Bill" : "Invoice"} ${r.number} has no ${side === "DR" ? "debit" : "credit"} of ${r.amount} on the old ledger, so its voucher cannot be moved. The ledger was not changed.`);
+      if (!line) {
+        // The voucher does not carry this amount on the old ledger (it was posted some other way): nothing to move. The document still takes the new
+        // ledger for the term and the job reports it as skipped, so the person can look at it.
+        skipped++;
+        await tx.execute(sql`update ${sql.identifier(termTbl)} set "generalLedgerId" = ${newLedger} where id = ${r.termRowId}`);
+        continue;
+      }
       // take the amount off the old line (drop the line when nothing is left) ...
       if (Number(line.amt) === Number(r.amount)) await tx.execute(sql`delete from "JournalVoucherLine" where id = ${line.id}`);
       else await tx.execute(sql`update "JournalVoucherLine" set ${sql.identifier(col)} = ${sql.identifier(col)} - ${r.amount} where id = ${line.id}`);
@@ -56,5 +63,5 @@ export async function propagateTermLedger(tx: Tx, companyId: number, kind: TermK
     // the ledger the document remembers for this term follows too (drafts included: they post to the master's ledger anyway)
     await tx.execute(sql`update ${sql.identifier(termTbl)} set "generalLedgerId" = ${newLedger} where id = ${r.termRowId}`);
   }
-  return { documents: new Set(rows.map((r) => r.billId)).size, terms: rows.length };
+  return { documents: new Set(rows.map((r) => r.billId)).size, terms: rows.length, skipped };
 }

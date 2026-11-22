@@ -5,6 +5,7 @@ import { useDialog } from "./components/Dialog";
 import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
+import { LedgerJobWatcher } from "./components/LedgerJobWatcher";
 import { QuickCreateHost } from "./components/QuickCreate";
 import MasterScreen from "./screens/MasterScreen";
 import CodeNumberingScreen from "./screens/CodeNumberingScreen";
@@ -248,6 +249,7 @@ export default function App() {
         <MasterScreen key={`${screen}:${companyId}`} def={MASTERS[screen]} companyId={companyId} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} calendar={calendar} onContextChanged={refreshCtx} userId={ctx.user.id} />
         )}
       </div>
+      <LedgerJobWatcher companyId={companyId} userId={ctx.user.id} />
       <StatusBar
         status={status} company={co.name}
         branch={co.branches.find((b) => b.id === branchId)?.name ?? "-"}

@@ -5,7 +5,7 @@ import { db } from "../db";
 import { HttpError, idParam, sameCompany, wrap } from "./_util";
 import { actorOf } from "./_input";
 import { inActorTx } from "../services/purchase/common";
-import { propagateTermLedger } from "../services/termLedgerPropagate";
+import { activeJobFor, startJob } from "../services/ledgerReassign";
 import type { FieldDef, MasterDef } from "../../shared/masters";
 
 type CountSrc = { table: any; column: string };
@@ -197,18 +197,21 @@ export function masterRouter(def: MasterDef, cfg: ServerCfg) {
       throw new HttpError(400, `${def.parent!.label} must belong to the same company.`, def.parent!.field);
     await cfg.validate?.(data, { companyId, id });
     await assertUnique(data, global ? null : companyId, id);
-    const termKind = def.key === "purchase-terms" ? "PURCHASE" : def.key === "sales-terms" ? "SALES" : null;
-    const oldLedger = termKind ? (existing.generalLedgerId as number | null) : null;
-    const newLedger = termKind ? ((data.generalLedgerId as number | null | undefined) ?? null) : null;
-    const moved = termKind && oldLedger && newLedger && oldLedger !== newLedger;
+    const jobKind = def.key === "purchase-terms" ? "PURCHASE_TERM" : def.key === "sales-terms" ? "SALES_TERM" : null;
+    const oldLedger = jobKind ? (existing.generalLedgerId as number | null) : null;
+    const newLedger = jobKind ? ((data.generalLedgerId as number | null | undefined) ?? null) : null;
+    const moved = !!(jobKind && oldLedger && newLedger && oldLedger !== newLedger);
+    const scope = req.query.reassign === "ALL" ? "ALL" : "UPCOMING"; // what happens to transactions already posted with the old ledger
+    if (moved && (await activeJobFor(companyId, jobKind!, id))) throw new HttpError(409, "The previous ledger reassignment for this term is still running. Wait for it to finish, then change the ledger again.");
     const actor = await actorOf(req);
-    // A term's ledger changed: the posted bills / invoices that used it move to the new ledger in the same transaction (audited, with this reason)
-    await inActorTx(moved ? { ...actor, reason: `Ledger of term "${existing.name}" changed in the master` } : actor, undefined, async (tx) => {
-      await tx.update(t).set(toDb(def, data)).where(eq(t.id, id));
-      if (moved) await propagateTermLedger(tx, companyId, termKind, id, oldLedger, newLedger);
-    });
+    await inActorTx(moved ? { ...actor, reason: `Ledger of term "${existing.name}" changed in the master (${scope === "ALL" ? "transactions to date are reassigned" : "upcoming transactions only"})` } : actor, undefined,
+      (tx) => tx.update(t).set(toDb(def, data)).where(eq(t.id, id)));
+    // "All till date": the move of the posted transactions runs in the background, after the master is saved (new postings already use the new ledger)
+    const ledgerJob = moved && scope === "ALL"
+      ? await startJob({ companyId, kind: jobKind!, masterId: id, masterName: String(existing.name), fromLedgerId: oldLedger!, toLedgerId: newLedger!, userId: (actor as { userId?: number | null }).userId ?? null })
+      : null;
     await cfg.afterWrite?.(data, id);
-    res.json((await selectRows({ id }))[0]);
+    res.json({ ...(await selectRows({ id }))[0], ...(ledgerJob ? { ledgerJob: { id: ledgerJob.id, total: ledgerJob.total } } : {}) });
   }));
 
   r.delete("/:id", wrap(async (req, res) => {

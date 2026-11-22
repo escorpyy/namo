@@ -182,6 +182,9 @@ export interface ConfirmOptions {
 }
 export interface PromptOptions { title?: string; label?: string; placeholder?: string; defaultValue?: string; required?: boolean; confirmLabel?: string; cancelLabel?: string }
 
+export interface ChooseOption<T extends string> { label: string; value: T; kind?: "primary" | "danger" | "neutral" }
+export interface ChooseOptions<T extends string> { title?: string; variant?: DialogVariant; choices: ChooseOption<T>[]; /** value returned on Esc / close; default null */ }
+
 export interface DialogApi {
   error(message: ReactNode, options?: AlertOptions): Promise<void>;
   warning(message: ReactNode, options?: AlertOptions): Promise<void>;
@@ -191,12 +194,15 @@ export interface DialogApi {
   confirm(message: ReactNode, options?: ConfirmOptions): Promise<boolean>;
   /** Resolves the trimmed text, or null on Cancel or Esc. */
   prompt(message: ReactNode, options?: PromptOptions): Promise<string | null>;
+  /** A question with its own set of buttons. Resolves the chosen button's value, or null on Esc. */
+  choose<T extends string>(message: ReactNode, options: ChooseOptions<T>): Promise<T | null>;
 }
 
 type Request =
   | { type: "alert"; variant: "error" | "warning" | "info" | "success"; message: ReactNode; options: AlertOptions }
   | { type: "confirm"; message: ReactNode; options: ConfirmOptions }
-  | { type: "prompt"; message: ReactNode; options: PromptOptions };
+  | { type: "prompt"; message: ReactNode; options: PromptOptions }
+  | { type: "choose"; message: ReactNode; options: ChooseOptions<string> };
 interface Item { id: number; request: Request; promise: Promise<any>; resolve: (value: any) => void }
 
 // Without a provider (a test, a stray preview) nothing is shown, and a question is answered "no" rather than "yes".
@@ -207,6 +213,7 @@ const unmounted: DialogApi = {
   success: async () => {},
   confirm: async () => false,
   prompt: async () => null,
+  choose: async () => null,
 };
 const Context = createContext<DialogApi>(unmounted);
 export const useDialog = () => useContext(Context);
@@ -236,6 +243,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
       error: alert("error"), warning: alert("warning"), info: alert("info"), success: alert("success"),
       confirm: (message, options = {}) => enqueue<boolean>({ type: "confirm", message, options }),
       prompt: (message, options = {}) => enqueue<string | null>({ type: "prompt", message, options }),
+      choose: <T extends string>(message: ReactNode, options: ChooseOptions<T>) => enqueue<T | null>({ type: "choose", message, options: options as ChooseOptions<string> }),
     };
   }, [enqueue]);
 
@@ -282,6 +290,15 @@ function Current({ item, settle }: { item: Item; settle: (item: Item, value: unk
           { label: r.options.cancelLabel ?? "Cancel", kind: "neutral", autoFocus: variant === "danger", onClick: no },
           { label: r.options.confirmLabel ?? "OK", kind: variant === "danger" ? "danger" : "primary", autoFocus: variant !== "danger", onClick: () => settle(item, true) },
         ],
+      }} />
+    );
+  }
+  if (r.type === "choose") {
+    const no = () => settle(item, null);
+    return (
+      <Dialog onClose={no} spec={{
+        title: r.options.title ?? "Please choose", body: r.message, variant: r.options.variant ?? "confirm",
+        buttons: r.options.choices.map((c, i) => ({ label: c.label, kind: c.kind ?? (i === r.options.choices.length - 1 ? "primary" : "neutral"), autoFocus: (c.kind ?? "") === "primary", onClick: () => settle(item, c.value) })),
       }} />
     );
   }

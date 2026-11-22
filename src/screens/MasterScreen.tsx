@@ -2,13 +2,14 @@ import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "rea
 import { flushSync } from "react-dom";
 import { codeSpec } from "../../shared/codeRules";
 import { MASTERS, matchWhere, type MasterDef, type Opt } from "../../shared/masters";
-import { ApiError, codeRulesApi, masterApi } from "../api";
+import { ApiError, codeRulesApi, ledgerReassignApi, masterApi } from "../api";
 import { useOnMasterChanged } from "../lib/masterEvents";
 import { emptyForm, recordLabel, recordTitle, sameForm, tabsOf, toForm, toPayload, validate, type Errors, type FormState, type Row } from "../lib/form";
 import type { Mode, MsgKind, StatusInfo } from "../types";
 import { MasterForm } from "../components/MasterForm";
 import { MasterList } from "../components/MasterList";
 import { Dialog, useDialog, type DialogSpec } from "../components/Dialog";
+import { askLedgerChange } from "../lib/ledgerChange";
 import { ShortcutsOverlay } from "../components/ShortcutsOverlay";
 
 const q = (sel: string) => document.querySelector<HTMLElement>(sel);
@@ -200,7 +201,24 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
     savingRef.current = true; setSaving(true);
     const wasEdit = mode === "edit" && selectedId != null;
     try {
-      const rec = wasEdit ? await api.update(selectedId!, companyId, payload, userId) : await api.create(companyId, payload, userId);
+      // A billing term's ledger is being changed while transactions already carry the old one: ask what should happen to them
+      let reassign: "ALL" | "UPCOMING" | undefined;
+      const jobKind = def.key === "purchase-terms" ? "PURCHASE_TERM" : def.key === "sales-terms" ? "SALES_TERM" : null;
+      const before = wasEdit ? items.find((i) => i.id === selectedId) : undefined;
+      const oldLedger = (before?.generalLedgerId as number | null | undefined) ?? null, newLedger = (payload.generalLedgerId as number | null | undefined) ?? null;
+      if (jobKind && wasEdit && oldLedger && newLedger && oldLedger !== newLedger) {
+        const impact = await ledgerReassignApi.impact(companyId, jobKind, selectedId!);
+        if (impact.documents > 0) {
+          const gls = await masterApi("general-ledger").list(companyId);
+          const nameOf = (id: number) => { const g = gls.find((x) => x.id === id); return g ? `${g.code} — ${g.name}` : `#${id}`; };
+          const choice = await askLedgerChange(dlg, { masterLabel: recordLabel(def, before!), oldLedger: nameOf(oldLedger), newLedger: nameOf(newLedger), impact });
+          if (!choice) { flash("Ledger change cancelled. Nothing was saved.", "info"); return false; }
+          reassign = choice;
+        }
+      }
+      const rec = wasEdit ? await api.update(selectedId!, companyId, payload, userId, reassign) : await api.create(companyId, payload, userId);
+      const ledgerJob = (rec as { ledgerJob?: { id: number } }).ledgerJob;
+      if (ledgerJob) window.dispatchEvent(new CustomEvent("namo:ledger-job", { detail: ledgerJob.id })); // the progress box opens (LedgerJobWatcher)
       setItems((prev) => sortRows(def, [...prev.filter((i) => i.id !== rec.id), rec]));
       setSelectedId(rec.id); setMode("view"); setForm(toForm(def, rec)); setErrors({});
       flash(`${wasEdit ? "Updated" : "Saved"} ${recordLabel(def, rec)}`, "ok");
