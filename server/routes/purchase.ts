@@ -154,7 +154,7 @@ function refuseAdditionalBill(body: any) {
 }
 const billInput = (b: any, base: { companyId: number; branchId: number; id?: number }): P.PurchaseBillInput => ({
   ...(pick(b, BILL_HEAD, "Bill") as any),
-  lines: rows(b?.lines, { ...LINE, ...TRACK, challanLineId: "int", purchaseOrderLineId: "int" }, "lines", MAX_LINES, "Line") as any,
+  lines: rows(b?.lines, { ...LINE, ...TRACK, challanLineId: "int", purchaseOrderLineId: "int", foreignRate: "num" }, "lines", MAX_LINES, "Line") as any,
   terms: rows(b?.terms, TERM, "terms", MAX_TERMS, "Term") as any,
   importDetail: b?.importDetail == null ? null : (pick(b.importDetail, IMPORT, "Import detail") as any),
   ...base,

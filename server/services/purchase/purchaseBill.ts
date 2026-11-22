@@ -10,7 +10,7 @@ import { assertLinesMatchPurchaseType } from "./billTypes";
 import { landed } from "./landed";
 import { importCostBasis } from "./importCostBasis";
 import { resolveLines, type LineInput, type ResolvedLine } from "./lines";
-import { ZERO, fmt, toMicro, type Micro } from "./money";
+import { ZERO, fmt, mul, roundTo, toMicro, type Micro } from "./money";
 import { billedByChallanLine, billedByOrderLine, pending, receivedByOrderLine, withTolerance } from "./quantities";
 import { assertGlEntryAllowed } from "../glEntryControl";
 
@@ -29,6 +29,7 @@ import { assertGlEntryAllowed } from "../glEntryControl";
 // It has no lines; its distributing terms re-value the MAIN bill's lines once it is posted.
 
 export type BillLineInput = LineInput & {
+  foreignRate?: string | number | null; // IMPORT bill in a foreign currency: the rate typed in that currency
   challanLineId?: number | null; // the challan line this bills
   purchaseOrderLineId?: number | null; // the order line this bills (reachable through the challan line too)
   locationId?: number | null;
@@ -268,7 +269,23 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
       if (o.status === "DRAFT" || o.status === "CANCELLED") throw new HttpError(409, `Order ${o.orderNumber} is ${o.status}; it cannot be billed.`, "purchaseOrderId");
     }
 
-    const lines = await resolveLines(tx, input.companyId, input.lines ?? [], { allowZeroQty: false });
+    // An IMPORT bill in a foreign currency is typed in it: each line carries a foreignRate and is priced in NPR at the exchange rate.
+    const cur = invoiceType === "IMPORT" ? String(input.importDetail?.currencyCode ?? "").trim().toUpperCase() : "";
+    let xr: bigint | null = null;
+    if (cur && cur !== "NPR") {
+      if (!/^[A-Z]{3}$/.test(cur)) throw new HttpError(400, "Currency must be a 3-letter code such as USD.", "importDetail");
+      xr = toMicro(input.importDetail?.exchangeRate ?? 0);
+      if (xr <= ZERO) throw new HttpError(400, "Enter the exchange rate (NPR per 1 unit of the foreign currency) when a foreign currency is given.", "importDetail");
+    }
+    const lineInputs = (input.lines ?? []).map((l, i) => {
+      if (xr === null) return { ...l, foreignRate: null as bigint | null };
+      const fr = l.foreignRate === null || l.foreignRate === undefined || String(l.foreignRate).trim() === "" ? null : toMicro(l.foreignRate);
+      if (fr === null || fr < ZERO) throw new HttpError(400, `Line ${i + 1}: enter the rate in ${cur}.`, "lines");
+      return { ...l, foreignRate: fr, rate: fmt(mul(fr, xr)) };
+    });
+    const lines = await resolveLines(tx, input.companyId, lineInputs, { allowZeroQty: false });
+    let foreignTotal = ZERO;
+    const foreignAmounts = lines.map((l, i) => { const fr = lineInputs[i].foreignRate; const a = fr === null ? null : roundTo(mul(l.qty, fr), 2); if (a !== null) foreignTotal += a; return a; });
     if (!isAdditional) assertLinesMatchPurchaseType(purchaseType, lines);
     await checkBillQuantities(tx, existing?.id ?? 0, lines.map((l, i) => ({ lineNumber: l.lineNumber, qty: l.qty, challanLineId: input.lines[i].challanLineId ?? null, purchaseOrderLineId: input.lines[i].purchaseOrderLineId ?? null })), opts.tolerancePercent);
 
@@ -319,6 +336,7 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
         purchaseBillId: id, lineNumber: l.lineNumber, productId: l.productId,
         challanLineId: src.challanLineId ?? null, purchaseOrderLineId: src.purchaseOrderLineId ?? null,
         altQty: l.altQty === null ? null : fmt(l.altQty), altUnitId: l.altUnitId, qty: fmt(l.qty), unitId: l.unitId, rate: fmt(l.rate), basicAmount: fmt(l.basicAmount, 2),
+        foreignRate: lineInputs[i].foreignRate === null ? null : fmt(lineInputs[i].foreignRate!), foreignAmount: foreignAmounts[i] === null ? null : fmt(foreignAmounts[i]!),
         locationId: src.locationId ?? null, batchNo: src.batchNo?.trim() || null,
         manufactureDate: optDate(src.manufactureDate, "manufactureDate"), expiryDate: optDate(src.expiryDate, "expiryDate"),
       }).returning({ id: S.purchaseBillLine.id });
@@ -329,7 +347,7 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
       const d = input.importDetail;
       const currencyCode = d.currencyCode ? String(d.currencyCode).trim().toUpperCase() : null;
       const exchangeRate = d.exchangeRate === undefined || d.exchangeRate === null || d.exchangeRate === "" ? null : String(d.exchangeRate);
-      const foreignInvoiceAmount = d.foreignInvoiceAmount === undefined || d.foreignInvoiceAmount === null || d.foreignInvoiceAmount === "" ? null : String(d.foreignInvoiceAmount);
+      const foreignInvoiceAmount = xr !== null ? fmt(foreignTotal) : d.foreignInvoiceAmount === undefined || d.foreignInvoiceAmount === null || d.foreignInvoiceAmount === "" ? null : String(d.foreignInvoiceAmount);
       if (currencyCode && !/^[A-Z]{3}$/.test(currencyCode)) throw new HttpError(400, "Currency must be a 3-letter code such as USD.", "importDetail");
       if (currencyCode && (exchangeRate === null || !(Number(exchangeRate) > 0))) throw new HttpError(400, "Enter the exchange rate (NPR per 1 unit of the foreign currency) when a foreign currency is given.", "importDetail");
       if (!currencyCode && (exchangeRate !== null || foreignInvoiceAmount !== null)) throw new HttpError(400, "Enter the currency code for the exchange rate and foreign amount.", "importDetail");

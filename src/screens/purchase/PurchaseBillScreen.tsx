@@ -17,6 +17,7 @@ import {
   type LineRow, type TermRow,
 } from "../../lib/purchaseForm";
 import { parseDec } from "../../../shared/decimal";
+import { isForeign, nprRate } from "../../lib/foreignRate";
 import { previewPurchase } from "../../../shared/purchase-preview";
 import { formatImportCost } from "../../../shared/import-costing";
 import { toMicro } from "../../../shared/purchase-calculation";
@@ -31,7 +32,7 @@ const IMPORT_FIELDS: { key: string; label: string; kind: "text" | "date" | "mode
   { key: "transporterName", label: "Transporter", kind: "text", max: 100 }, { key: "vehicleNo", label: "Vehicle No", kind: "text", max: 30 }, { key: "lrNo", label: "LR No", kind: "text", max: 30 }, { key: "lrDate", label: "LR Date", kind: "date" },
   { key: "importPermitNo", label: "Import Permit No", kind: "text", max: 30 }, { key: "importPermitDate", label: "Permit Date", kind: "date" },
   // Optional foreign currency: amounts on the bill stay in NPR; these record how they were converted.
-  { key: "currencyCode", label: "Foreign Currency (optional, e.g. USD)", kind: "text", max: 3 }, { key: "exchangeRate", label: "Exchange Rate (NPR per 1 unit)", kind: "text", max: 20 }, { key: "foreignInvoiceAmount", label: "Invoice Total in Foreign Currency", kind: "text", max: 20 },
+  { key: "currencyCode", label: "Invoice Currency (e.g. USD; blank = NPR)", kind: "text", max: 3 }, { key: "exchangeRate", label: "Exchange Rate (NPR per 1 unit)", kind: "text", max: 20 }, { key: "foreignInvoiceAmount", label: "Invoice Total in Foreign Currency", kind: "text", max: 20 },
 ];
 const PURCHASE_TYPES = [
   { value: "GOODS_PURCHASE_OTHERS", label: "Goods — Others" }, { value: "GOODS_PURCHASE_CAPITAL", label: "Goods — Capital" },
@@ -94,7 +95,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
         numberSeriesId: str(d.numberSeriesId), docNumber: str(d.invoiceNumber), invoiceDate: str(d.invoiceDate), invoiceType: d.invoiceType, purchaseType: str(d.purchaseType), vendorGLId: str(d.vendorGLId), subLedgerId: str(d.subLedgerId), agentId: str(d.agentId),
         vendorInvoiceNo: str(d.vendorInvoiceNo), vendorInvoiceDate: str(d.vendorInvoiceDate), dueDays: str(d.dueDays), dueDate: str(d.dueDate), remarks: str(d.remarks),
         purchaseChallanId: str(d.purchaseChallanId), purchaseOrderId: str(d.purchaseOrderId), importCostForBillId: str(d.importCostForBillId), importCostAllocationBasis: d.importCostAllocationBasis === "QUANTITY" ? "QUANTITY" : "VALUE", importCostTreatment: d.importCostTreatment === "LANDED_ONLY" ? "LANDED_ONLY" : "CIF", challanNo: str(d.challanNumber), orderNo: str(d.orderNumber),
-        lines: d.lines.length ? d.lines.map((l) => lineFromDoc(l, prods.get(str(l.productId)))) : [blankLine()], terms: (d.terms ?? []).map(termFromDoc), imp,
+        lines: d.lines.length ? d.lines.map((l) => { const row = lineFromDoc(l, prods.get(str(l.productId))); return isForeign(imp.currencyCode) && l.foreignRate != null ? { ...row, rate: trimDec(l.foreignRate) } : row; }) : [blankLine()], terms: (d.terms ?? []).map(termFromDoc), imp,
       };
     },
     toPayload: (f, doc) => {
@@ -108,7 +109,10 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
         dueDays: f.dueDays ? Number(f.dueDays) : null, dueDate: f.dueDate || null, remarks: nn(f.remarks),
         purchaseChallanId: f.purchaseChallanId ? Number(f.purchaseChallanId) : null, purchaseOrderId: f.purchaseOrderId ? Number(f.purchaseOrderId) : null,
         importCostForBillId: f.importCostForBillId ? Number(f.importCostForBillId) : null, importCostAllocationBasis: f.importCostAllocationBasis, importCostTreatment: f.importCostTreatment,
-        lines: f.lines.filter((l) => !isBlankLine(l)).map((l) => lineToPayload(l, prods.get(l.productId), "bill")),
+        lines: f.lines.filter((l) => !isBlankLine(l)).map((l) => {
+          const row = lineToPayload(l, prods.get(l.productId), "bill");
+          return f.invoiceType === "IMPORT" && isForeign(f.imp.currencyCode) && !(doc && doc.lines.some((x: any) => x.foreignRate == null)) ? { ...row, rate: null, foreignRate: row.rate } : row; // typed in the invoice currency; the server converts to NPR
+        }),
         terms: f.terms.filter((t) => !isBlankTerm(t)).map((t) => termToPayload(t, masters.get(t.termId))),
         importDetail: f.invoiceType === "IMPORT" ? Object.fromEntries(IMPORT_FIELDS.map((k) => [k.key, nn(f.imp[k.key] ?? "")])) : null,
       };
@@ -148,6 +152,8 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   const f = s.form, lk = s.lookups, doc = s.doc, ro = s.readOnly;
   const products = useMemo(() => new Map((lk?.products ?? []).map((x) => [String(x.id), x])), [lk]);
   const masters = useMemo(() => new Map((lk?.terms ?? []).map((x) => [String(x.id), x])), [lk]);
+  // an IMPORT bill in a foreign currency is typed in it (an older saved bill without foreign rates stays in NPR)
+  const foreignOn = !!f && f.invoiceType === "IMPORT" && isForeign(f.imp.currencyCode) && !(doc && doc.lines.some((l: any) => l.foreignRate == null));
   const invoicePreview = useMemo(() => {
     if (!f) return previewPurchase([], [], new Map(), true);
     const liveLines = f.lines.filter((line) => !isBlankLine(line));
@@ -162,7 +168,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
         incompleteLines = true;
         return [];
       }
-      const amount = lineAmount(line, product);
+      const amount = lineAmount(foreignOn && isForeign(f.imp.currencyCode) ? { ...line, rate: nprRate(line.rate, f.imp.exchangeRate) } : line, product); // a foreign-currency bill is priced in NPR like the server does
       if (!amount) {
         incompleteLines = true;
         return [];
@@ -175,7 +181,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     }));
     const termMasters = new Map((lk?.terms ?? []).map((term) => [term.id, term]));
     return previewPurchase(pricedLines, terms, termMasters, incompleteLines);
-  }, [f, lk?.terms, products]);
+  }, [f, lk?.terms, products, foreignOn]);
 
   const liveLines = f ? f.lines.filter((line) => !isBlankLine(line)).length : 0;
   const impFilled = f ? Object.values(f.imp).filter((v) => String(v ?? "").trim() !== "").length : 0;
@@ -359,7 +365,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
 
   // The lines grid starts as one blank line and grows with every product. `fill` caps it at the height of the lines stage (the rows then scroll inside).
   const linesGrid = (fill: boolean) => (
-    <LinesGrid fill={fill} kind="bill" lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
+    <LinesGrid fill={fill} kind="bill" currency={foreignOn ? f.imp.currencyCode.trim().toUpperCase() : undefined} lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
       onOpenTerms={(index, continueAfterApply) => T.open({ scope: "line", lineNumber: T.lineNumberAt(index), lineIndex: index, continueAfterApply })} termSummary={T.lineSummary} />
   );
 

@@ -16,6 +16,7 @@ import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import CustomerSide from "./CustomerSide";
 import { DateField, TextField } from "../../components/purchase/HeadFields";
 import { ExportPanel, DATE_KEYS, blankExport, exportFromDoc, foreignCurrency, type ExportValues } from "../../components/sales/ExportPanel";
+import { nprRate } from "../../lib/foreignRate";
 import { LinesGrid } from "../../components/purchase/LinesGrid";
 import { NumberField } from "../../components/purchase/NumberField";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
@@ -33,15 +34,6 @@ export interface SalesScreenProps {
   setStatus: (s: StatusInfo) => void; dirtyRef: MutableRefObject<boolean>; externalMessage: { text: string; n: number } | null;
   openRequest?: OpenRequest | null;
 }
-
-// foreign rate x NRB rate, 6 decimals (what the server stores as the NPR rate)
-const nprRate = (rate: string, xr: string): string => {
-  const a = parseDec(rate), b = parseDec(xr);
-  if (!a || !b || a.scale > 6 || b.scale > 6) return "";
-  const m = (x: { n: bigint; scale: number }) => x.n * 10n ** BigInt(6 - x.scale);
-  const q = m(a) * m(b), r = q / 1_000_000n + ((q % 1_000_000n) * 2n >= 1_000_000n ? 1n : 0n);
-  return `${r / 1_000_000n}.${(r % 1_000_000n).toString().padStart(6, "0")}`;
-};
 
 export interface SForm {
   numberSeriesId: string; docNumber: string; invoiceDate: string; invoiceType: "LOCAL" | "EXPORT"; salesType: "GOODS_SALES" | "SERVICE_SALES"; exp: ExportValues; customerGLId: string; subLedgerId: string; agentId: string;

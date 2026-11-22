@@ -411,6 +411,25 @@ describe.skipIf(!DB_READY)("purchase service layer", () => {
       });
     });
 
+    it("an import bill in a foreign currency is typed in it, priced in NPR at the exchange rate, and reversed with the same figures", async () => {
+      await run(async (tx, W) => {
+        const imp = { customsDeclarationNo: "CD-USD-1", currencyCode: "usd", exchangeRate: "133.5" };
+        const lines = [{ productId: W.rice.id, qty: 10, foreignRate: 2 }, { productId: W.oil.id, qty: 5, foreignRate: "1.5" }];
+        await rejects(tx, svc.savePurchaseBill(billIn(W, { invoiceType: "IMPORT", importDetail: { ...imp, exchangeRate: undefined }, lines }), ACTOR, { tx }), 400, /exchange rate/);
+        await rejects(tx, svc.savePurchaseBill(billIn(W, { invoiceType: "IMPORT", importDetail: imp, lines: [{ productId: W.rice.id, qty: 10 }] }), ACTOR, { tx }), 400, /rate in USD/);
+        const s = await svc.savePurchaseBill(billIn(W, { invoiceType: "IMPORT", importDetail: imp, lines }), ACTOR, { tx });
+        const ls = await blines(tx, s.id);
+        expect(ls.map((l: any) => [Number(l.rate), Number(l.basicAmount), Number(l.foreignRate), Number(l.foreignAmount)])).toEqual([[267, 2670, 2, 20], [200.25, 1001.25, 1.5, 7.5]]);
+        const [d] = await q(tx, sql`select "currencyCode", "foreignInvoiceAmount" from "PurchaseBillImportDetail" where "purchaseBillId" = ${s.id}`);
+        expect(d.currencyCode).toBe("USD");
+        expect(Number(d.foreignInvoiceAmount)).toBe(27.5); // worked out from the lines, not typed
+        await svc.postPurchaseBill(s.id, ACTOR, { tx });
+        const rev = await svc.reversePurchaseBill(s.id, ACTOR, { tx, date: "2025-10-20", reason: "usd check" });
+        const rl = await blines(tx, rev.reversalBillId);
+        expect(rl.map((l: any) => Number(l.foreignAmount))).toEqual([20, 7.5]);
+      });
+    });
+
     it("links separate service invoices into import CIF using each source basis, excludes input tax, and reverses cleanly", async () => {
       await run(async (tx, W) => {
         const goods = await svc.savePurchaseBill(billIn(W, {

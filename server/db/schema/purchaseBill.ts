@@ -248,6 +248,9 @@ export const purchaseBillLine = pgTable(
 
     rate: money().notNull().default("0"),
     basicAmount: money().notNull().default("0"), // qty * rate
+    // IMPORT bill in a foreign currency: rate and amount as typed, in that currency (rate/basicAmount above are NPR = foreign x exchange rate)
+    foreignRate: money(),
+    foreignAmount: money(),
 
     // Landed cost result (item 8). Header terms flagged distributeToLines are
     // split over the lines in PurchaseDocumentTermAllocation; the sums are

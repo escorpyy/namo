@@ -227,16 +227,19 @@ describe.skipIf(!DB_READY)("Cost assessment: local and import, against ledgers, 
   it("an import bill can optionally carry a foreign currency and exchange rate; the last against ledger used for a charge is offered next time", async () => {
     // each valid bill needs its own customs declaration number (one declaration belongs to one live bill)
     let fx = 0;
-    const imp = (extra: Record<string, unknown>) => call("POST", api("bills"), billBody({ invoiceType: "IMPORT", purchaseType: "GOODS_PURCHASE_OTHERS", importDetail: { customsDeclarationNo: `CUS-FX-${++fx}`, ...extra }, lines: goodsLines() }));
+    // in a foreign currency the lines are typed in that currency (foreignRate) and priced in NPR at the rate
+    const usdLines = [{ productId: W.goods, qty: 30, foreignRate: 1 }, { productId: W.goods, qty: 10, foreignRate: 2 }];
+    const imp = (extra: Record<string, unknown>, lines: any[] = goodsLines()) => call("POST", api("bills"), billBody({ invoiceType: "IMPORT", purchaseType: "GOODS_PURCHASE_OTHERS", importDetail: { customsDeclarationNo: `CUS-FX-${++fx}`, ...extra }, lines }));
     const plain = await imp({});
     expect(plain.status, JSON.stringify(plain.body)).toBe(201); // currency stays optional
     expect((await imp({ currencyCode: "USD" })).status).toBe(400);               // a currency needs its rate
     expect((await imp({ exchangeRate: 133.5 })).status).toBe(400);               // a rate needs its currency
     expect((await imp({ currencyCode: "usd1", exchangeRate: 133.5 })).status).toBe(400);
-    const ok = await imp({ currencyCode: "usd", exchangeRate: 133.5, foreignInvoiceAmount: 1000 });
+    const ok = await imp({ currencyCode: "usd", exchangeRate: 133.5, foreignInvoiceAmount: 1000 }, usdLines);
     expect(ok.status, JSON.stringify(ok.body)).toBe(201);
     const saved = (await call("GET", `${api("bills")}/${ok.body.result.id}?companyId=${W.co}`)).body.importDetail;
-    expect([saved.currencyCode, Number(saved.exchangeRate), Number(saved.foreignInvoiceAmount)]).toEqual(["USD", 133.5, 1000]);
+    expect([saved.currencyCode, Number(saved.exchangeRate), Number(saved.foreignInvoiceAmount)]).toEqual(["USD", 133.5, 50]); // USD 30 + 20, worked out from the lines
+    expect((await imp({ currencyCode: "usd", exchangeRate: 133.5 })).status).toBe(400); // lines without a rate in USD
 
     // Remembered against ledger: after a charge was assessed against Seraj, the term lookup offers Seraj.
     const goods = await createBill({ invoiceType: "LOCAL", purchaseType: "GOODS_PURCHASE_OTHERS", lines: goodsLines() });
