@@ -441,8 +441,8 @@ export function postPurchaseBill(id: number, actor: Actor, opts: Opts & QtyOpts 
     for (const { t, name, code, masterGL } of terms) {
       const amount = toMicro(t.finalAmount);
       if (amount === ZERO) continue;
-      // The term's ledger as it is NOW: a draft saved before the master was corrected must not post to the old ledger. (A posted bill is never
-      // touched by a master change; correcting those is done by the term ledger correction.)
+      // The term's ledger as it is NOW: a draft saved before the master was corrected must not post to the old ledger. (Bills already posted follow a master change
+      // when it is saved: see propagateTermLedger.)
       const gl = masterGL ?? t.generalLedgerId;
       if (!gl) throw new HttpError(409, `Term ${code} (${name}) has no ledger, so it cannot be posted.`);
       if (t.generalLedgerId !== gl) await tx.update(S.purchaseDocumentTerm).set({ generalLedgerId: gl }).where(eq(S.purchaseDocumentTerm.id, t.id));
