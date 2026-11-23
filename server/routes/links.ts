@@ -14,6 +14,15 @@ export async function assertSubGroup(id: number, companyId: number): Promise<str
   return r.type;
 }
 
+export async function assertLedgerGroup(accountGroupId: number, accountSubGroupId: number | null | undefined, companyId: number): Promise<string> {
+  const [g] = await db.select({ c: S.accountGroup.companyId, type: S.accountGroup.type }).from(S.accountGroup).where(eq(S.accountGroup.id, accountGroupId));
+  if (g?.c !== companyId) throw new HttpError(400, "Account Group not found in this company.", "accountGroupId");
+  if (accountSubGroupId == null) return g.type;
+  const [sg] = await db.select({ c: S.accountGroup.companyId, groupId: S.accountSubGroup.accountGroupId }).from(S.accountSubGroup).innerJoin(S.accountGroup, eq(S.accountSubGroup.accountGroupId, S.accountGroup.id)).where(eq(S.accountSubGroup.id, accountSubGroupId));
+  if (sg?.c !== companyId || sg.groupId !== accountGroupId) throw new HttpError(400, "Sub Group must belong to the selected Account Group and company.", "accountSubGroupId");
+  return g.type;
+}
+
 export async function assertSubArea(id: number | null | undefined, companyId: number) {
   if (id == null) return;
   const [r] = await db.select({ c: S.area.companyId }).from(S.subArea).innerJoin(S.area, eq(S.subArea.areaId, S.area.id)).where(eq(S.subArea.id, id));

@@ -179,6 +179,10 @@ export const generalLedgerRelations = relations(generalLedger, ({ one, many }) =
     references: [company.id],
     relationName: "GLCompany",
   }),
+  accountGroup: one(accountGroup, {
+    fields: [generalLedger.accountGroupId],
+    references: [accountGroup.id],
+  }),
   accountSubGroup: one(accountSubGroup, {
     fields: [generalLedger.accountSubGroupId],
     references: [accountSubGroup.id],

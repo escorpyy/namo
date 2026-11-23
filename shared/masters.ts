@@ -260,7 +260,8 @@ const list: MasterDef[] = [
     fields: [
       { name: "code", label: "Code", type: "text", required: true, max: 20, upper: true },
       text("name", "Name", 100),
-      lookup("accountSubGroupId", "Sub Group", "account-sub-groups"),
+      lookup("accountGroupId", "Account Group", "account-groups"),
+      { ...lookup("accountSubGroupId", "Sub Group", "account-sub-groups", false), lookupWhere: { field: "accountGroupId" } },
       { name: "normalBalance", label: "Normal Balance", type: "select", required: true, options: NORMAL_BALANCE, placeholder: "Auto from group type" },
       { name: "glType", label: "GL Type", type: "select", required: true, options: GL_TYPES, default: "OTHER" },
       lookup("parentId", "Parent Ledger", "general-ledger", false),
@@ -295,7 +296,8 @@ const list: MasterDef[] = [
     fields: [
       { name: "code", label: "Code", type: "text", required: true, max: 20, upper: true, section: "Ledger" },
       text("name", "Name", 100),
-      lookup("accountSubGroupId", "Sub Group", "account-sub-groups"),
+      lookup("accountGroupId", "Account Group", "account-groups"),
+      { ...lookup("accountSubGroupId", "Sub Group", "account-sub-groups", false), lookupWhere: { field: "accountGroupId" } },
       { name: "glType", label: "Party Type", type: "select", required: true, options: PARTY_TYPES, default: "CUSTOMER" },
       lookup("subAreaId", "Sub Area", "sub-areas", false),
       lookup("agentId", "Agent", "agents", false),

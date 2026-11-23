@@ -4,7 +4,7 @@ import { db } from "./db";
 import * as S from "./db/schema";
 import { masterRouter, type ServerCfg } from "./routes/masterFactory";
 import { HttpError } from "./routes/_util";
-import { assertAgent, assertSubArea, assertSubGroup } from "./routes/links";
+import { assertAgent, assertLedgerGroup, assertSubArea, assertSubGroup } from "./routes/links";
 import { partyRouter } from "./routes/party";
 import { productRouter } from "./routes/product";
 
@@ -74,7 +74,7 @@ const CFG: Record<string, ServerCfg> = {
     },
     // GL.companyId denormalized hai (schema comment: trigger chahiye) — yahan API me hi enforce karte hain
     validate: async (data, ctx) => {
-      await assertSubGroup(data.accountSubGroupId, ctx.companyId);
+      await assertLedgerGroup(data.accountGroupId, data.accountSubGroupId, ctx.companyId);
       await assertSubArea(data.subAreaId, ctx.companyId);
       await assertAgent(data.agentId, ctx.companyId);
       await checkHierarchy(S.generalLedger, data.parentId ?? null, ctx, "ledger");

@@ -43,7 +43,7 @@ const manual = (key: string, label: string, module: string, nameField = "name", 
 export const CODE_SPECS: CodeSpec[] = [
   manual("account-groups", "Account Group", "Accounts", "description", { defaultTemplate: "{SEQ:2}" }),
   { key: "account-sub-groups", label: "Account Sub Group", module: "Accounts", parentField: "accountGroupId", parentLabel: "Account Group", parentKey: "account-groups", nameField: "description", defaultMode: "SUGGESTED", defaultTemplate: "{PARENT}{SEQ:2}" },
-  { key: "general-ledger", label: "General Ledger", module: "Accounts", parentField: "accountSubGroupId", parentLabel: "Sub Group", parentKey: "account-sub-groups", nameField: "name", defaultMode: "SUGGESTED", defaultTemplate: "{PARENT}{SEQ:3}" },
+  { key: "general-ledger", label: "General Ledger", module: "Accounts", parentField: "accountGroupId", parentLabel: "Account Group", parentKey: "account-groups", nameField: "name", defaultMode: "SUGGESTED", defaultTemplate: "{PARENT}{SEQ:3}" },
   { key: "sub-ledger", label: "Sub Ledger", module: "Accounts", nameField: "name", defaultMode: "SUGGESTED", defaultTemplate: "{NAME2}{SEQ:3}" },
   { key: "party", label: "Party (customer / vendor)", module: "Parties", typeField: "glType", typeLetters: PARTY_LETTERS, nameField: "name", defaultMode: "SUGGESTED", defaultTemplate: "{NAME2}{TYPE}{SEQ:3}" },
   manual("areas", "Area", "Parties"),

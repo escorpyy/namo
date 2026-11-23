@@ -189,7 +189,7 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
       LEFT JOIN "SalesInvoice" si ON si."journalVoucherId" = v.id
       LEFT JOIN "PurchaseImportAssessment" ia ON ia."journalVoucherId" = v.id OR ia."reversalVoucherId" = v.id
       LEFT JOIN "PurchaseBill" pb ON pb."journalVoucherId" = v.id OR pb.id = ia."importBillId"
-      ${grouped ? sql`JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId" JOIN "AccountGroup" ag ON ag.id = sg."accountGroupId"
+      ${grouped ? sql`LEFT JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId" JOIN "AccountGroup" ag ON ag.id = g."accountGroupId"
       LEFT JOIN "Party" ledgerParty ON ledgerParty."generalLedgerId" = g.id
       LEFT JOIN "Party" pt ON pt.id = COALESCE(s."partyId", (SELECT p0.id FROM "Party" p0 WHERE p0."generalLedgerId" = g.id))
       LEFT JOIN "Agent" a ON a.id = COALESCE(ledgerParty."agentId", g."agentId")
@@ -216,7 +216,7 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
         l.debit::text, l.credit::text, v."voucherNumber", 'Cash / bank voucher', '[]'::jsonb, '[]'::jsonb, 'cash-bank'::text, v.id
       FROM "CashBankVoucherLine" l JOIN "CashBankVoucher" v ON v.id = l."cashBankVoucherId"
       JOIN "GeneralLedger" g ON g.id = l."generalLedgerId" LEFT JOIN "SubLedger" s ON s.id = l."subLedgerId"
-      ${grouped ? sql`JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId" JOIN "AccountGroup" ag ON ag.id = sg."accountGroupId"
+      ${grouped ? sql`LEFT JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId" JOIN "AccountGroup" ag ON ag.id = g."accountGroupId"
       LEFT JOIN "Party" ledgerParty ON ledgerParty."generalLedgerId" = g.id
       LEFT JOIN "Party" pt ON pt.id = COALESCE(s."partyId", (SELECT p0.id FROM "Party" p0 WHERE p0."generalLedgerId" = g.id))
       LEFT JOIN "Agent" a ON a.id = COALESCE(ledgerParty."agentId", g."agentId")

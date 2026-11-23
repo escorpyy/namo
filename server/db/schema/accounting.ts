@@ -77,7 +77,7 @@ export const generalLedger = pgTable(
   "GeneralLedger",
   {
     id: serial().primaryKey(),
-    // Denormalized from accountSubGroup -> accountGroup -> company, since GL
+    // Denormalized from accountGroup -> company, since GL
     // is the most frequently company-filtered table. A trigger must keep it
     // in sync with the parent AccountGroup's companyId.
     companyId: integer()
@@ -86,8 +86,10 @@ export const generalLedger = pgTable(
 
     code: varchar({ length: 20 }).notNull(),
     name: varchar({ length: 100 }).notNull(),
-    accountSubGroupId: integer()
+    accountGroupId: integer()
       .notNull()
+      .references(() => accountGroup.id, { onDelete: "restrict" }),
+    accountSubGroupId: integer()
       .references(() => accountSubGroup.id, { onDelete: "restrict" }),
     normalBalance: normalBalanceEnum().notNull(),
     glType: glTypeEnum().notNull().default("OTHER"),
@@ -110,6 +112,7 @@ export const generalLedger = pgTable(
   (t) => [
     uniqueIndex("GeneralLedger_companyId_code_key").on(t.companyId, t.code),
     index("GeneralLedger_companyId_idx").on(t.companyId),
+    index("GeneralLedger_accountGroupId_idx").on(t.accountGroupId),
     index("GeneralLedger_accountSubGroupId_idx").on(t.accountSubGroupId),
     index("GeneralLedger_parentId_idx").on(t.parentId),
     index("GeneralLedger_glType_idx").on(t.glType),

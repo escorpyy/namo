@@ -206,15 +206,15 @@ async function main() {
       const sales = await ensureSub("AG05", "SG01", "Sales Accounts");
       const adm = await ensureSub("AG08", "SG01", "Administrative Expenses");
       await db.insert(S.generalLedger).values([
-        { companyId: co.id, code: "GL001", name: "Cash in Hand", accountSubGroupId: cash.id, normalBalance: "DEBIT", isCashOrBank: true, postsToCashBook: true },
-        { companyId: co.id, code: "GL002", name: "Nabil Bank A/C", accountSubGroupId: bank.id, normalBalance: "DEBIT", isCashOrBank: true },
-        { companyId: co.id, code: "GL003", name: "Stock in Hand", accountSubGroupId: stock.id, normalBalance: "DEBIT" },
-        { companyId: co.id, code: "GL010", name: "Owner's Capital", accountSubGroupId: cap.id, normalBalance: "CREDIT" },
-        { companyId: co.id, code: "GL020", name: "Sales", accountSubGroupId: sales.id, normalBalance: "CREDIT" },
-        { companyId: co.id, code: "GL030", name: "Rent Expense", accountSubGroupId: adm.id, normalBalance: "DEBIT" },
-        { companyId: co.id, code: "GL031", name: "Salary Expense", accountSubGroupId: adm.id, normalBalance: "DEBIT" },
+        { companyId: co.id, code: "GL001", name: "Cash in Hand", accountGroupId: cash.accountGroupId, accountSubGroupId: cash.id, normalBalance: "DEBIT", isCashOrBank: true, postsToCashBook: true },
+        { companyId: co.id, code: "GL002", name: "Nabil Bank A/C", accountGroupId: bank.accountGroupId, accountSubGroupId: bank.id, normalBalance: "DEBIT", isCashOrBank: true },
+        { companyId: co.id, code: "GL003", name: "Stock in Hand", accountGroupId: stock.accountGroupId, accountSubGroupId: stock.id, normalBalance: "DEBIT" },
+        { companyId: co.id, code: "GL010", name: "Owner's Capital", accountGroupId: cap.accountGroupId, accountSubGroupId: cap.id, normalBalance: "CREDIT" },
+        { companyId: co.id, code: "GL020", name: "Sales", accountGroupId: sales.accountGroupId, accountSubGroupId: sales.id, normalBalance: "CREDIT" },
+        { companyId: co.id, code: "GL030", name: "Rent Expense", accountGroupId: adm.accountGroupId, accountSubGroupId: adm.id, normalBalance: "DEBIT" },
+        { companyId: co.id, code: "GL031", name: "Salary Expense", accountGroupId: adm.accountGroupId, accountSubGroupId: adm.id, normalBalance: "DEBIT" },
         // Where the Round Off term posts for now (it can be a debit or a credit); point the term at an income ledger later if that is wanted.
-        { companyId: co.id, code: "GL032", name: "Other Expenses", accountSubGroupId: adm.id, normalBalance: "DEBIT" },
+        { companyId: co.id, code: "GL032", name: "Other Expenses", accountGroupId: adm.accountGroupId, accountSubGroupId: adm.id, normalBalance: "DEBIT" },
       ]);
     }
 
@@ -250,14 +250,14 @@ async function main() {
       const creditors = await sub(g3.id, "SG01", "Sundry Creditors");
       const [ktm] = await db.select().from(S.subArea).where(eq(S.subArea.shortName, "KTM"));
       const [agt] = await db.select().from(S.agent).where(and(eq(S.agent.companyId, co.id), eq(S.agent.code, "AGT1")));
-      const demo: { code: string; name: string; type: "CUSTOMER" | "VENDOR" | "BOTH"; sub: { id: number }; city: string; pan: string; credit?: [string, number]; terms?: number }[] = [
+      const demo: { code: string; name: string; type: "CUSTOMER" | "VENDOR" | "BOTH"; sub: { id: number; accountGroupId: number }; city: string; pan: string; credit?: [string, number]; terms?: number }[] = [
         { code: "C001", name: "Ram Traders", type: "CUSTOMER", sub: debtors, city: "Kathmandu", pan: "600123456", credit: ["100000.00", 30] },
         { code: "V001", name: "Sita Suppliers", type: "VENDOR", sub: creditors, city: "Birgunj", pan: "600654321", terms: 45 },
         { code: "B001", name: "Himalayan Mart", type: "BOTH", sub: debtors, city: "Pokhara", pan: "600111222", credit: ["50000.00", 15], terms: 30 },
       ];
       for (const d of demo) {
         const [gl] = await db.insert(S.generalLedger).values({
-          companyId: co.id, code: d.code, name: d.name, accountSubGroupId: d.sub.id, glType: d.type,
+          companyId: co.id, code: d.code, name: d.name, accountGroupId: d.sub.accountGroupId, accountSubGroupId: d.sub.id, glType: d.type,
           normalBalance: d.sub === debtors ? "DEBIT" : "CREDIT", subAreaId: ktm?.id ?? null, agentId: agt?.id ?? null,
         }).returning();
         const [p] = await db.insert(S.party).values({
@@ -347,25 +347,25 @@ async function main() {
         const [ex] = await db.select().from(S.accountSubGroup).where(and(eq(S.accountSubGroup.accountGroupId, g.id), eq(S.accountSubGroup.code, subCode)));
         return ex ?? (await db.insert(S.accountSubGroup).values({ accountGroupId: g.id, code: subCode, description }).returning())[0];
       };
-      const gl = async (code: string, name: string, subId: number, nb: "DEBIT" | "CREDIT") => {
+      const gl = async (code: string, name: string, sub: { id: number; accountGroupId: number }, nb: "DEBIT" | "CREDIT") => {
         const [ex] = await db.select().from(S.generalLedger).where(and(eq(S.generalLedger.companyId, co.id), eq(S.generalLedger.code, code)));
-        return ex ?? (await db.insert(S.generalLedger).values({ companyId: co.id, code, name, accountSubGroupId: subId, normalBalance: nb }).returning())[0];
+        return ex ?? (await db.insert(S.generalLedger).values({ companyId: co.id, code, name, accountGroupId: sub.accountGroupId, accountSubGroupId: sub.id, normalBalance: nb }).returning())[0];
       };
       const purchSub = await sub("AG07", "SG01", "Purchase Accounts");
       const salesSub = await sub("AG05", "SG01", "Sales Accounts");
       const vehSub = await sub("AG02", "SG01", "Vehicles");
       const admSub = await sub("AG08", "SG01", "Administrative Expenses");
       const stockSub = await sub("AG01", "SG03", "Stock-in-Hand");
-      const sales = await gl("GL020", "Sales", salesSub.id, "CREDIT");
-      const purchases = await gl("GL040", "Purchases", purchSub.id, "DEBIT");
-      const purchRet = await gl("GL041", "Purchase Returns", purchSub.id, "CREDIT");
-      const salesRet = await gl("GL021", "Sales Returns", salesSub.id, "DEBIT");
-      const openStock = await gl("GL050", "Opening Stock", purchSub.id, "DEBIT");
-      const closePL = await gl("GL051", "Closing Stock (P&L)", salesSub.id, "CREDIT");
-      const closeBS = await gl("GL003", "Stock in Hand", stockSub.id, "DEBIT");
-      const vehicles = await gl("GL060", "Vehicles", vehSub.id, "DEBIT");
-      const accDep = await gl("GL061", "Accumulated Depreciation - Vehicles", vehSub.id, "CREDIT");
-      const depExp = await gl("GL062", "Depreciation Expense", admSub.id, "DEBIT");
+      const sales = await gl("GL020", "Sales", salesSub, "CREDIT");
+      const purchases = await gl("GL040", "Purchases", purchSub, "DEBIT");
+      const purchRet = await gl("GL041", "Purchase Returns", purchSub, "CREDIT");
+      const salesRet = await gl("GL021", "Sales Returns", salesSub, "DEBIT");
+      const openStock = await gl("GL050", "Opening Stock", purchSub, "DEBIT");
+      const closePL = await gl("GL051", "Closing Stock (P&L)", salesSub, "CREDIT");
+      const closeBS = await gl("GL003", "Stock in Hand", stockSub, "DEBIT");
+      const vehicles = await gl("GL060", "Vehicles", vehSub, "DEBIT");
+      const accDep = await gl("GL061", "Accumulated Depreciation - Vehicles", vehSub, "CREDIT");
+      const depExp = await gl("GL062", "Depreciation Expense", admSub, "DEBIT");
 
       const unit = async (c: string) => (await db.select().from(S.productUnit).where(and(eq(S.productUnit.companyId, co.id), eq(S.productUnit.code, c))))[0];
       const [kg, ltr, pcs, box] = [await unit("KG"), await unit("LTR"), await unit("PCS"), await unit("BOX")];
@@ -442,7 +442,7 @@ async function main() {
         const [group] = await db.select().from(S.accountGroup).where(and(eq(S.accountGroup.companyId, co.id), eq(S.accountGroup.code, "AG01")));
         const [existingSub] = await db.select().from(S.accountSubGroup).where(and(eq(S.accountSubGroup.accountGroupId, group.id), eq(S.accountSubGroup.code, "SG05")));
         const taxSub = existingSub ?? (await db.insert(S.accountSubGroup).values({ accountGroupId: group.id, code: "SG05", description: "Duties & Taxes" }).returning())[0];
-        vatInput = (await db.insert(S.generalLedger).values({ companyId: co.id, code: "GL070", name: "VAT Input (Receivable)", accountSubGroupId: taxSub.id, normalBalance: "DEBIT" }).returning())[0];
+        vatInput = (await db.insert(S.generalLedger).values({ companyId: co.id, code: "GL070", name: "VAT Input (Receivable)", accountGroupId: taxSub.accountGroupId, accountSubGroupId: taxSub.id, normalBalance: "DEBIT" }).returning())[0];
       }
       const ensureTerm = async (t: typeof S.purchaseTerm.$inferInsert) => {
         const [ex] = await db.select({ id: S.purchaseTerm.id }).from(S.purchaseTerm).where(and(eq(S.purchaseTerm.companyId, co.id), eq(S.purchaseTerm.code, t.code)));

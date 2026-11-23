@@ -330,6 +330,13 @@
       "when": 1795420000001,
       "tag": "0046_sales_challan",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1795437889493,
+      "tag": "0047_pink_enchantress",
+      "breakpoints": true
     }
   ]
 }

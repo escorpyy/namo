@@ -59,8 +59,8 @@ openingBalanceRouter.get("/", wrap(async (req, res) => {
       subGroupCode: S.accountSubGroup.code, groupCode: S.accountGroup.code, groupType: S.accountGroup.type,
     })
     .from(S.generalLedger)
-    .innerJoin(S.accountSubGroup, eq(S.generalLedger.accountSubGroupId, S.accountSubGroup.id))
-    .innerJoin(S.accountGroup, eq(S.accountSubGroup.accountGroupId, S.accountGroup.id))
+    .leftJoin(S.accountSubGroup, eq(S.generalLedger.accountSubGroupId, S.accountSubGroup.id))
+    .innerJoin(S.accountGroup, eq(S.generalLedger.accountGroupId, S.accountGroup.id))
     .where(eq(S.generalLedger.companyId, companyId))
     .orderBy(asc(S.generalLedger.code));
 

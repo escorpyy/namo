@@ -4,7 +4,7 @@ import { db } from "../db";
 import * as S from "../db/schema";
 import { HttpError, idParam, sameCompany, wrap } from "./_util";
 import { buildSchema } from "./masterFactory";
-import { assertAgent, assertSubArea, assertSubGroup, normalBalanceFor } from "./links";
+import { assertAgent, assertLedgerGroup, assertSubArea, normalBalanceFor } from "./links";
 import type { MasterDef } from "../../shared/masters";
 
 const GL = S.generalLedger, P = S.party, CD = S.customerDetail, VD = S.vendorDetail;
@@ -25,7 +25,7 @@ export function partyRouter(def: MasterDef) {
     db
       .select({
         id: P.id, companyId: P.companyId, generalLedgerId: P.generalLedgerId,
-        code: GL.code, name: GL.name, accountSubGroupId: GL.accountSubGroupId, glType: GL.glType, isActive: GL.isActive,
+        code: GL.code, name: GL.name, accountGroupId: GL.accountGroupId, accountSubGroupId: GL.accountSubGroupId, glType: GL.glType, isActive: GL.isActive,
         subAreaId: P.subAreaId, agentId: P.agentId,
         address: P.address, city: P.city, state: P.state, country: P.country, phone: P.phone, mobile: P.mobile,
         email: P.email, contactPerson: P.contactPerson, panNo: P.panNo, isVatRegistered: P.isVatRegistered,
@@ -54,7 +54,7 @@ export function partyRouter(def: MasterDef) {
   };
 
   async function validate(d: Record<string, any>, companyId: number, partyId?: number, glId?: number) {
-    const groupType = await assertSubGroup(d.accountSubGroupId, companyId);
+    const groupType = await assertLedgerGroup(d.accountGroupId, d.accountSubGroupId, companyId);
     await assertSubArea(d.subAreaId, companyId);
     await assertAgent(d.agentId, companyId);
     // GL code company ke saare ledgers me unique (sirf party me nahi)
@@ -100,7 +100,7 @@ export function partyRouter(def: MasterDef) {
     const groupType = await validate(d, companyId);
     const id = await db.transaction(async (tx) => {
       const [gl] = await tx.insert(GL).values({
-        companyId, code: d.code, name: d.name, accountSubGroupId: d.accountSubGroupId, normalBalance: normalBalanceFor(groupType),
+        companyId, code: d.code, name: d.name, accountGroupId: d.accountGroupId, accountSubGroupId: d.accountSubGroupId ?? null, normalBalance: normalBalanceFor(groupType),
         glType: d.glType, isActive: d.isActive, subAreaId: d.subAreaId ?? null, agentId: d.agentId ?? null,
       }).returning({ id: GL.id });
       const [p] = await tx.insert(P).values({ companyId, generalLedgerId: gl.id, ...partyCols(d) }).returning({ id: P.id });
@@ -120,10 +120,10 @@ export function partyRouter(def: MasterDef) {
     const groupType = await validate(d, ex.companyId, id, ex.generalLedgerId);
     await db.transaction(async (tx) => {
       await tx.update(GL).set({
-        code: d.code, name: d.name, accountSubGroupId: d.accountSubGroupId, glType: d.glType, isActive: d.isActive,
+        code: d.code, name: d.name, accountGroupId: d.accountGroupId, accountSubGroupId: d.accountSubGroupId ?? null, glType: d.glType, isActive: d.isActive,
         subAreaId: d.subAreaId ?? null, agentId: d.agentId ?? null,
         // Sub group badla ho tabhi normal balance dobara nikalo, warna jaisa tha waisa
-        ...(d.accountSubGroupId !== glRow.accountSubGroupId ? { normalBalance: normalBalanceFor(groupType) } : {}),
+        ...(d.accountGroupId !== glRow.accountGroupId || d.accountSubGroupId !== glRow.accountSubGroupId ? { normalBalance: normalBalanceFor(groupType) } : {}),
       }).where(eq(GL.id, ex.generalLedgerId));
       await tx.update(P).set(partyCols(d)).where(eq(P.id, id));
       await saveDetails(tx, id, d);
