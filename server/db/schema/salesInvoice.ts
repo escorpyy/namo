@@ -21,6 +21,7 @@ import { generalLedger, subLedger } from "./accounting";
 import { journalVoucher } from "./vouchers";
 import { agent } from "./parties";
 import { location, product, productUnit } from "./products";
+import { salesChallan, salesChallanLine } from "./salesChallan";
 
 // ============================================================
 // SALES INVOICE  (direct customer invoice: no challan / order yet)
@@ -119,6 +120,8 @@ export const salesInvoice = pgTable(
     bankName: varchar({ length: 100 }),
     bankSwift: varchar({ length: 20 }),
 
+    // The challan (delivery note) this invoice bills; null = direct invoice. Lines say which challan lines.
+    salesChallanId: integer().references(() => salesChallan.id, { onDelete: "restrict" }),
     reversalOfId: integer().references((): AnyPgColumn => salesInvoice.id, {
       onDelete: "set null",
     }),
@@ -155,6 +158,7 @@ export const salesInvoice = pgTable(
     index("SalesInvoice_companyId_idx").on(t.companyId),
     index("SalesInvoice_branchId_idx").on(t.branchId),
     index("SalesInvoice_customerGLId_idx").on(t.customerGLId),
+    index("SalesInvoice_salesChallanId_idx").on(t.salesChallanId),
     index("SalesInvoice_subLedgerId_idx").on(t.subLedgerId),
     index("SalesInvoice_agentId_idx").on(t.agentId),
     index("SalesInvoice_fiscalYear_idx").on(t.fiscalYear),
@@ -205,6 +209,8 @@ export const salesInvoiceLine = pgTable(
     locationId: integer().references(() => location.id, { onDelete: "restrict" }),
     batchNo: varchar({ length: 50 }),
     expiryDate: date({ mode: "date" }),
+    // The challan line this bills. Stock already left on the challan, so posting takes nothing out for this line.
+    challanLineId: integer().references(() => salesChallanLine.id, { onDelete: "restrict" }),
 
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -215,6 +221,7 @@ export const salesInvoiceLine = pgTable(
     index("SalesInvoiceLine_unitId_idx").on(t.unitId),
     index("SalesInvoiceLine_altUnitId_idx").on(t.altUnitId),
     index("SalesInvoiceLine_locationId_idx").on(t.locationId),
+    index("SalesInvoiceLine_challanLineId_idx").on(t.challanLineId),
     check("SalesInvoiceLine_lineNumber_check", sql`${t.lineNumber} > 0`),
     check(
       "SalesInvoiceLine_amounts_check",

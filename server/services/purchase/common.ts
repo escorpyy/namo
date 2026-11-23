@@ -97,7 +97,7 @@ export async function assertVendorLedger(tx: Tx, companyId: number, vendorGLId: 
 // ---- numbering ----
 // Next number for a document type in a branch and fiscal year: highest purely numeric number + 1, zero-padded to 4.
 // A transaction-scoped advisory lock stops two people taking the same number at the same moment.
-export async function nextNumber(tx: Tx, table: "PurchaseOrder" | "PurchaseChallan" | "PurchaseBill" | "SalesInvoice" | "JournalVoucher", col: "orderNumber" | "challanNumber" | "invoiceNumber" | "voucherNumber", branchId: number, fiscalYear: string) {
+export async function nextNumber(tx: Tx, table: "PurchaseOrder" | "PurchaseChallan" | "SalesChallan" | "PurchaseBill" | "SalesInvoice" | "JournalVoucher", col: "orderNumber" | "challanNumber" | "invoiceNumber" | "voucherNumber", branchId: number, fiscalYear: string) {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`${table}:${branchId}:${fiscalYear}`}))`);
   // a journal voucher number is unique per branch across fiscal years (its unique index has no fiscal year)
   const yearTest = table === "JournalVoucher" ? sql`true` : sql`"fiscalYear" = ${fiscalYear}`;

@@ -9,6 +9,7 @@ export * from "./billing";
 export * from "./purchaseOrder";
 export * from "./purchaseChallan";
 export * from "./purchaseBill";
+export * from "./salesChallan";
 export * from "./salesInvoice";
 export * from "./billSettlement";
 export * from "./advanceApplication";

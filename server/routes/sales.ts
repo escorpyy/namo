@@ -3,14 +3,15 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import * as S from "../db/schema";
 import * as SI from "../services/salesInvoice";
+import * as SC from "../services/salesChallan";
 import { HttpError, wrap } from "./_util";
 import { whole, optWhole, q, companyOf, idOf, lockOverrideOf, actorOf, pick, rows, type Kind } from "./_input";
 
 export const salesRouter = Router();
 const MAX_LINES = 500, MAX_TERMS = 100;
-const LINE = { productId: "int", altQty: "num", altUnitId: "int", qty: "num", unitId: "int", rate: "num", foreignRate: "num", locationId: "int", batchNo: "str", expiryDate: "date" } as const satisfies Record<string, Kind>;
+const LINE = { productId: "int", altQty: "num", altUnitId: "int", qty: "num", unitId: "int", rate: "num", foreignRate: "num", locationId: "int", batchNo: "str", expiryDate: "date", challanLineId: "int" } as const satisfies Record<string, Kind>;
 const TERM = { termId: "int", lineNumber: "int", calcType: ["PERCENT", "AMOUNT"], rate: "num", inputAmount: "num", isOverridden: "bool", overrideAmount: "num" } as const satisfies Record<string, Kind>;
-const HEAD = { invoiceNumber: "str", numberSeriesId: "int", invoiceDate: "date", invoiceType: ["LOCAL", "EXPORT"], salesType: ["GOODS_SALES", "SERVICE_SALES"], fiscalYear: "str", customerGLId: "int", subLedgerId: "int", agentId: "int", dueDays: "int", dueDate: "date", remarks: "str" } as const satisfies Record<string, Kind>;
+const HEAD = { invoiceNumber: "str", numberSeriesId: "int", invoiceDate: "date", invoiceType: ["LOCAL", "EXPORT"], salesType: ["GOODS_SALES", "SERVICE_SALES"], fiscalYear: "str", customerGLId: "int", subLedgerId: "int", agentId: "int", dueDays: "int", dueDate: "date", remarks: "str", salesChallanId: "int" } as const satisfies Record<string, Kind>;
 
 const filterOf = (req: Request): SI.SalesListFilter => ({
   companyId: companyOf(req), branchId: optWhole(q(req, "branchId"), "branchId"), fiscalYear: q(req, "fiscalYear")?.slice(0, 15),
@@ -76,4 +77,56 @@ salesRouter.post("/invoices/:id/reverse", wrap(async (req, res) => {
   const body = pick(req.body ?? {}, { date: "date", reason: "str" }, "Reversal");
   const result = await SI.reverseSalesInvoice(id, await actorOf(req), { date: body.date as any, reason: body.reason?.trim(), lockOverride: lockOverrideOf(req) });
   res.json({ result, document: await SI.getSalesInvoice(result.id, companyId) });
+}));
+
+// ---- Challans (delivery notes): confirm takes the stock out; an invoice can bill one ----
+const CLINE = { productId: "int", altQty: "num", altUnitId: "int", qty: "num", unitId: "int", rate: "num", locationId: "int", batchNo: "str", expiryDate: "date" } as const satisfies Record<string, Kind>;
+const CHEAD = { challanNumber: "str", numberSeriesId: "int", challanDate: "date", fiscalYear: "str", customerGLId: "int", subLedgerId: "int", agentId: "int", transporterName: "str", vehicleNo: "str", lrNo: "str", lrDate: "date", remarks: "str" } as const satisfies Record<string, Kind>;
+const challanInput = (body: any, base: { companyId: number; branchId: number; id?: number }) => ({
+  ...(pick(body, CHEAD, "Sales challan") as any), lines: rows(body?.lines, CLINE, "lines", MAX_LINES, "Line") as any, ...base,
+}) as SC.SalesChallanInput;
+async function ownedChallan(id: number, companyId: number) {
+  const [c] = await db.select({ id: S.salesChallan.id, branchId: S.salesChallan.branchId }).from(S.salesChallan).where(and(eq(S.salesChallan.id, id), eq(S.salesChallan.companyId, companyId)));
+  if (!c) throw new HttpError(404, "Sales challan not found in this company.");
+  return c;
+}
+salesRouter.get("/challans/lookups", wrap(async (req, res) => {
+  const companyId = companyOf(req), branchId = whole(q(req, "branchId"), "branchId"), actor = await actorOf(req);
+  const look = await SI.salesInvoiceLookups(companyId, branchId, actor.userId);
+  const { usableSeries } = await import("../services/numberSeries");
+  const series = await usableSeries(db as any, companyId, "SALES_CHALLAN", actor.userId, branchId);
+  res.json({ ...look, series: series.map((s) => ({ id: s.id, name: s.name, mode: s.mode, isDefault: s.isDefault })) });
+}));
+salesRouter.get("/challans", wrap(async (req, res) => {
+  res.json(await SC.listSalesChallans({ companyId: companyOf(req), branchId: optWhole(q(req, "branchId"), "branchId"), fiscalYear: q(req, "fiscalYear")?.slice(0, 15),
+    customerGLId: optWhole(q(req, "customerGLId"), "customerGLId"), status: q(req, "status"), search: q(req, "search")?.slice(0, 60), limit: optWhole(q(req, "limit"), "limit") }));
+}));
+salesRouter.get("/challans/:id", wrap(async (req, res) => { res.json(await SC.getSalesChallan(idOf(req), companyOf(req))); }));
+salesRouter.post("/challans", wrap(async (req, res) => {
+  const companyId = whole(req.body?.companyId ?? q(req, "companyId"), "companyId"), branchId = whole(req.body?.branchId, "branchId");
+  const result = await SC.saveSalesChallan(challanInput(req.body, { companyId, branchId }), await actorOf(req));
+  res.status(201).json({ result, document: await SC.getSalesChallan(result.id, companyId) });
+}));
+salesRouter.put("/challans/:id", wrap(async (req, res) => {
+  const id = idOf(req), companyId = companyOf(req), c = await ownedChallan(id, companyId);
+  const result = await SC.saveSalesChallan(challanInput(req.body, { companyId, branchId: c.branchId, id }), await actorOf(req));
+  res.json({ result, document: await SC.getSalesChallan(id, companyId) });
+}));
+salesRouter.delete("/challans/:id", wrap(async (req, res) => {
+  const id = idOf(req); await ownedChallan(id, companyOf(req));
+  res.json({ result: await SC.deleteSalesChallan(id, await actorOf(req)) });
+}));
+salesRouter.post("/challans/:id/confirm", wrap(async (req, res) => {
+  const id = idOf(req), companyId = companyOf(req); await ownedChallan(id, companyId);
+  const result = await SC.confirmSalesChallan(id, await actorOf(req));
+  res.json({ result, document: await SC.getSalesChallan(id, companyId) });
+}));
+// A ready-to-edit invoice draft body for the still-unbilled part of a confirmed challan (nothing is saved).
+salesRouter.get("/invoices/from-challan/:challanId", wrap(async (req, res) => {
+  const companyId = companyOf(req), c = await SC.getSalesChallan(whole(req.params.challanId, "challanId"), companyId);
+  if (!c.isConfirmed) throw new HttpError(409, `Challan ${c.challanNumber} is not confirmed; only delivered goods can be billed.`);
+  res.json({
+    salesChallanId: c.id, challanNumber: c.challanNumber, customerGLId: c.customerGLId, subLedgerId: c.subLedgerId, agentId: c.agentId, branchId: c.branchId,
+    lines: c.lines.filter((l) => Number(l.pendingQty) > 0).map((l) => ({ challanLineId: l.id, productId: l.productId, qty: l.pendingQty, unitId: l.unitId, rate: l.rate, locationId: l.locationId, batchNo: l.batchNo, expiryDate: l.expiryDate })),
+  });
 }));

@@ -18,6 +18,7 @@ export const DOCUMENT_TYPES = [
   { key: "PURCHASE_ORDER", label: "Purchase Order", module: "Purchase" },
   { key: "PURCHASE_CHALLAN", label: "Purchase Challan", module: "Purchase" },
   { key: "PURCHASE_BILL", label: "Purchase Bill", module: "Purchase" },
+  { key: "SALES_CHALLAN", label: "Sales Challan", module: "Sales" },
   { key: "SALES_INVOICE", label: "Sales Invoice", module: "Sales" },
   { key: "JOURNAL_VOUCHER", label: "Journal Voucher", module: "Accounting" },
 ] as const;

@@ -323,6 +323,13 @@
       "when": 1795410000001,
       "tag": "0045_product_gl_default_sources",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1795420000001,
+      "tag": "0046_sales_challan",
+      "breakpoints": true
     }
   ]
 }

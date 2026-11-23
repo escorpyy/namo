@@ -12,6 +12,7 @@ import { mergeRows, writeVoucher, type JvRow } from "./voucherWriter";
 import { assertGlEntryAllowed } from "./glEntryControl";
 import { assertStockCovers, recordMovements, reverseMovements } from "./stockLedger";
 import { assertLinesMatchSalesType, type SalesType } from "./salesTypes";
+import { billedBySalesChallanLine } from "./salesChallan";
 
 type SaveInput = {
   id?: number;
@@ -29,7 +30,8 @@ type SaveInput = {
   dueDays?: number;
   dueDate?: string | Date | null;
   remarks?: string | null;
-  lines: (LineInput & { foreignRate?: string | number | null; locationId?: number | null; batchNo?: string | null; expiryDate?: string | Date | null })[];
+  salesChallanId?: number | null; // bills this delivery note; its lines (challanLineId) take no stock out again
+  lines: (LineInput & { foreignRate?: string | number | null; locationId?: number | null; batchNo?: string | null; expiryDate?: string | Date | null; challanLineId?: number | null })[];
   terms?: SalesTermInput[];
   exportDetail?: ExportInput | null; // EXPORT invoices only
 };
@@ -58,6 +60,36 @@ async function assertCustomerLedger(tx: any, companyId: number, glId: number, su
     throw new HttpError(400, `Ledger ${gl.code} needs a sub-ledger.`, "subLedgerId");
   }
   return gl;
+}
+
+// An invoice that bills a challan: the challan must be confirmed and the customer's own, each billed line must be that challan's line
+// for the same product, and nothing may be billed beyond what was delivered (standing invoices, drafts included, reserve their share).
+async function assertChallanBilling(tx: any, a: { companyId: number; customerGLId: number; invoiceId: number; salesChallanId: number | null; lines: { lineNumber: number; productId: number; qty: string; challanLineId: number | null }[] }) {
+  const linked = a.lines.filter((l) => l.challanLineId);
+  if (!a.salesChallanId) {
+    if (linked.length) throw new HttpError(400, "Lines refer to challan lines but the invoice has no challan.", "salesChallanId");
+    return;
+  }
+  const [c] = await tx.select().from(S.salesChallan).where(and(eq(S.salesChallan.id, a.salesChallanId), eq(S.salesChallan.companyId, a.companyId)));
+  if (!c) throw new HttpError(404, "Sales challan not found in this company.", "salesChallanId");
+  if (!c.isConfirmed) throw new HttpError(409, `Challan ${c.challanNumber} is not confirmed; only delivered goods can be billed.`, "salesChallanId");
+  if (c.customerGLId !== a.customerGLId) throw new HttpError(409, `Challan ${c.challanNumber} was made out to a different customer.`, "customerGLId");
+  const ids = [...new Set(linked.map((l) => l.challanLineId as number))];
+  if (!ids.length) return;
+  const cls = await tx.select().from(S.salesChallanLine).where(and(eq(S.salesChallanLine.salesChallanId, c.id), inArray(S.salesChallanLine.id, ids)));
+  const byId = new Map(cls.map((l: any) => [l.id, l]));
+  const wanted = new Map<number, bigint>();
+  for (const l of linked) {
+    const cl: any = byId.get(l.challanLineId as number);
+    if (!cl) throw new HttpError(409, `Line ${l.lineNumber}: that is not a line of challan ${c.challanNumber}.`, "lines");
+    if (cl.productId !== l.productId) throw new HttpError(409, `Line ${l.lineNumber}: the product differs from challan line ${cl.lineNumber}.`, "lines");
+    wanted.set(cl.id, (wanted.get(cl.id) ?? ZERO) + toMicro(l.qty));
+  }
+  const billed = await billedBySalesChallanLine(tx, ids, a.invoiceId);
+  for (const [lineId, q] of wanted) {
+    const cl: any = byId.get(lineId), already = billed.get(lineId) ?? ZERO, delivered = toMicro(cl.qty);
+    if (already + q > delivered) throw new HttpError(409, `Challan ${c.challanNumber} line ${cl.lineNumber}: billing ${fmt(q)} would exceed the delivered ${fmt(delivered)} (already billed ${fmt(already)}).`, "lines");
+  }
 }
 
 async function assertAgent(tx: any, companyId: number, agentId: number | null | undefined) {
@@ -199,7 +231,7 @@ export function getSalesInvoice(id: number, companyId: number) {
       invoiceDate: iso(invoice.invoiceDate), fiscalYear: invoice.fiscalYear, invoiceType: invoice.invoiceType, salesType: invoice.salesType, customerGLId: invoice.customerGLId, customerCode: customer[0]?.code ?? "", customerName: customer[0]?.name ?? "",
       subLedgerId: invoice.subLedgerId, subLedgerCode: sub[0]?.code ?? null, subLedgerName: sub[0]?.name ?? null, agentId: invoice.agentId, agentCode: agent[0]?.code ?? null, agentName: agent[0]?.name ?? null,
       exportDetail: invoice.invoiceType === "EXPORT" ? Object.fromEntries(EXPORT_COLUMNS.map((k) => { const v = (invoice as any)[k]; return [k, v instanceof Date ? iso(v) : v ?? null]; })) : null,
-      dueDays: invoice.dueDays, dueDate: iso(invoice.dueDate), remarks: invoice.remarks, isPosted: invoice.isPosted, postedAt: invoice.postedAt,
+      salesChallanId: invoice.salesChallanId, dueDays: invoice.dueDays, dueDate: iso(invoice.dueDate), remarks: invoice.remarks, isPosted: invoice.isPosted, postedAt: invoice.postedAt,
       reversalOfId: invoice.reversalOfId, reversalOf: reversalOf[0] ?? null, reversedBy: reversedBy[0] ?? null, state: stateOf(invoice.isPosted, invoice.reversalOfId, reversed),
       journalVoucher: voucher[0] ? { ...voucher[0], voucherDate: iso(voucher[0].voucherDate) } : null,
       basicAmount: String(invoice.basicAmount), termAmount: String(invoice.termAmount), totalAmount: String(invoice.totalAmount),
@@ -251,6 +283,9 @@ export async function saveSalesInvoice(input: SaveInput, actor: Actor, opts: Wri
     const prepared = await resolveLines(tx, input.companyId, lineInputs, { allowZeroQty: false });
     if (prepared.some((l) => l.productType === "FIXED_ASSET" || l.productType === "BUNDLE")) throw new HttpError(400, "Direct sales invoices support stock, non-stock and service items only.", "lines");
     assertLinesMatchSalesType(salesType, prepared);
+    const salesChallanId = input.salesChallanId ? Number(input.salesChallanId) : null;
+    await assertChallanBilling(tx, { companyId: input.companyId, customerGLId: customerGL, invoiceId: existing?.id ?? 0, salesChallanId,
+      lines: prepared.map((l, i) => ({ lineNumber: l.lineNumber, productId: l.productId, qty: fmt(l.qty), challanLineId: input.lines[i].challanLineId ? Number(input.lines[i].challanLineId) : null })) });
     const numbering = await numberForSave(tx, {
       companyId: input.companyId, userId: actor.userId, documentType: "SALES_INVOICE", seriesId: input.numberSeriesId,
       typed: input.invoiceNumber, branchId: input.branchId, fiscalYear: fy.code,
@@ -260,7 +295,7 @@ export async function saveSalesInvoice(input: SaveInput, actor: Actor, opts: Wri
     const values = {
       companyId: input.companyId, branchId: input.branchId, documentType: "SALES_INVOICE" as const,
       invoiceNumber: numbering.number, numberSeriesId: numbering.seriesId, invoiceDate, fiscalYear: fy.code, invoiceType, salesType, ...ex.cols,
-      customerGLId: customerGL, subLedgerId, agentId, dueDays, dueDate, remarks, ...ex.cols,
+      customerGLId: customerGL, subLedgerId, agentId, dueDays, dueDate, remarks, salesChallanId, ...ex.cols,
     };
     if (existing) {
       await tx.update(S.salesInvoice).set({ ...values, updatedAt: new Date() }).where(eq(S.salesInvoice.id, existing.id));
@@ -279,6 +314,7 @@ export async function saveSalesInvoice(input: SaveInput, actor: Actor, opts: Wri
         altUnitId: line.altUnitId, qty: fmt(line.qty), unitId: line.unitId, rate: fmt(line.rate), basicAmount: fmt(line.basicAmount),
         foreignRate: fr === null ? null : fmt(fr), foreignAmount: fr === null ? null : fmt(roundTo(mul(line.qty, fr), 2)),
         locationId: input.lines[i].locationId ?? null, batchNo: input.lines[i].batchNo?.trim() || null, expiryDate: optDate(input.lines[i].expiryDate, "expiryDate"),
+        challanLineId: input.lines[i].challanLineId ? Number(input.lines[i].challanLineId) : null,
       }).returning({ id: S.salesInvoiceLine.id, lineNumber: S.salesInvoiceLine.lineNumber });
       lineIdByNumber.set(created.lineNumber, created.id);
     }
@@ -306,14 +342,18 @@ export function postSalesInvoice(id: number, actor: Actor, opts: WriteOpts = {})
     const totals = await recalcSalesTerms(tx, id);
     if (totals.total <= ZERO) throw new HttpError(409, "A posted sales invoice must have a positive total.");
     await assertMandatorySalesTerms(tx, invoice.companyId, id);
+    await assertChallanBilling(tx, { companyId: invoice.companyId, customerGLId: invoice.customerGLId, invoiceId: id, salesChallanId: invoice.salesChallanId,
+      lines: lines.map(({ line }) => ({ lineNumber: line.lineNumber, productId: line.productId, qty: line.qty, challanLineId: line.challanLineId })) });
+    // Lines that bill a challan: that stock already left on the challan, so only the other lines take stock out here.
+    const ownStock = lines.filter((l) => !l.line.challanLineId);
     // stock products: batch / expiry where the product tracks them, and the stock must cover what the invoice takes out
-    for (const { line, type } of lines) {
+    for (const { line, type } of ownStock) {
       if (type !== "STOCK") continue;
       const [sd] = await tx.select({ tracksBatch: S.stockDetail.tracksBatch, tracksExpiry: S.stockDetail.tracksExpiry }).from(S.stockDetail).where(eq(S.stockDetail.productId, line.productId));
       if (sd?.tracksBatch && !line.batchNo) throw new HttpError(409, `Line ${line.lineNumber}: this product is batch-tracked; choose the batch it is sold from.`, "lines");
       if (sd?.tracksExpiry && !line.expiryDate) throw new HttpError(409, `Line ${line.lineNumber}: this product expires; enter the expiry date of the batch.`, "lines");
     }
-    await assertStockCovers(tx, { companyId: invoice.companyId, branchId: invoice.branchId }, lines.map((l) => l.line));
+    await assertStockCovers(tx, { companyId: invoice.companyId, branchId: invoice.branchId }, ownStock.map((l) => l.line));
     const rows: JvRow[] = [];
     for (const { line, code, type, isActive } of lines) {
       if (!isActive) throw new HttpError(409, `Product ${code} is inactive and cannot be posted.`);
@@ -349,7 +389,7 @@ export function postSalesInvoice(id: number, actor: Actor, opts: WriteOpts = {})
       fiscalYear: invoice.fiscalYear, remarks: `Sales invoice ${invoice.invoiceNumber}`, reversalOfId: null,
     }, journalRows, actor);
     await tx.update(S.salesInvoice).set({ isPosted: true, postedAt: new Date(), postedBy: actor.userId, journalVoucherId, updatedAt: new Date() }).where(eq(S.salesInvoice.id, id));
-    await recordMovements(tx, { companyId: invoice.companyId, branchId: invoice.branchId, date: invoice.invoiceDate, source: "SALES_INVOICE", sourceId: id, direction: "OUT" }, lines.map((l) => l.line));
+    await recordMovements(tx, { companyId: invoice.companyId, branchId: invoice.branchId, date: invoice.invoiceDate, source: "SALES_INVOICE", sourceId: id, direction: "OUT" }, ownStock.map((l) => l.line));
     return { id, invoiceNumber: invoice.invoiceNumber, journalVoucherId, totalAmount: fmt(totals.total, 2) };
   });
 }

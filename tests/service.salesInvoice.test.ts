@@ -245,6 +245,61 @@ describe.skipIf(!DB_READY)("sales invoice service layer", () => {
     });
   });
 
+  it("challan: confirming takes the goods out once, and an invoice that bills it takes nothing out again", async () => {
+    await run(async (tx, w) => {
+      const ch = await import("../server/services/salesChallan");
+      const tag = uniq();
+      const sub = (await rows(tx, sql`select "productSubGroupId" as id from "Product" where id = ${w.productId}`))[0].id;
+      const plain = await ins(tx, "Product", { companyId: w.companyId, code: `CH${tag}`.slice(0, 10), description: "Challan goods", type: "STOCK", productSubGroupId: sub, updatedAt: NOW });
+      await ins(tx, "StockDetail", { productId: plain, baseUnitId: w.unitId, salesGLId: w.salesGLId, purchaseGLId: w.purchaseGLId, updatedAt: NOW });
+      const wh = await ins(tx, "Location", { companyId: w.companyId, code: `WC${tag}`.slice(0, 10), name: "Warehouse", updatedAt: NOW });
+      await ins(tx, "StockMovement", { companyId: w.companyId, branchId: w.branchId, productId: plain, locationId: wh, movementDate: "2025-10-01", qty: 10, sourceType: "PURCHASE_BILL", sourceId: 1, sourceLineId: 1 });
+      const on = async () => Number((await rows(tx, sql`select coalesce(sum(qty), 0) as q from "StockMovement" where "productId" = ${plain} and "locationId" = ${wh}`))[0].q);
+      const challan = (lines: any[]) => ch.saveSalesChallan({ companyId: w.companyId, branchId: w.branchId, challanDate: "2025-10-10", fiscalYear: "2082/83", customerGLId: w.customerGLId, lines }, ACTOR, { tx });
+      const line = (qty: number) => ({ productId: plain, qty, unitId: w.unitId, rate: 100, locationId: wh });
+
+      // a challan carries stock items only; a draft moves nothing
+      await expect(challan([{ productId: w.productId, qty: 1, unitId: w.unitId, rate: 1 }])).rejects.toMatchObject({ status: 400 });
+      const c = await challan([line(6)]);
+      expect(await on()).toBe(10);
+      // more than is on hand cannot go out
+      const big = await challan([line(11)]);
+      await expect(ch.confirmSalesChallan(big.id, ACTOR, { tx })).rejects.toMatchObject({ status: 409 });
+      // an unconfirmed challan cannot be billed
+      const cl0 = (await rows(tx, sql`select id from "SalesChallanLine" where "salesChallanId" = ${c.id}`))[0].id;
+      const billInput = (qty: number, extra: Record<string, unknown> = {}) => draftInput(w, { salesChallanId: c.id, lines: [{ productId: plain, qty, unitId: w.unitId, rate: 100, challanLineId: cl0 }], ...extra });
+      await expect(svc.saveSalesInvoice(billInput(6), ACTOR, { tx })).rejects.toMatchObject({ status: 409 });
+
+      await ch.confirmSalesChallan(c.id, ACTOR, { tx });
+      expect(await on()).toBe(4);
+      await expect(ch.confirmSalesChallan(c.id, ACTOR, { tx })).rejects.toMatchObject({ status: 409 });
+      await expect(ch.deleteSalesChallan(c.id, ACTOR, { tx })).rejects.toMatchObject({ status: 409 });
+      await expect(ch.saveSalesChallan({ id: c.id, companyId: w.companyId, branchId: w.branchId, challanDate: "2025-10-10", fiscalYear: "2082/83", customerGLId: w.customerGLId, lines: [line(1)] }, ACTOR, { tx })).rejects.toMatchObject({ status: 409 });
+
+      // bill part, then too much; billing a challan line twice over is refused
+      const first = await svc.saveSalesInvoice(billInput(4), ACTOR, { tx });
+      await expect(svc.saveSalesInvoice(billInput(3), ACTOR, { tx })).rejects.toMatchObject({ status: 409 }); // 4 reserved + 3 > 6
+      await svc.postSalesInvoice(first.id, ACTOR, { tx });
+      expect(await on()).toBe(4); // the invoice took nothing out again
+      expect((await rows(tx, sql`select count(*)::int as c from "StockMovement" where "sourceType" = 'SALES_INVOICE' and "sourceId" = ${first.id}`))[0].c).toBe(0);
+      expect((await ch.getSalesChallan(c.id, w.companyId, { tx })).lines[0]).toMatchObject({ billedQty: "4.000000", pendingQty: "2.000000" });
+
+      // the rest, with an extra line that is not on the challan: that line still takes its own stock out
+      const second = await svc.saveSalesInvoice(billInput(2, { lines: [{ productId: plain, qty: 2, unitId: w.unitId, rate: 100, challanLineId: cl0 }, { productId: plain, qty: 1, unitId: w.unitId, rate: 100, locationId: wh }] }), ACTOR, { tx });
+      await svc.postSalesInvoice(second.id, ACTOR, { tx });
+      expect(await on()).toBe(3);
+
+      // a different customer's challan cannot be billed
+      const other = await ins(tx, "GeneralLedger", { companyId: w.companyId, code: `C2${tag}`.slice(0, 10), name: "Other customer", accountSubGroupId: (await rows(tx, sql`select "accountSubGroupId" as id from "GeneralLedger" where id = ${w.customerGLId}`))[0].id, normalBalance: "DEBIT", glType: "CUSTOMER", updatedAt: NOW });
+      await expect(svc.saveSalesInvoice(billInput(1, { customerGLId: other }), ACTOR, { tx })).rejects.toMatchObject({ status: 409 });
+
+      // reversing an invoice does not bring the delivered goods back: they are still with the customer
+      await svc.reverseSalesInvoice(first.id, ACTOR, { tx, date: "2025-10-20", reason: "rebill" });
+      expect(await on()).toBe(3);
+      expect((await ch.getSalesChallan(c.id, w.companyId, { tx })).lines[0]).toMatchObject({ billedQty: "2.000000", pendingQty: "4.000000" });
+    });
+  });
+
   it("refuses a draft with no lines", async () => {
     await run(async (tx, w) => {
       await expect(svc.saveSalesInvoice(draftInput(w, { lines: [] }), ACTOR, { tx })).rejects.toMatchObject({ status: 400 });
