@@ -33,7 +33,7 @@ const HELP: [string, string][] = [
   ["Alt+, / Alt+.", "Previous / next tab"],
   ["Alt+W", "Close this tab"],
   ["Alt+1 / Alt+2", "Sidebar / the form"],
-  ["Alt+Shift+H / V / S", "Fold or open the header / vendor / stock panel"],
+  ["Alt+Shift+H / V / S", "Open the header / vendor / stock panel"],
   ["Alt+Shift+T", "Open header terms"],
   ["Post", "Writes the journal voucher; a posted bill cannot be edited, only reversed"],
 ];
@@ -291,8 +291,12 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   const narrow = typeof window !== "undefined" && window.innerWidth < 1400;
   const [hdrOff, setHdrOff] = useState(false);
   const [headerFlowPassed, setHeaderFlowPassed] = useState(false);
-  const [vendOff, setVendOff] = useRail("bill.vendor", narrow);
-  const [stockOff, setStockOff] = useRail("bill.stock", narrow);
+  const [rightOff, setRightOff] = useRail("bill.vendor", narrow);
+  const [rightTab, setRightTab] = useState<"vendor" | "stock">(() => {
+    try { return localStorage.getItem("bill.right.tab") === "stock" ? "stock" : "vendor"; }
+    catch { return "vendor"; }
+  });
+  useEffect(() => { try { localStorage.setItem("bill.right.tab", rightTab); } catch { /* storage is optional */ } }, [rightTab]);
   useEffect(() => { setHdrOff(!!doc); setHeaderFlowPassed(!!doc); }, [doc?.id]);
   const [focusLine, setFocusLine] = useState(0); // the line the cursor is on drives the stock panel
   const focusProduct = f?.lines[focusLine]?.productId ?? "";
@@ -305,15 +309,20 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
         termsRef.current.open({ scope: "header" });
         return;
       }
-      const set = e.code === "KeyH" ? setHdrOff : e.code === "KeyV" ? setVendOff : e.code === "KeyS" ? setStockOff : null;
-      if (!set) return;
+      if (e.code === "KeyV" || e.code === "KeyS") {
+        e.preventDefault();
+        setRightTab(e.code === "KeyV" ? "vendor" : "stock");
+        setRightOff(false);
+        return;
+      }
+      if (e.code !== "KeyH") return;
       e.preventDefault();
-      if (e.code === "KeyH") setHeaderFlowPassed(true);
-      set((v) => !v);
+      setHeaderFlowPassed(true);
+      setHdrOff((v) => !v);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [setVendOff, setStockOff]);
+  }, [setRightOff]);
   // a save that found a problem in a header field opens the header again, so the field can be seen and fixed
   useEffect(() => {
     if (Object.entries(s.errors).some(([key, message]) => message && !/^(L\.|T\.|imp\.)/.test(key) && key !== "lines" && key !== "terms")) setHdrOff(false);
@@ -457,24 +466,35 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
 
           </div>
 
-          <div className="flex min-h-0 shrink-0 flex-col items-end gap-3">
-            <RailPanel side="right" label="Vendor and recent bills" collapsed={vendOff} onToggle={() => setVendOff((v) => !v)} shortcut="Alt+Shift+V" className="min-h-0 flex-[3_1_0]">
-              {vendor && (
-                <div className="space-y-0.5 border-b border-slate-200 px-3 py-2 text-[12.5px]">
-                  <div className="truncate font-semibold text-ink" title={vendor.name}>{vendor.name}</div>
-                  <div className="flex justify-between text-slate-600"><span>Code</span><span className="font-mono">{vendor.code}</span></div>
-                  {vendor.paymentTermDays != null && <div className="flex justify-between text-slate-600"><span>Payment terms</span><span>{vendor.paymentTermDays} days</span></div>}
-                  {vendor.creditLimit && <div className="flex justify-between text-slate-600"><span>Credit limit</span><span className="tabular-nums">{money(vendor.creditLimit)}</span></div>}
-                </div>
-              )}
-              <div className="[&_.lg-card-head]:hidden [&_.lg-card]:rounded-none [&_.lg-card]:border-0">
-                <VendorBillsTable lookups={lk} vendorGLId={f.vendorGLId} vendorBills={vendorBills} doc={doc} companyId={p.companyId} userId={p.userId} calendar={p.calendar} />
+          <RailPanel side="right" label="Vendor / Stock" collapsed={rightOff} onToggle={() => setRightOff((v) => !v)} shortcut="Alt+Shift+V / S" className="h-full min-h-0 !rounded-none !border-slate-200">
+            <div className="flex min-h-full flex-col">
+              <div role="group" aria-label="Right panel views" className="flex shrink-0 border-b border-slate-200">
+                <button type="button" data-nav aria-pressed={rightTab === "vendor"} onClick={() => setRightTab("vendor")}
+                  className={`flex min-w-0 flex-1 items-center justify-between gap-1 border-b-2 px-2 py-1.5 text-left text-[12px] ${rightTab === "vendor" ? "border-cobalt-700 bg-cobalt-50 text-cobalt-900" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>
+                  <span className="truncate font-semibold">Vendor</span><span className="kbd shrink-0">Alt+Shift+V</span>
+                </button>
+                <button type="button" data-nav aria-pressed={rightTab === "stock"} onClick={() => setRightTab("stock")}
+                  className={`flex min-w-0 flex-1 items-center justify-between gap-1 border-b-2 px-2 py-1.5 text-left text-[12px] ${rightTab === "stock" ? "border-cobalt-700 bg-cobalt-50 text-cobalt-900" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>
+                  <span className="truncate font-semibold">Stock</span><span className="kbd shrink-0">Alt+Shift+S</span>
+                </button>
               </div>
-            </RailPanel>
-            <RailPanel side="right" label="Stock and last rates" collapsed={stockOff} onToggle={() => setStockOff((v) => !v)} shortcut="Alt+Shift+S" className="min-h-0 flex-[2_1_0]">
-              <ProductInfoPanel lookups={lk} productId={focusProduct} info={productInfo} calendar={p.calendar} />
-            </RailPanel>
-          </div>
+              {rightTab === "vendor" ? <div className="min-h-0 flex-1">
+                {vendor && (
+                  <div className="space-y-0.5 border-b border-slate-200 px-2 py-1.5 text-[12px]">
+                    <div className="truncate font-semibold text-ink" title={vendor.name}>{vendor.name}</div>
+                    <div className="flex justify-between text-slate-600"><span>Code</span><span className="font-mono">{vendor.code}</span></div>
+                    {vendor.paymentTermDays != null && <div className="flex justify-between text-slate-600"><span>Payment terms</span><span>{vendor.paymentTermDays} days</span></div>}
+                    {vendor.creditLimit && <div className="flex justify-between text-slate-600"><span>Credit limit</span><span className="tabular-nums">{money(vendor.creditLimit)}</span></div>}
+                  </div>
+                )}
+                <div className="[&_.lg-card-head]:hidden [&_.lg-card]:rounded-none [&_.lg-card]:border-0">
+                  <VendorBillsTable lookups={lk} vendorGLId={f.vendorGLId} vendorBills={vendorBills} doc={doc} companyId={p.companyId} userId={p.userId} calendar={p.calendar} />
+                </div>
+              </div> : <div className="min-h-0 flex-1 [&>div]:!px-2 [&>div]:!py-1.5">
+                <ProductInfoPanel lookups={lk} productId={focusProduct} info={productInfo} calendar={p.calendar} />
+              </div>}
+            </div>
+          </RailPanel>
           </div>}
         </div>
 
