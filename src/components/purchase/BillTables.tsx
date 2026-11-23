@@ -102,6 +102,8 @@ export interface BillHeaderProps {
   duplicate?: PListRow;
   /** one label-value pair per row (for a narrow side panel) instead of five pairs across */
   stacked?: boolean;
+  /** compact wide entry layout with labels above controls */
+  wide?: boolean;
 }
 
 export function BillHeaderTable(p: BillHeaderProps) {
@@ -112,82 +114,48 @@ export function BillHeaderTable(p: BillHeaderProps) {
   const noCost = ro || !f.importCostForBillId;
   const links = [f.challanNo && `Challan ${f.challanNo}`, f.orderNo && `Order ${f.orderNo}`].filter(Boolean).join(" · ");
   const stacked = !!p.stacked;
-  const h1 = (<Fragment key="h1">
-        <FLabel title="A confirmed challan fills the vendor and the lines">Challan</FLabel>
-        <FCell error={err("purchaseChallanId")}>
-          {ro || doc || service
-            ? <input disabled className="fld" value={links} placeholder="—" aria-label="Linked documents" />
-            : <Combobox fieldName="purchaseChallanId" placeholder="— (none)" value={f.purchaseChallanId} hasError={!!err("purchaseChallanId")} options={p.challanOptions} allowClear
-                onChange={(value) => p.onPickChallan(value)} onCommit={(el, dir) => focusStep(el, dir)} />}
-        </FCell>
-  </Fragment>);
-  const h2 = (<Fragment key="h2">
-        <FLabel>Invoice No</FLabel>
-        <FCell><NumberField bare label="Invoice No" documentType="PURCHASE_BILL" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.invoiceNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => patch(c)} /></FCell>
-  </Fragment>);
-  const h3 = (<Fragment key="h3">
-        <FLabel required>Invoice Date ({cal})</FLabel>
-        <FCell error={err("invoiceDate")} className={DATE_CELL}>
-          <DateInput fieldName="invoiceDate" value={f.invoiceDate} calendar={cal} hasError={!!err("invoiceDate")} onBlurField={() => {}} disabled={ro} onChange={(v) => {
-            // with due days entered, the due date follows the invoice date
-            const due = f.dueDays ? addDaysIso(v, Number(f.dueDays)) : "";
-            patch(due ? { invoiceDate: v, dueDate: due } : { invoiceDate: v });
-            clearError("invoiceDate");
-          }} />
-        </FCell>
-  </Fragment>);
-  const h4 = (<Fragment key="h4">
-        <FLabel>Vendor Invoice No</FLabel>
-        <FCell error={err("vendorInvoiceNo")}><TextInput name="vendorInvoiceNo" label="Vendor Invoice No" value={f.vendorInvoiceNo} onChange={(v) => patch({ vendorInvoiceNo: v })} readOnly={ro} error={err("vendorInvoiceNo")} max={30} /></FCell>
-  </Fragment>);
-  const h5 = (<Fragment key="h5">
-        <DateCell name="vendorInvoiceDate" label="Vendor Invoice Date" value={f.vendorInvoiceDate} onChange={(v) => { patch({ vendorInvoiceDate: v }); clearError("vendorInvoiceDate"); }} calendar={cal} readOnly={ro} error={err("vendorInvoiceDate")} />
-  </Fragment>);
-  const h6 = (<Fragment key="h6">
-        <FLabel required>Vendor</FLabel>
-        <FCell colSpan={stacked ? 1 : 3} error={err("vendorGLId")}>
-          <VendorPicker vendors={vendors} vendorGLId={f.vendorGLId} readOnly={ro} error={err("vendorGLId")} lockVendor={!!f.purchaseChallanId} contextKey={ctx}
-            onChange={(c) => {
-              // a new vendor brings its payment term days, unless due days are already filled
-              const days = c.vendorGLId && c.vendorGLId !== f.vendorGLId && !f.dueDays ? lk.vendors.find((v) => String(v.id) === c.vendorGLId)?.paymentTermDays : null;
-              patch(days ? { ...c, dueDays: String(days), dueDate: f.invoiceDate ? addDaysIso(f.invoiceDate, days) : f.dueDate } : c);
-              clearError("vendorGLId", "subLedgerId");
-            }} />
-        </FCell>
-  </Fragment>);
-  const h7 = (<Fragment key="h7">
-        <FLabel required={!!vendor?.requiresSubLedger}>{vendor?.requiresSubLedger ? "Sub Ledger" : "Sub Ledger (not needed)"}</FLabel>
-        <FCell colSpan={stacked ? 1 : 5} error={err("subLedgerId")}><SubLedgerPicker subs={subs} requiresSubLedger={!!vendor?.requiresSubLedger} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} readOnly={ro} error={err("subLedgerId")} contextKey={ctx} onChange={(c) => patch(c)} /></FCell>
-  </Fragment>);
-  const h8 = (<Fragment key="h8">
-        <FLabel>Agent</FLabel>
-        <FCell error={err("agentId")}><AgentPicker agents={agents} agentId={f.agentId} readOnly={ro} error={err("agentId")} contextKey={ctx} onChange={(c) => patch(c)} /></FCell>
-  </Fragment>);
-  const h9 = (<Fragment key="h9">
-        <FLabel>Invoice Type</FLabel>
-        <FCell><SelectInput name="invoiceType" label="Invoice Type" disabled={ro} value={f.invoiceType} onChange={(v) => { patch({ invoiceType: v as BForm["invoiceType"] }); p.onInvoiceType(v as BForm["invoiceType"]); }}><option value="LOCAL">Local</option><option value="IMPORT">Import</option></SelectInput></FCell>
-  </Fragment>);
-  const h10 = (<Fragment key="h10">
-        <FLabel>Purchase Type</FLabel>
-        <FCell><SelectInput name="purchaseType" label="Purchase Type" disabled={ro} value={f.purchaseType} onChange={(purchaseType) => { patch({ purchaseType, importCostForBillId: purchaseType.startsWith("SERVICE_PURCHASE_") ? f.importCostForBillId : "" }); clearError("importCostForBillId"); }}>{PURCHASE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</SelectInput></FCell>
-  </Fragment>);
-  const h11 = (<Fragment key="h11">
-        <FLabel>Due Days</FLabel>
-        <FCell error={err("dueDays")}>
-          <TextInput name="dueDays" label="Due Days" value={f.dueDays} readOnly={ro} error={err("dueDays")} max={4} onChange={(v) => {
-            if (!/^\d{0,4}$/.test(v)) return;
-            // typing the days sets the due date from the invoice date; a due date typed afterwards still wins
-            const due = v ? addDaysIso(f.invoiceDate, Number(v)) : "";
-            patch(due ? { dueDays: v, dueDate: due } : { dueDays: v });
-            if (due) clearError("dueDate");
-          }} />
-        </FCell>
-  </Fragment>);
-  const h12 = (<Fragment key="h12">
-        <DateCell name="dueDate" label="Due Date" value={f.dueDate} onChange={(v) => { patch({ dueDate: v }); clearError("dueDate"); }} calendar={cal} readOnly={ro} error={err("dueDate")} />
-  </Fragment>);
+  const field = (key: string, label: ReactNode, control: ReactNode, options: { error?: string; required?: boolean; title?: string; span?: number; tableSpan?: number; cellClass?: string } = {}) => {
+    const span = options.span ?? 1;
+    if (p.wide) return (
+      <div key={key} data-bill-header-field className="min-w-0" style={{ gridColumn: `span ${span} / span ${span}` }}>
+        <label title={options.title} className="mb-0.5 block truncate text-[11px] font-semibold leading-tight text-slate-600">{label}{options.required && <span className="text-rose-600"> *</span>}</label>
+        <div className={`${options.cellClass ?? ""} min-w-0 [&_.fld]:h-8`}>{control}</div>
+        {options.error && <p role="alert" className="text-[11px] leading-tight text-rose-700">{options.error}</p>}
+      </div>
+    );
+    return <Fragment key={key}><FLabel required={options.required} title={options.title}>{label}</FLabel><FCell error={options.error} colSpan={options.tableSpan ?? (stacked ? 1 : undefined)} className={options.cellClass}>{control}</FCell></Fragment>;
+  };
+  const h1 = field("h1", "Challan", ro || doc || service
+    ? <input disabled className="fld" value={links} placeholder="—" aria-label="Linked documents" />
+    : <Combobox fieldName="purchaseChallanId" placeholder="— (none)" value={f.purchaseChallanId} hasError={!!err("purchaseChallanId")} options={p.challanOptions} allowClear onChange={(value) => p.onPickChallan(value)} onCommit={(el, dir) => focusStep(el, dir)} />,
+  { title: "A confirmed challan fills the vendor and the lines", error: err("purchaseChallanId") });
+  const h2 = field("h2", "Invoice No", <NumberField bare label="Invoice No" documentType="PURCHASE_BILL" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.invoiceNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => patch(c)} />);
+  const h3 = field("h3", `Invoice Date (${cal})`, <DateInput fieldName="invoiceDate" value={f.invoiceDate} calendar={cal} hasError={!!err("invoiceDate")} onBlurField={() => {}} disabled={ro} onChange={(v) => {
+    const due = f.dueDays ? addDaysIso(v, Number(f.dueDays)) : "";
+    patch(due ? { invoiceDate: v, dueDate: due } : { invoiceDate: v });
+    clearError("invoiceDate");
+  }} />, { required: true, error: err("invoiceDate"), cellClass: DATE_CELL });
+  const h4 = field("h4", "Vendor Invoice No", <TextInput name="vendorInvoiceNo" label="Vendor Invoice No" value={f.vendorInvoiceNo} onChange={(v) => patch({ vendorInvoiceNo: v })} readOnly={ro} error={err("vendorInvoiceNo")} max={30} />, { error: err("vendorInvoiceNo") });
+  const h5 = field("h5", `Vendor Invoice Date (${cal})`, <DateInput fieldName="vendorInvoiceDate" value={f.vendorInvoiceDate} calendar={cal} hasError={!!err("vendorInvoiceDate")} onBlurField={() => {}} disabled={ro} onChange={(v) => { patch({ vendorInvoiceDate: v }); clearError("vendorInvoiceDate"); }} />, { error: err("vendorInvoiceDate"), cellClass: DATE_CELL });
+  const h6 = field("h6", "Vendor", <VendorPicker vendors={vendors} vendorGLId={f.vendorGLId} readOnly={ro} error={err("vendorGLId")} lockVendor={!!f.purchaseChallanId} contextKey={ctx}
+    onChange={(c) => {
+      const days = c.vendorGLId && c.vendorGLId !== f.vendorGLId && !f.dueDays ? lk.vendors.find((v) => String(v.id) === c.vendorGLId)?.paymentTermDays : null;
+      patch(days ? { ...c, dueDays: String(days), dueDate: f.invoiceDate ? addDaysIso(f.invoiceDate, days) : f.dueDate } : c);
+      clearError("vendorGLId", "subLedgerId");
+    }} />, { required: true, error: err("vendorGLId"), span: p.wide ? 2 : 1, tableSpan: stacked ? 1 : 3 });
+  const h7 = field("h7", vendor?.requiresSubLedger ? "Sub Ledger" : "Sub Ledger (not needed)", <SubLedgerPicker subs={subs} requiresSubLedger={!!vendor?.requiresSubLedger} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} readOnly={ro} error={err("subLedgerId")} contextKey={ctx} onChange={(c) => patch(c)} />, { required: !!vendor?.requiresSubLedger, error: err("subLedgerId"), span: p.wide ? 2 : 1, tableSpan: stacked ? 1 : 5 });
+  const h8 = field("h8", "Agent", <AgentPicker agents={agents} agentId={f.agentId} readOnly={ro} error={err("agentId")} contextKey={ctx} onChange={(c) => patch(c)} />, { error: err("agentId") });
+  const h9 = field("h9", "Invoice Type", <SelectInput name="invoiceType" label="Invoice Type" disabled={ro} value={f.invoiceType} onChange={(v) => { patch({ invoiceType: v as BForm["invoiceType"] }); p.onInvoiceType(v as BForm["invoiceType"]); }}><option value="LOCAL">Local</option><option value="IMPORT">Import</option></SelectInput>);
+  const h10 = field("h10", "Purchase Type", <SelectInput name="purchaseType" label="Purchase Type" disabled={ro} value={f.purchaseType} onChange={(purchaseType) => { patch({ purchaseType, importCostForBillId: purchaseType.startsWith("SERVICE_PURCHASE_") ? f.importCostForBillId : "" }); clearError("importCostForBillId"); }}>{PURCHASE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</SelectInput>);
+  const h11 = field("h11", "Due Days", <TextInput name="dueDays" label="Due Days" value={f.dueDays} readOnly={ro} error={err("dueDays")} max={4} onChange={(v) => {
+    if (!/^\d{0,4}$/.test(v)) return;
+    const due = v ? addDaysIso(f.invoiceDate, Number(v)) : "";
+    patch(due ? { dueDays: v, dueDate: due } : { dueDays: v });
+    if (due) clearError("dueDate");
+  }} />, { error: err("dueDays") });
+  const h12 = field("h12", `Due Date (${cal})`, <DateInput fieldName="dueDate" value={f.dueDate} calendar={cal} hasError={!!err("dueDate")} onBlurField={() => {}} disabled={ro} onChange={(v) => { patch({ dueDate: v }); clearError("dueDate"); }} />, { error: err("dueDate"), cellClass: DATE_CELL });
   const s1 = (<Fragment key="s1">
-          <FLabel>Cost of goods bill</FLabel>
+        <FLabel>Cost of goods bill</FLabel>
           <FCell error={err("importCostForBillId")}>
             <Combobox fieldName="importCostForBillId" placeholder="— (not linked: stays an expense)" value={f.importCostForBillId} hasError={!!err("importCostForBillId")} options={p.costTargets} disabled={ro} allowClear
               onChange={(value) => {
@@ -205,6 +173,31 @@ export function BillHeaderTable(p: BillHeaderProps) {
           <FLabel>Cost treatment</FLabel>
           <FCell><SelectInput name="importCostTreatment" label="Cost treatment" disabled={noCost} value={f.importCostTreatment} onChange={(v) => patch({ importCostTreatment: v as BForm["importCostTreatment"] })}><option value="CIF">CIF input (pre-customs)</option><option value="LANDED_ONLY">Landed only (post-CIF)</option></SelectInput></FCell>
   </Fragment>);
+  const fields = [h1,h2,h3,h4,h5,h6,h7,h8,h9,h10,h11,h12];
+  const serviceFields = service && (
+    <>
+      <div data-bill-header-field className="min-w-0" style={{ gridColumn: "span 4 / span 4" }}>
+        <label className="mb-0.5 block text-[11px] font-semibold text-slate-600">Cost of goods bill</label>
+        <Combobox fieldName="importCostForBillId" placeholder="— (not linked: stays an expense)" value={f.importCostForBillId} hasError={!!err("importCostForBillId")} options={p.costTargets} disabled={ro} allowClear
+          onChange={(value) => { const target = p.mains.find((x) => String(x.id) === value); patch({ importCostForBillId: value, ...(value && target && target.invoiceType !== "IMPORT" ? { importCostTreatment: "LANDED_ONLY" as const } : {}) }); clearError("importCostForBillId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
+        {err("importCostForBillId") && <p role="alert" className="text-[11px] text-rose-700">{err("importCostForBillId")}</p>}
+      </div>
+      <div className="min-w-0" style={{ gridColumn: "span 3 / span 3" }}>
+        <label className="mb-0.5 block text-[11px] font-semibold text-slate-600">Source allocation basis</label>
+        <SelectInput name="importCostAllocationBasis" label="Source allocation basis" disabled={noCost} value={f.importCostAllocationBasis} onChange={(v) => patch({ importCostAllocationBasis: v as BForm["importCostAllocationBasis"] })}><option value="VALUE">By goods value</option><option value="QUANTITY">By quantity</option></SelectInput>
+      </div>
+      <div className="min-w-0" style={{ gridColumn: "span 3 / span 3" }}>
+        <label className="mb-0.5 block text-[11px] font-semibold text-slate-600">Cost treatment</label>
+        <SelectInput name="importCostTreatment" label="Cost treatment" disabled={noCost} value={f.importCostTreatment} onChange={(v) => patch({ importCostTreatment: v as BForm["importCostTreatment"] })}><option value="CIF">CIF input (pre-customs)</option><option value="LANDED_ONLY">Landed only (post-CIF)</option></SelectInput>
+      </div>
+    </>
+  );
+  if (p.wide) return (
+    <div data-bill-header className="lg-scroll min-w-0 overflow-auto border border-slate-200 bg-white [scrollbar-gutter:stable]">
+      <div className="grid min-w-[1080px] grid-cols-10 gap-x-2 gap-y-1.5 p-2">{fields}{serviceFields}</div>
+      {p.duplicate && <p role="alert" className="border-t border-amber-200 bg-amber-50 px-2 py-1 text-[12px] text-amber-900">Vendor invoice <b>{f.vendorInvoiceNo.trim()}</b> is already on bill <b className="font-mono">{p.duplicate.invoiceNumber}</b>. A repeated vendor invoice number is refused on save.</p>}
+    </div>
+  );
   return (
     <FormTable label="Bill header" pairs={stacked ? 1 : 5}>
       {[[h1,h2,h3,h4,h5],[h6,h7],[h8,h9,h10,h11,h12]].map((r, i) => (stacked ? r.map((x, j) => <tr key={`${i}.${j}`}>{x}</tr>) : <tr key={i}>{r}</tr>))}

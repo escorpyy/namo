@@ -17,6 +17,7 @@ import {
 } from "../../lib/purchaseForm";
 import { parseDec } from "../../../shared/decimal";
 import { isForeign, nprRate } from "../../lib/foreignRate";
+import { adToBs } from "../../lib/nepaliDate";
 import { previewPurchase } from "../../../shared/purchase-preview";
 import type { PurchaseScreenProps } from "./PurchaseOrderScreen";
 import { useDocScreen, type DocConfig, type DocSnapshot, type Errors } from "./useDocScreen";
@@ -286,8 +287,10 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   // side panels: the header folds to the left edge; the vendor and stock panels to the right edge (the right ones start folded on a narrow window)
   const narrow = typeof window !== "undefined" && window.innerWidth < 1400;
   const [hdrOff, setHdrOff] = useState(false);
+  const [headerFlowPassed, setHeaderFlowPassed] = useState(false);
   const [vendOff, setVendOff] = useRail("bill.vendor", narrow);
   const [stockOff, setStockOff] = useRail("bill.stock", narrow);
+  useEffect(() => { setHdrOff(!!doc); setHeaderFlowPassed(!!doc); }, [doc?.id]);
   const [focusLine, setFocusLine] = useState(0); // the line the cursor is on drives the stock panel
   const focusProduct = f?.lines[focusLine]?.productId ?? "";
   const productInfo = useProductInfo(p.companyId, p.branchId, focusProduct);
@@ -297,6 +300,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
       const set = e.code === "KeyH" ? setHdrOff : e.code === "KeyV" ? setVendOff : e.code === "KeyS" ? setStockOff : null;
       if (!set) return;
       e.preventDefault();
+      if (e.code === "KeyH") setHeaderFlowPassed(true);
       set((v) => !v);
     };
     window.addEventListener("keydown", onKey);
@@ -356,6 +360,25 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   // "Header completed": nothing outside the lines, terms and import details is still failing validation.
   const headerDone = Object.entries(cfg.validate(f, lk)).every(([key, message]) => !message || /^(L\.|T\.|imp\.)/.test(key) || key === "lines" || key === "terms");
   const autoImport = f.invoiceType === "IMPORT" && !ro && headerDone && !importAutoOpened.current && importFilled(f.imp) === 0;
+  const onFormKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (e.key === "Enter" && !e.shiftKey && headerDone && target.closest("[data-bill-header-field]")) {
+      const headerFields = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("[data-bill-header-field]"));
+      const usable = (field: HTMLElement) => Array.from(field.querySelectorAll<HTMLElement>("input, select, textarea, button, [tabindex]:not([tabindex='-1'])"))
+        .some((el) => !("disabled" in el && (el as HTMLInputElement).disabled) && el.getClientRects().length > 0);
+      const last = [...headerFields].reverse().find(usable);
+      if (target.closest("[data-bill-header-field]") === last) {
+        e.preventDefault();
+        e.stopPropagation();
+        setHeaderFlowPassed(true);
+        setHdrOff(true);
+        const selector = autoImport ? '[data-nav="import-details"]' : '[data-field="L.0.p"]';
+        window.setTimeout(() => document.querySelector<HTMLElement>(`${selector}:not(:disabled)`)?.focus(), 50);
+        return;
+      }
+    }
+    formEnterKey(e);
+  };
   const closeImport = () => {
     const auto = importDlg === "auto";
     setImportDlg(null);
@@ -368,27 +391,38 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
       <section data-purchase-document className="flex min-h-0 min-w-0 flex-1 flex-col">
         {notice && <div className="shrink-0 px-5 pt-3">{notice}</div>}
 
-        {/* Header folds to the left edge; lines, terms and totals in the middle; vendor and stock panels fold to the right edge. The middle scrolls only when the window is too short for the lines' minimum height. */}
-        <div data-zone="form" onKeyDown={formEnterKey} className="flex min-h-0 flex-1 gap-3 px-5 py-3">
-          <RailPanel side="left" label="Bill header" collapsed={hdrOff} onToggle={() => setHdrOff((v) => !v)} width={380} shortcut="Alt+Shift+H">
-            <div className="space-y-2 p-2">
-          <div className="shrink-0">
-            <BillHeaderTable stacked f={f} lk={lk} doc={doc} readOnly={ro} companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} calendar={p.calendar}
-              err={s.err} patch={s.patch} clearError={s.clearError} costTargets={sourceTargetOpts} mains={mains} duplicate={vendorBills.duplicate}
-              onInvoiceType={(type) => { if (type !== "IMPORT") setImportDlg(null); }} challanOptions={challanOptions} onPickChallan={pickChallan} />
-          </div>
-          {f.invoiceType === "IMPORT" && (
-            <div className="shrink-0">
-              <ImportDetailsButton imp={f.imp} readOnly={ro} autoOpen={autoImport} onOpen={(auto) => { importAutoOpened.current = true; setImportDlg(auto ? "auto" : "manual"); }} />
+        <div data-zone="form" onKeyDown={onFormKeyDown} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {hdrOff ? (
+            <div className="flex min-h-9 shrink-0 items-center gap-2 overflow-hidden border-b border-slate-200 bg-slate-50 px-3 text-left text-[12px] text-slate-600">
+              <button type="button" data-nav="bill-header-summary" aria-expanded={false} onClick={() => setHdrOff(false)}
+                className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left hover:text-cobalt-800">
+                <span className="shrink-0 font-semibold text-ink">{vendor?.name ?? "Vendor"}</span><span aria-hidden>·</span>
+                <span className="truncate">Inv {doc ? String(doc.invoiceNumber) : f.docNumber || "—"}</span><span aria-hidden>·</span>
+                <span className="shrink-0">{p.calendar === "BS" ? (adToBs(f.invoiceDate) ?? f.invoiceDate) || "—" : f.invoiceDate || "—"}</span><span aria-hidden>·</span>
+                <span className="shrink-0">{f.invoiceType === "IMPORT" ? "Import" : "Local"}</span><span aria-hidden>·</span>
+                <span className="shrink-0">Due {f.dueDate ? (p.calendar === "BS" ? adToBs(f.dueDate) ?? f.dueDate : f.dueDate) : f.dueDays ? `${f.dueDays} days` : "—"}</span>
+              </button>
+              {f.invoiceType === "IMPORT" && <ImportDetailsButton imp={f.imp} readOnly={ro} autoOpen={autoImport} onOpen={(auto) => { importAutoOpened.current = true; setImportDlg(auto ? "auto" : "manual"); }} />}
+              <span className="shrink-0 text-[11px] text-cobalt-700">Alt+Shift+H</span>
+            </div>
+          ) : (
+            <div className="shrink-0 border-b border-slate-200 bg-white">
+              <BillHeaderTable wide f={f} lk={lk} doc={doc} readOnly={ro} companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} calendar={p.calendar}
+                err={s.err} patch={s.patch} clearError={s.clearError} costTargets={sourceTargetOpts} mains={mains} duplicate={vendorBills.duplicate}
+                onInvoiceType={(type) => { if (type !== "IMPORT") setImportDlg(null); }} challanOptions={challanOptions} onPickChallan={pickChallan} />
+              {f.invoiceType === "IMPORT" && (
+                <div className="shrink-0 border-t border-slate-100 px-2 py-1">
+                  <ImportDetailsButton imp={f.imp} readOnly={ro} autoOpen={autoImport} onOpen={(auto) => { importAutoOpened.current = true; setImportDlg(auto ? "auto" : "manual"); }} />
+                </div>
+              )}
             </div>
           )}
-            </div>
-          </RailPanel>
 
-          <div className="lg-scroll flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-auto"
+          {headerFlowPassed && <div className="flex min-h-0 min-w-0 flex-1"
             onFocusCapture={(e) => { const row = (e.target as HTMLElement).closest<HTMLElement>('[data-grid="lines"] [data-row]'); if (row?.dataset.row !== undefined) setFocusLine(Number(row.dataset.row)); }}>
+          <div className="lg-scroll flex min-h-0 min-w-0 flex-1 flex-col overflow-auto [scrollbar-gutter:stable]">
           {/* the lines take whatever height is left */}
-          <section aria-label="Lines" className="flex min-h-[240px] flex-1 flex-col [&>.lg-card]:min-h-0 [&>.lg-card]:flex-1">
+          <section aria-label="Lines" className="flex min-h-[240px] flex-1 flex-col [&>.lg-card]:min-h-0 [&>.lg-card]:flex-1 [&>.lg-card]:rounded-none">
             <LinesGrid fill kind="bill" currency={foreignOn ? f.imp.currencyCode.trim().toUpperCase() : undefined} lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
               onOpenTerms={(index, continueAfterApply) => T.open({ scope: "line", lineNumber: T.lineNumberAt(index), lineIndex: index, continueAfterApply })} termSummary={T.lineSummary} />
           </section>
@@ -425,6 +459,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
               <ProductInfoPanel lookups={lk} productId={focusProduct} info={productInfo} calendar={p.calendar} />
             </RailPanel>
           </div>
+          </div>}
         </div>
 
         <footer className="tape flex shrink-0 flex-wrap items-center justify-end gap-2 px-5 py-3">
