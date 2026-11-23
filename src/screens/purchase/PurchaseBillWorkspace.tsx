@@ -17,7 +17,7 @@ import type { DocSnapshot } from "./useDocScreen";
 // The Purchase Bill screen: a tab strip with the bill list first and one tab per bill being entered or viewed.
 // Only the open tab is on screen; the others keep their document in a snapshot and come back exactly as they were left.
 
-interface EntryTab { id: number; docId: number | null; title: string; dirty: boolean; initialForm?: BForm; fromChallan: { id: number; n: number } | null }
+interface EntryTab { id: number; docId: number | null; title: string; dirty: boolean; state: string | null; initialForm?: BForm; fromChallan: { id: number; n: number } | null }
 type Active = "list" | number;
 interface TabSnap { hook: MutableRefObject<DocSnapshot<BForm> | null> }
 
@@ -93,7 +93,7 @@ export default function PurchaseBillWorkspace(p: PurchaseScreenProps & { fromCha
 
   const addTab = useCallback((t: Pick<EntryTab, "docId" | "fromChallan"> & Partial<Pick<EntryTab, "title" | "initialForm">>) => {
     const id = nextId.current++;
-    setTabs((cur) => [...cur, { id, docId: t.docId, title: t.title ?? "New bill", dirty: false, initialForm: t.initialForm, fromChallan: t.fromChallan }]);
+    setTabs((cur) => [...cur, { id, docId: t.docId, title: t.title ?? "New bill", dirty: false, state: null, initialForm: t.initialForm, fromChallan: t.fromChallan }]);
     setActive(id);
   }, []);
   const openNew = useCallback((prefill?: BForm) => addTab({ docId: null, fromChallan: null, initialForm: prefill }), [addTab]);
@@ -111,11 +111,11 @@ export default function PurchaseBillWorkspace(p: PurchaseScreenProps & { fromCha
     setTabs(list.filter((t) => t.id !== id));
     if (activeRef.current === id) setActive(list[at - 1]?.id ?? list[at + 1]?.id ?? "list");
   }, [dlg]);
-  const onMeta = useCallback((id: number, meta: { title: string; dirty: boolean; docId: number | null }) => {
+  const onMeta = useCallback((id: number, meta: { title: string; dirty: boolean; docId: number | null; state: string | null }) => {
     setTabs((cur) => {
       let changed = false;
       const next = cur.map((t) => {
-        if (t.id !== id || (t.title === meta.title && t.dirty === meta.dirty && t.docId === meta.docId)) return t;
+        if (t.id !== id || (t.title === meta.title && t.dirty === meta.dirty && t.docId === meta.docId && t.state === meta.state)) return t;
         changed = true;
         return { ...t, ...meta };
       });
@@ -188,7 +188,8 @@ export default function PurchaseBillWorkspace(p: PurchaseScreenProps & { fromCha
   return (
     <main className="ledger flex min-h-0 min-w-0 flex-1 flex-col">
       <WorkspaceTabs ariaLabel="Purchase bill tabs" listLabel="Bill list" listCount={total} active={active} onList={() => setActive("list")}
-        tabs={tabs} onSelect={setActive} onClose={(id) => closeTab(id)} onNew={() => openNew()} newTitle="New bill in a new tab (F3)" />
+        tabs={tabs} onSelect={setActive} onClose={(id) => closeTab(id)} onNew={() => openNew()} newTitle="New bill in a new tab (F3)"
+        rightContent={activeTab?.state ? <Pill text={activeTab.state} tone={STATE_TONE[activeTab.state]} /> : null} />
 
       {loadError ? <p className="p-5 text-rose-700">{loadError}</p>
         : !lookups ? <p className="p-5 text-slate-500">Loading…</p>

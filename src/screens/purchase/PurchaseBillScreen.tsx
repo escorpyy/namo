@@ -4,7 +4,7 @@ import { purchaseApi, type PDoc, type PListRow, type PLookups } from "../../api"
 import { type ComboOption } from "../../components/Combobox";
 import { Dialog, useDialog } from "../../components/Dialog";
 import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
-import { COMMON_HELP, DocHeader, HINTS, Pill, formEnterKey, money } from "../../components/purchase/Bits";
+import { COMMON_HELP, HINTS, formEnterKey, money } from "../../components/purchase/Bits";
 import { BillHeaderTable, BillRemarksTable, HeaderTermsTable, ImportDetailsButton, ImportDetailsDialog, IMPORT_FIELDS, importFilled, LinkedCostsTable, VendorBillsTable, useVendorBills } from "../../components/purchase/BillTables";
 import { LinesGrid } from "../../components/purchase/LinesGrid";
 import { ProductInfoPanel, useProductInfo } from "../../components/purchase/ProductInfo";
@@ -52,7 +52,7 @@ export interface BillEntryProps extends PurchaseScreenProps {
   initialForm?: BForm;
   fromChallan: { id: number; n: number } | null;
   hookSnapRef: MutableRefObject<DocSnapshot<BForm> | null>;
-  onMeta: (tabId: number, meta: { title: string; dirty: boolean; docId: number | null }) => void;
+  onMeta: (tabId: number, meta: { title: string; dirty: boolean; docId: number | null; state: string | null }) => void;
   onNew: (prefill?: BForm) => void;
   onClose: (tabId: number) => void;
   onListChanged: () => void;
@@ -182,7 +182,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   }, [T.isOpen, f, ro]);
 
   // ---- tab state: title / unsaved mark for the tab strip (Alt+, / Alt+. move between tabs, Alt+W closes this one; the workspace handles those) ----
-  useEffect(() => { p.onMeta(p.tabId, { title: doc ? String(doc.invoiceNumber) : "New bill", dirty: s.dirty, docId: doc?.id ?? null }); }, [doc?.invoiceNumber, doc?.id, s.dirty, p.tabId]);
+  useEffect(() => { p.onMeta(p.tabId, { title: doc ? String(doc.invoiceNumber) : "New bill", dirty: s.dirty, docId: doc?.id ?? null, state: doc?.state ?? null }); }, [doc?.invoiceNumber, doc?.id, doc?.state, s.dirty, p.tabId]);
   // A save that found a problem in the import details opens their dialog and puts the cursor on the field; every other field is already on screen
   // and useDocScreen moves the cursor to it.
   useEffect(() => {
@@ -366,9 +366,6 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   return (
     <>
       <section data-purchase-document className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <DocHeader title="Purchase bill" number={doc ? String(doc.invoiceNumber) : undefined} pill={state ? <Pill text={state} tone={STATE_TONE[state]} /> : undefined}
-          branchName={p.branchName} fyCode={p.fyCode} dirty={s.dirty}
-          right={<span className="text-[12px] text-slate-500">F1 help</span>} />
         {notice && <div className="shrink-0 px-5 pt-3">{notice}</div>}
 
         {/* Header folds to the left edge; lines, terms and totals in the middle; vendor and stock panels fold to the right edge. The middle scrolls only when the window is too short for the lines' minimum height. */}

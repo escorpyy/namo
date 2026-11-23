@@ -1,11 +1,13 @@
 import { List, Plus, X } from "lucide-react";
+import type { ReactNode } from "react";
 
 export interface WorkspaceTab { id: number; title: string; dirty: boolean }
 
 // The strip across the top of a purchase workspace: the document list first, then one tab for every document being entered or viewed.
-export function WorkspaceTabs({ ariaLabel, listLabel, listCount, active, onList, tabs, onSelect, onClose, onNew, newTitle }: {
+export function WorkspaceTabs({ ariaLabel, listLabel, listCount, active, onList, tabs, onSelect, onClose, onNew, newTitle, rightContent }: {
   ariaLabel: string; listLabel: string; listCount: number; active: "list" | number; onList: () => void;
   tabs: WorkspaceTab[]; onSelect: (id: number) => void; onClose: (id: number) => void; onNew: () => void; newTitle: string;
+  rightContent?: ReactNode;
 }) {
   const base = "relative flex h-9 items-center gap-2 rounded-t-lg border border-b-0 px-3.5 text-[13px] transition-colors";
   const tone = (selected: boolean) => selected
@@ -31,6 +33,7 @@ export function WorkspaceTabs({ ariaLabel, listLabel, listCount, active, onList,
       })}
       <button type="button" onClick={onNew} title={newTitle} aria-label={newTitle}
         className="mb-1 ml-1 grid h-7 w-7 place-items-center rounded-md text-slate-500 hover:bg-white hover:text-cobalt-700"><Plus size={16} /></button>
+      {rightContent && <><span className="min-w-2 flex-1" />{rightContent}</>}
     </div>
   );
 }
