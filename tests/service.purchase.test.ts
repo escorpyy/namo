@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { DB_READY, uniq } from "./helpers";
+import { stockBalance } from "../server/services/stockLedger";
 
 // The purchase service layer end to end: order -> challan -> bill -> journal, with the rules the database cannot
 // express (pricing, landed cost, quantity limits, balanced posting, reversal). Every test runs inside one transaction
@@ -408,6 +409,37 @@ describe.skipIf(!DB_READY)("purchase service layer", () => {
         await rejects(tx, svc.postPurchaseBill(s.id, ACTOR, { tx }), 409, /customs declaration number/);
         await svc.savePurchaseBill(billIn(W, { id: s.id, invoiceType: "IMPORT", importDetail: { customsDeclarationNo: "CD-55", customsDeclarationDate: "2025-10-12" } }), ACTOR, { tx });
         expect(await svc.postPurchaseBill(s.id, ACTOR, { tx })).toMatchObject({ isPosted: true });
+      });
+    });
+
+    it("stock: a challan brings goods in once, a bill with no challan brings its own, and reversing a bill takes back only what it brought", async () => {
+      await run(async (tx, W) => {
+        const on = async (productId: number) => Number((await stockBalance(tx, { companyId: W.co, productId })).reduce((a, r) => a + Number(r.qty), 0));
+        const ch = await svc.savePurchaseChallan(challanIn(W, { lines: [{ productId: W.rice.id, qty: 10 }, { productId: W.oil.id, qty: 3 }] }), ACTOR, { tx });
+        expect(await on(W.rice.id)).toBe(0); // a draft challan is not stock
+        await svc.confirmPurchaseChallan(ch.id, ACTOR, { tx });
+        expect([await on(W.rice.id), await on(W.oil.id)]).toEqual([10, 3]);
+
+        // the bill that bills the challan does not bring the goods in a second time
+        const [cl1] = await clines(tx, ch.id);
+        const linked = await svc.savePurchaseBill(billIn(W, { purchaseChallanId: ch.id, lines: [{ productId: W.rice.id, qty: 10, rate: 100, challanLineId: cl1.id }] }), ACTOR, { tx });
+        await svc.postPurchaseBill(linked.id, ACTOR, { tx });
+        expect(await on(W.rice.id)).toBe(10);
+
+        // a bill with no challan is the receipt
+        const direct = await svc.savePurchaseBill(billIn(W, { lines: [{ productId: W.rice.id, qty: 4, rate: 100 }] }), ACTOR, { tx });
+        expect(await on(W.rice.id)).toBe(10); // still a draft
+        await svc.postPurchaseBill(direct.id, ACTOR, { tx });
+        expect(await on(W.rice.id)).toBe(14);
+
+        // reversing it takes its 4 back; reversing the challan-linked bill leaves the received 10
+        await svc.reversePurchaseBill(direct.id, ACTOR, { tx, date: "2025-10-20", reason: "stock check" });
+        expect(await on(W.rice.id)).toBe(10);
+        await svc.reversePurchaseBill(linked.id, ACTOR, { tx, date: "2025-10-20", reason: "stock check" });
+        expect(await on(W.rice.id)).toBe(10);
+        expect(await on(W.oil.id)).toBe(3);
+        // the ledger is append-only
+        await expect(tx.execute(sql`update "StockMovement" set qty = 1 where "productId" = ${W.rice.id}`)).rejects.toThrow();
       });
     });
 

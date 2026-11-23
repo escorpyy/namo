@@ -11,6 +11,7 @@ import { landed } from "./landed";
 import { importCostBasis } from "./importCostBasis";
 import { resolveLines, type LineInput, type ResolvedLine } from "./lines";
 import { ZERO, fmt, mul, roundTo, toMicro, type Micro } from "./money";
+import { recordMovements, reverseMovements } from "../stockLedger";
 import { billedByChallanLine, billedByOrderLine, pending, receivedByOrderLine, withTolerance } from "./quantities";
 import { assertGlEntryAllowed } from "../glEntryControl";
 
@@ -475,6 +476,9 @@ export function postPurchaseBill(id: number, actor: Actor, opts: Opts & QtyOpts 
     const jvId = await writeVoucher(tx, { companyId: bill.companyId, branchId: bill.branchId, voucherNumber: voucherNumberFor(bill), voucherDate: bill.invoiceDate, fiscalYear: bill.fiscalYear, remarks: `Purchase bill ${bill.invoiceNumber}`, reversalOfId: null }, jv, actor);
     await tx.update(S.purchaseBill).set({ isPosted: true, postedAt: new Date(), postedBy: actor.userId, journalVoucherId: jvId, updatedAt: new Date() }).where(eq(S.purchaseBill.id, id));
 
+    // A bill is also the receipt for lines no challan received (a challan-linked line came into stock when the challan was confirmed).
+    if (!isAdditional && !bill.importCostForBillId) await recordMovements(tx, { companyId: bill.companyId, branchId: bill.branchId, date: bill.invoiceDate, source: "PURCHASE_BILL", sourceId: id, direction: "IN" }, dbLines.filter((l) => !l.challanLineId));
+
     // Now that this bill stands, re-value the lines it allocates to (its own, or the main bill's).
     const targets = isAdditional ? await tx.select({ id: S.purchaseBillLine.id }).from(S.purchaseBillLine).where(eq(S.purchaseBillLine.purchaseBillId, bill.mainBillId!)) : dbLines;
     await recomputeLanded(tx, targets.map((l) => l.id));
@@ -580,6 +584,8 @@ export function reversePurchaseBill(id: number, actor: Actor, opts: Opts & LockO
         lineMap.set(oldId, nl.id);
       }
     });
+    // goods this bill brought into stock go out again (lines that a challan received stay in stock: the goods are still here)
+    await reverseMovements(tx, { source: "PURCHASE_BILL", originalSourceId: orig.id, newSourceId: rb.id, date }, lineMap);
     const oterms = await tx.select().from(S.purchaseDocumentTerm).where(and(eq(S.purchaseDocumentTerm.documentType, "PURCHASE_BILL"), eq(S.purchaseDocumentTerm.documentId, orig.id)));
     await withInitialPostedChildInsert(tx, "PurchaseDocumentTerm", rb.id, async () => {
       for (const t of oterms) {

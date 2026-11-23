@@ -302,6 +302,13 @@
       "when": 1795390000000,
       "tag": "0042_purchase_line_foreign",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1795400000000,
+      "tag": "0043_stock_movement",
+      "breakpoints": true
     }
   ]
 }

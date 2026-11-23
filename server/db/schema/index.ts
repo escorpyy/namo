@@ -13,6 +13,7 @@ export * from "./salesInvoice";
 export * from "./billSettlement";
 export * from "./advanceApplication";
 export * from "./ledgerReassignJob";
+export * from "./stockMovement";
 export * from "./importAssessment";
 export * from "./periodLock";
 export * from "./codeRule";

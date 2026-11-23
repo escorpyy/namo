@@ -5,13 +5,13 @@ import { type Actor, type Opts, type Tx, assertBranch, assertVendorLedger, inAct
 import { numberForSave } from "../numberSeries";
 import { resolveLines, type LineInput } from "./lines";
 import { ZERO, fmt, toMicro, type Micro } from "./money";
+import { recordMovements } from "../stockLedger";
 import { billedByChallanLine, pending, receivedByOrderLine, withTolerance } from "./quantities";
 
 // PURCHASE CHALLAN (goods receipt). Posts nothing to the ledger; the accounting happens when a bill closes it.
 //   draft ──confirm──▶ confirmed (goods are in; the challan is now immutable)
 //
-// NOTE: the schema has no stock-movement table yet. Confirming validates the receipt and locks it; a confirmed
-// challan's lines ARE the receipt records a stock ledger will be built from. Nothing is written to stock here.
+// Confirming validates the receipt, locks it, and brings the goods into stock (one StockMovement IN per stock line).
 
 export type ChallanLineInput = LineInput & {
   purchaseOrderLineId?: number | null; // the order line this receipt fulfils
@@ -153,6 +153,7 @@ export function confirmPurchaseChallan(id: number, actor: Actor, opts: Opts & { 
     }
 
     await tx.update(S.purchaseChallan).set({ isConfirmed: true, confirmedAt: new Date(), confirmedBy: actor.userId, updatedAt: new Date() }).where(eq(S.purchaseChallan.id, id));
+    await recordMovements(tx, { companyId: c.companyId, branchId: c.branchId, date: c.challanDate, source: "PURCHASE_CHALLAN", sourceId: id, direction: "IN" }, lines);
     return { id, isConfirmed: true as const };
   });
 }

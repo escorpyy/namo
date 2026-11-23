@@ -68,6 +68,9 @@ export const productTypeEnum = pgEnum("ProductType", [
   "BUNDLE",
 ]);
 
+// Which document a stock movement comes from. Purchase documents write IN rows, sales documents (later) write OUT rows.
+export const stockSourceTypeEnum = pgEnum("StockSourceType", ["PURCHASE_CHALLAN", "PURCHASE_BILL", "SALES_CHALLAN", "SALES_INVOICE"]);
+
 export const valuationMethodEnum = pgEnum("ValuationMethod", [
   "FIFO",
   "WEIGHTED_AVERAGE",
