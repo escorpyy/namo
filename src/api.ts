@@ -262,6 +262,12 @@ export const journalApi = {
     req<JWrite>(`/api/journal-vouchers/${id}/${action}?companyId=${companyId}`, { method: "POST", body: JSON.stringify(body) }),
 };
 
+export interface ProductPurchaseRow { billId: number; invoiceNumber: string; invoiceDate: string | null; vendorGLId: number; qty: string; rate: string }
+export interface StockBalanceRow { productId: number; code: string; description: string; locationId: number | null; batchNo: string | null; expiryDate: string | null; qty: string }
+export const stockApi = {
+  balance: (p: { companyId: number; branchId?: number; productId?: number }) => req<StockBalanceRow[]>(`/api/stock/balance?${qstr(p)}`),
+};
+
 export const purchaseApi = {
   lookups: (companyId: number) => req<PLookups>(`/api/purchase/lookups?companyId=${companyId}`),
   list: (kind: PurchaseKind, p: { companyId: number; branchId: number; fiscalYear: string; status?: string; search?: string; vendorGLId?: number }) =>
@@ -274,6 +280,7 @@ export const purchaseApi = {
     req<{ result: { id: number } }>(`/api/purchase/${kind}/${id}?${qstr({ companyId, userId })}`, { method: "DELETE" }),
   action: (kind: PurchaseKind, id: number, companyId: number, action: string, body: Record<string, unknown> = {}) =>
     req<PWrite>(`/api/purchase/${kind}/${id}/${action}?companyId=${companyId}`, { method: "POST", body: JSON.stringify(body) }),
+  productHistory: (companyId: number, productId: number, limit = 5) => req<ProductPurchaseRow[]>(`/api/purchase/product-history?${qstr({ companyId, productId, limit })}`),
   billFromChallan: (companyId: number, challanId: number) => req<Record<string, any>>(`/api/purchase/bills/from-challan/${challanId}?companyId=${companyId}`),
 };
 

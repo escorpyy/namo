@@ -12,6 +12,7 @@ import { whole, optWhole, q, companyOf, idOf, lockOverrideOf, actorOf, pick, row
 // owns every business rule (pricing, quantity limits, posting, reversal). Nothing is calculated here.
 //
 //   GET    /api/purchase/lookups?companyId=
+//   GET    /api/purchase/product-history?companyId=&productId=[&limit=]   latest posted purchases of one product
 //   GET    /api/purchase/{orders|challans|bills}?companyId=&branchId=&fiscalYear=&status=&vendorGLId=&search=&limit=
 //   GET    /api/purchase/{orders|challans|bills}/:id?companyId=
 //   POST   /api/purchase/{orders|challans|bills}                 body: companyId, branchId, ...fields, lines, terms
@@ -57,6 +58,11 @@ async function owned(table: "order" | "challan" | "bill", id: number, companyId:
   if (!r) throw new HttpError(404, `Purchase ${table} not found.`);
   return r;
 }
+
+// ---------- last purchases of one product (the stock panel of the bill screen) ----------
+purchaseRouter.get("/product-history", wrap(async (req, res) => {
+  res.json(await P.productPurchaseHistory(companyOf(req), whole(q(req, "productId"), "productId"), optWhole(q(req, "limit"), "limit")));
+}));
 
 // ---------- lookups ----------
 purchaseRouter.get("/lookups", wrap(async (req, res) => {

@@ -7,6 +7,8 @@ import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
 import { COMMON_HELP, DocHeader, HINTS, Pill, formEnterKey, money } from "../../components/purchase/Bits";
 import { BillHeaderTable, BillRemarksTable, HeaderTermsTable, ImportDetailsButton, ImportDetailsDialog, IMPORT_FIELDS, importFilled, LinkedCostsTable, VendorBillsTable, useVendorBills } from "../../components/purchase/BillTables";
 import { LinesGrid } from "../../components/purchase/LinesGrid";
+import { ProductInfoPanel, useProductInfo } from "../../components/purchase/ProductInfo";
+import { RailPanel, useRail } from "../../components/purchase/Rails";
 import { useTermsDialog } from "../../components/purchase/TermsDialog";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
 import {
@@ -30,6 +32,7 @@ const HELP: [string, string][] = [
   ["Alt+, / Alt+.", "Previous / next tab"],
   ["Alt+W", "Close this tab"],
   ["Alt+1 / Alt+2", "Sidebar / the form"],
+  ["Alt+Shift+H / V / S", "Fold or open the header / vendor / stock panel"],
   ["Post", "Writes the journal voucher; a posted bill cannot be edited, only reversed"],
 ];
 const BILL_HINTS = HINTS.filter((h) => !h.startsWith("F4"));
@@ -279,6 +282,31 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   // the vendor's other bills: shown in a table, and the source of the "vendor invoice number already used" warning in the header
   const vendorBills = useVendorBills(p.companyId, p.branchId, f?.vendorGLId ?? "", doc?.id, f?.vendorInvoiceNo ?? "");
 
+  const vendor = lk?.vendors.find((v) => String(v.id) === (f?.vendorGLId ?? ""));
+  // side panels: the header folds to the left edge; the vendor and stock panels to the right edge (the right ones start folded on a narrow window)
+  const narrow = typeof window !== "undefined" && window.innerWidth < 1400;
+  const [hdrOff, setHdrOff] = useState(false);
+  const [vendOff, setVendOff] = useRail("bill.vendor", narrow);
+  const [stockOff, setStockOff] = useRail("bill.stock", narrow);
+  const [focusLine, setFocusLine] = useState(0); // the line the cursor is on drives the stock panel
+  const focusProduct = f?.lines[focusLine]?.productId ?? "";
+  const productInfo = useProductInfo(p.companyId, p.branchId, focusProduct);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || !e.shiftKey || e.ctrlKey || e.metaKey) return;
+      const set = e.code === "KeyH" ? setHdrOff : e.code === "KeyV" ? setVendOff : e.code === "KeyS" ? setStockOff : null;
+      if (!set) return;
+      e.preventDefault();
+      set((v) => !v);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [setVendOff, setStockOff]);
+  // a save that found a problem in a header field opens the header again, so the field can be seen and fixed
+  useEffect(() => {
+    if (Object.entries(s.errors).some(([key, message]) => message && !/^(L\.|T\.|imp\.)/.test(key) && key !== "lines" && key !== "terms")) setHdrOff(false);
+  }, [s.errors]);
+
   const state = doc?.state as string | undefined;
   const reversible = !!doc && state === "POSTED";
   // A new draft from this bill (any state): same vendor, lines and charges, dated today, without the vendor invoice no., links or declaration no.
@@ -343,10 +371,12 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
           right={<span className="text-[12px] text-slate-500">F1 help</span>} />
         {notice && <div className="shrink-0 px-5 pt-3">{notice}</div>}
 
-        {/* One screen of tables: header, (import details,) lines, then terms | vendor's bills | totals. It scrolls only when the window is too short for the lines' minimum height. */}
-        <div data-zone="form" onKeyDown={formEnterKey} className="lg-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-auto px-5 py-3">
+        {/* Header folds to the left edge; lines, terms and totals in the middle; vendor and stock panels fold to the right edge. The middle scrolls only when the window is too short for the lines' minimum height. */}
+        <div data-zone="form" onKeyDown={formEnterKey} className="flex min-h-0 flex-1 gap-3 px-5 py-3">
+          <RailPanel side="left" label="Bill header" collapsed={hdrOff} onToggle={() => setHdrOff((v) => !v)} width={380} shortcut="Alt+Shift+H">
+            <div className="space-y-2 p-2">
           <div className="shrink-0">
-            <BillHeaderTable f={f} lk={lk} doc={doc} readOnly={ro} companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} calendar={p.calendar}
+            <BillHeaderTable stacked f={f} lk={lk} doc={doc} readOnly={ro} companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} calendar={p.calendar}
               err={s.err} patch={s.patch} clearError={s.clearError} costTargets={sourceTargetOpts} mains={mains} duplicate={vendorBills.duplicate}
               onInvoiceType={(type) => { if (type !== "IMPORT") setImportDlg(null); }} challanOptions={challanOptions} onPickChallan={pickChallan} />
           </div>
@@ -355,7 +385,11 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
               <ImportDetailsButton imp={f.imp} readOnly={ro} autoOpen={autoImport} onOpen={(auto) => { importAutoOpened.current = true; setImportDlg(auto ? "auto" : "manual"); }} />
             </div>
           )}
+            </div>
+          </RailPanel>
 
+          <div className="lg-scroll flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-auto"
+            onFocusCapture={(e) => { const row = (e.target as HTMLElement).closest<HTMLElement>('[data-grid="lines"] [data-row]'); if (row?.dataset.row !== undefined) setFocusLine(Number(row.dataset.row)); }}>
           {/* the lines take whatever height is left */}
           <section aria-label="Lines" className="flex min-h-[240px] flex-1 flex-col [&>.lg-card]:min-h-0 [&>.lg-card]:flex-1">
             <LinesGrid fill kind="bill" currency={foreignOn ? f.imp.currencyCode.trim().toUpperCase() : undefined} lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
@@ -370,10 +404,29 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
             <p className="shrink-0 text-[12px] text-slate-600">Landed cost per line: {doc.lines.map((l) => `${l.lineNumber}: ${money(l.landedAmount)}`).join(" · ")}</p>
           )}
 
-          <div className="grid shrink-0 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)_minmax(260px,300px)]">
+          <div className="grid shrink-0 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,300px)]">
             <HeaderTermsTable terms={f.terms} masters={masters} signedOf={T.signedOf} total={T.header.amount} readOnly={ro} error={s.err("terms")} onOpen={() => T.open({ scope: "header" })} />
-            <VendorBillsTable lookups={lk} vendorGLId={f.vendorGLId} vendorBills={vendorBills} doc={doc} companyId={p.companyId} userId={p.userId} calendar={p.calendar} />
             <PurchaseInvoiceTotals table preview={invoicePreview} savedDoc={doc} readOnly={ro} hasLines={liveLines > 0} />
+          </div>
+          </div>
+
+          <div className="flex min-h-0 shrink-0 flex-col items-end gap-3">
+            <RailPanel side="right" label="Vendor and recent bills" collapsed={vendOff} onToggle={() => setVendOff((v) => !v)} shortcut="Alt+Shift+V" className="min-h-0 flex-[3_1_0]">
+              {vendor && (
+                <div className="space-y-0.5 border-b border-slate-200 px-3 py-2 text-[12.5px]">
+                  <div className="truncate font-semibold text-ink" title={vendor.name}>{vendor.name}</div>
+                  <div className="flex justify-between text-slate-600"><span>Code</span><span className="font-mono">{vendor.code}</span></div>
+                  {vendor.paymentTermDays != null && <div className="flex justify-between text-slate-600"><span>Payment terms</span><span>{vendor.paymentTermDays} days</span></div>}
+                  {vendor.creditLimit && <div className="flex justify-between text-slate-600"><span>Credit limit</span><span className="tabular-nums">{money(vendor.creditLimit)}</span></div>}
+                </div>
+              )}
+              <div className="[&_.lg-card-head]:hidden [&_.lg-card]:rounded-none [&_.lg-card]:border-0">
+                <VendorBillsTable lookups={lk} vendorGLId={f.vendorGLId} vendorBills={vendorBills} doc={doc} companyId={p.companyId} userId={p.userId} calendar={p.calendar} />
+              </div>
+            </RailPanel>
+            <RailPanel side="right" label="Stock and last rates" collapsed={stockOff} onToggle={() => setStockOff((v) => !v)} shortcut="Alt+Shift+S" className="min-h-0 flex-[2_1_0]">
+              <ProductInfoPanel lookups={lk} productId={focusProduct} info={productInfo} calendar={p.calendar} />
+            </RailPanel>
           </div>
         </div>
 

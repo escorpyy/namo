@@ -386,3 +386,20 @@ async function termRows(tx: Tx, docType: "PURCHASE_ORDER" | "PURCHASE_BILL", doc
     baseAmount: t.baseAmount, calculatedAmount: t.calculatedAmount, finalAmount: t.finalAmount,
   }));
 }
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// PRODUCT PURCHASE HISTORY (the "last rates" panel of the bill screen)
+// ---------------------------------------------------------------------------------------------------------------------------
+/** The latest posted purchases of one product, newest first: bill, date, vendor, quantity and rate (NPR). Reversal bills and bills
+ *  that were reversed are left out, so every row is a purchase that still stands. */
+export async function productPurchaseHistory(companyId: number, productId: number, limit = 5) {
+  const L = S.purchaseBillLine, B = S.purchaseBill;
+  const rows = await db.select({ billId: B.id, invoiceNumber: B.invoiceNumber, invoiceDate: B.invoiceDate, vendorGLId: B.vendorGLId, qty: L.qty, rate: L.rate })
+    .from(L).innerJoin(B, eq(B.id, L.purchaseBillId))
+    .where(and(
+      eq(B.companyId, companyId), eq(L.productId, productId), eq(B.isPosted, true), sql`${B.reversalOfId} is null`,
+      sql`not exists (select 1 from "PurchaseBill" r where r."reversalOfId" = ${B.id})`,
+    ))
+    .orderBy(desc(B.invoiceDate), desc(B.id)).limit(Math.min(Math.max(Math.trunc(limit) || 5, 1), 20));
+  return rows.map((r) => ({ ...r, invoiceDate: iso(r.invoiceDate), qty: fmt(toMicro(r.qty)), rate: fmt(toMicro(r.rate)) }));
+}

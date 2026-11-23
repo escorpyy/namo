@@ -100,6 +100,8 @@ export interface BillHeaderProps {
   challanOptions: ComboOption[]; onPickChallan: (id: string) => void;
   /** an earlier bill of this vendor with the same vendor invoice number */
   duplicate?: PListRow;
+  /** one label-value pair per row (for a narrow side panel) instead of five pairs across */
+  stacked?: boolean;
 }
 
 export function BillHeaderTable(p: BillHeaderProps) {
@@ -109,9 +111,8 @@ export function BillHeaderTable(p: BillHeaderProps) {
   const service = f.purchaseType.startsWith("SERVICE_PURCHASE_");
   const noCost = ro || !f.importCostForBillId;
   const links = [f.challanNo && `Challan ${f.challanNo}`, f.orderNo && `Order ${f.orderNo}`].filter(Boolean).join(" · ");
-  return (
-    <FormTable label="Bill header" pairs={5}>
-      <tr>
+  const stacked = !!p.stacked;
+  const h1 = (<Fragment key="h1">
         <FLabel title="A confirmed challan fills the vendor and the lines">Challan</FLabel>
         <FCell error={err("purchaseChallanId")}>
           {ro || doc || service
@@ -119,8 +120,12 @@ export function BillHeaderTable(p: BillHeaderProps) {
             : <Combobox fieldName="purchaseChallanId" placeholder="— (none)" value={f.purchaseChallanId} hasError={!!err("purchaseChallanId")} options={p.challanOptions} allowClear
                 onChange={(value) => p.onPickChallan(value)} onCommit={(el, dir) => focusStep(el, dir)} />}
         </FCell>
+  </Fragment>);
+  const h2 = (<Fragment key="h2">
         <FLabel>Invoice No</FLabel>
         <FCell><NumberField bare label="Invoice No" documentType="PURCHASE_BILL" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.invoiceNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => patch(c)} /></FCell>
+  </Fragment>);
+  const h3 = (<Fragment key="h3">
         <FLabel required>Invoice Date ({cal})</FLabel>
         <FCell error={err("invoiceDate")} className={DATE_CELL}>
           <DateInput fieldName="invoiceDate" value={f.invoiceDate} calendar={cal} hasError={!!err("invoiceDate")} onBlurField={() => {}} disabled={ro} onChange={(v) => {
@@ -130,13 +135,17 @@ export function BillHeaderTable(p: BillHeaderProps) {
             clearError("invoiceDate");
           }} />
         </FCell>
+  </Fragment>);
+  const h4 = (<Fragment key="h4">
         <FLabel>Vendor Invoice No</FLabel>
         <FCell error={err("vendorInvoiceNo")}><TextInput name="vendorInvoiceNo" label="Vendor Invoice No" value={f.vendorInvoiceNo} onChange={(v) => patch({ vendorInvoiceNo: v })} readOnly={ro} error={err("vendorInvoiceNo")} max={30} /></FCell>
+  </Fragment>);
+  const h5 = (<Fragment key="h5">
         <DateCell name="vendorInvoiceDate" label="Vendor Invoice Date" value={f.vendorInvoiceDate} onChange={(v) => { patch({ vendorInvoiceDate: v }); clearError("vendorInvoiceDate"); }} calendar={cal} readOnly={ro} error={err("vendorInvoiceDate")} />
-      </tr>
-      <tr>
+  </Fragment>);
+  const h6 = (<Fragment key="h6">
         <FLabel required>Vendor</FLabel>
-        <FCell colSpan={3} error={err("vendorGLId")}>
+        <FCell colSpan={stacked ? 1 : 3} error={err("vendorGLId")}>
           <VendorPicker vendors={vendors} vendorGLId={f.vendorGLId} readOnly={ro} error={err("vendorGLId")} lockVendor={!!f.purchaseChallanId} contextKey={ctx}
             onChange={(c) => {
               // a new vendor brings its payment term days, unless due days are already filled
@@ -145,16 +154,24 @@ export function BillHeaderTable(p: BillHeaderProps) {
               clearError("vendorGLId", "subLedgerId");
             }} />
         </FCell>
+  </Fragment>);
+  const h7 = (<Fragment key="h7">
         <FLabel required={!!vendor?.requiresSubLedger}>{vendor?.requiresSubLedger ? "Sub Ledger" : "Sub Ledger (not needed)"}</FLabel>
-        <FCell colSpan={5} error={err("subLedgerId")}><SubLedgerPicker subs={subs} requiresSubLedger={!!vendor?.requiresSubLedger} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} readOnly={ro} error={err("subLedgerId")} contextKey={ctx} onChange={(c) => patch(c)} /></FCell>
-      </tr>
-      <tr>
+        <FCell colSpan={stacked ? 1 : 5} error={err("subLedgerId")}><SubLedgerPicker subs={subs} requiresSubLedger={!!vendor?.requiresSubLedger} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} readOnly={ro} error={err("subLedgerId")} contextKey={ctx} onChange={(c) => patch(c)} /></FCell>
+  </Fragment>);
+  const h8 = (<Fragment key="h8">
         <FLabel>Agent</FLabel>
         <FCell error={err("agentId")}><AgentPicker agents={agents} agentId={f.agentId} readOnly={ro} error={err("agentId")} contextKey={ctx} onChange={(c) => patch(c)} /></FCell>
+  </Fragment>);
+  const h9 = (<Fragment key="h9">
         <FLabel>Invoice Type</FLabel>
         <FCell><SelectInput name="invoiceType" label="Invoice Type" disabled={ro} value={f.invoiceType} onChange={(v) => { patch({ invoiceType: v as BForm["invoiceType"] }); p.onInvoiceType(v as BForm["invoiceType"]); }}><option value="LOCAL">Local</option><option value="IMPORT">Import</option></SelectInput></FCell>
+  </Fragment>);
+  const h10 = (<Fragment key="h10">
         <FLabel>Purchase Type</FLabel>
         <FCell><SelectInput name="purchaseType" label="Purchase Type" disabled={ro} value={f.purchaseType} onChange={(purchaseType) => { patch({ purchaseType, importCostForBillId: purchaseType.startsWith("SERVICE_PURCHASE_") ? f.importCostForBillId : "" }); clearError("importCostForBillId"); }}>{PURCHASE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</SelectInput></FCell>
+  </Fragment>);
+  const h11 = (<Fragment key="h11">
         <FLabel>Due Days</FLabel>
         <FCell error={err("dueDays")}>
           <TextInput name="dueDays" label="Due Days" value={f.dueDays} readOnly={ro} error={err("dueDays")} max={4} onChange={(v) => {
@@ -165,17 +182,11 @@ export function BillHeaderTable(p: BillHeaderProps) {
             if (due) clearError("dueDate");
           }} />
         </FCell>
+  </Fragment>);
+  const h12 = (<Fragment key="h12">
         <DateCell name="dueDate" label="Due Date" value={f.dueDate} onChange={(v) => { patch({ dueDate: v }); clearError("dueDate"); }} calendar={cal} readOnly={ro} error={err("dueDate")} />
-      </tr>
-      {p.duplicate && (
-        <tr>
-          <td colSpan={10} role="alert" className="bg-amber-50 text-left text-[12px] text-amber-900">
-            Vendor invoice <b>{f.vendorInvoiceNo.trim()}</b> is already on bill <b className="font-mono">{p.duplicate.invoiceNumber}</b>. A repeated vendor invoice number is refused on save.
-          </td>
-        </tr>
-      )}
-      {service && (
-        <tr>
+  </Fragment>);
+  const s1 = (<Fragment key="s1">
           <FLabel>Cost of goods bill</FLabel>
           <FCell error={err("importCostForBillId")}>
             <Combobox fieldName="importCostForBillId" placeholder="— (not linked: stays an expense)" value={f.importCostForBillId} hasError={!!err("importCostForBillId")} options={p.costTargets} disabled={ro} allowClear
@@ -185,13 +196,26 @@ export function BillHeaderTable(p: BillHeaderProps) {
                 clearError("importCostForBillId");
               }} onCommit={(el, dir) => focusStep(el, dir)} />
           </FCell>
+  </Fragment>);
+  const s2 = (<Fragment key="s2">
           <FLabel>Source allocation basis</FLabel>
           <FCell><SelectInput name="importCostAllocationBasis" label="Source allocation basis" disabled={noCost} value={f.importCostAllocationBasis} onChange={(v) => patch({ importCostAllocationBasis: v as BForm["importCostAllocationBasis"] })}><option value="VALUE">By goods value</option><option value="QUANTITY">By quantity</option></SelectInput></FCell>
+  </Fragment>);
+  const s3 = (<Fragment key="s3">
           <FLabel>Cost treatment</FLabel>
           <FCell><SelectInput name="importCostTreatment" label="Cost treatment" disabled={noCost} value={f.importCostTreatment} onChange={(v) => patch({ importCostTreatment: v as BForm["importCostTreatment"] })}><option value="CIF">CIF input (pre-customs)</option><option value="LANDED_ONLY">Landed only (post-CIF)</option></SelectInput></FCell>
-          <Filler pairs={2} />
+  </Fragment>);
+  return (
+    <FormTable label="Bill header" pairs={stacked ? 1 : 5}>
+      {[[h1,h2,h3,h4,h5],[h6,h7],[h8,h9,h10,h11,h12]].map((r, i) => (stacked ? r.map((x, j) => <tr key={`${i}.${j}`}>{x}</tr>) : <tr key={i}>{r}</tr>))}
+      {p.duplicate && (
+        <tr>
+          <td colSpan={stacked ? 2 : 10} role="alert" className="bg-amber-50 text-left text-[12px] text-amber-900">
+            Vendor invoice <b>{f.vendorInvoiceNo.trim()}</b> is already on bill <b className="font-mono">{p.duplicate.invoiceNumber}</b>. A repeated vendor invoice number is refused on save.
+          </td>
         </tr>
       )}
+      {service && (stacked ? [s1,s2,s3].map((x, i) => <tr key={i}>{x}</tr>) : <tr>{s1}{s2}{s3}<Filler pairs={2} /></tr>)}
     </FormTable>
   );
 }
