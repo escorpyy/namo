@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { Check, Lock, Ban } from "lucide-react";
 import type { PDoc, PLookups } from "../../api";
 import type { EntryTabProps } from "../../components/purchase/DocWorkspace";
-import { COMMON_HELP, DocShell, Field, HINTS, Pill, money } from "../../components/purchase/Bits";
-import { DateField, TextField, VendorFields } from "../../components/purchase/HeadFields";
+import { COMMON_HELP, DocShell, HINTS, Pill, money } from "../../components/purchase/Bits";
+import { AgentCells, DateCell, FCell, FLabel, Filler, FormTable, RemarksTable, TextInput, VendorRow } from "../../components/purchase/BillTables";
 import { LinesGrid, TermsGrid } from "../../components/purchase/LinesGrid";
 import {
   alwaysShowTerms, blankLine, dateErr, defaultDate, isBlankLine, isBlankTerm, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, validateLines, validateTerms,
@@ -101,18 +101,25 @@ export default function PurchaseOrderEntry(p: PurchaseScreenProps & EntryTabProp
       notice={doc && status !== "DRAFT" && <p className="mt-2 text-[12px] text-amber-800 bg-amber-50 border border-amber-300 px-2 py-1">{status === "APPROVED" ? "Approved orders cannot be edited." : `This order is ${status!.toLowerCase()}.`}</p>}>
       {f && lk && (
         <div className="space-y-3 pt-2">
-          <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-x-3 gap-y-2">
-            <NumberField label="Order No" documentType="PURCHASE_ORDER" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.orderNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => s.patch(c)} />
-            <DateField label="Order Date" name="orderDate" value={f.orderDate} onChange={(v) => { s.patch({ orderDate: v }); s.clearError("orderDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("orderDate")} required />
-            <VendorFields lookups={lk} contextKey={String(p.companyId)} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} agentId={f.agentId} readOnly={ro} errors={s.errors}
-              onChange={(c) => { s.patch(c); s.clearError("vendorGLId", "subLedgerId"); }} />
-            <TextField label="Vendor Ref No" name="vendorRefNo" value={f.vendorRefNo} onChange={(v) => s.patch({ vendorRefNo: v })} readOnly={ro} error={s.err("vendorRefNo")} />
-            <DateField label="Vendor Ref Date" name="vendorRefDate" value={f.vendorRefDate} onChange={(v) => { s.patch({ vendorRefDate: v }); s.clearError("vendorRefDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("vendorRefDate")} />
-            <DateField label="Expected By" name="expectedDate" value={f.expectedDate} onChange={(v) => { s.patch({ expectedDate: v }); s.clearError("expectedDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("expectedDate")} />
-            <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} narrationCompanyId={p.companyId} className="col-span-1 sm:col-span-2 2xl:col-span-3" error={s.err("remarks")} />
-          </div>
+          <FormTable label="Order header" pairs={5}>
+            <tr>
+              <FLabel>Order No</FLabel>
+              <FCell><NumberField bare label="Order No" documentType="PURCHASE_ORDER" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.orderNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => s.patch(c)} /></FCell>
+              <DateCell name="orderDate" label="Order Date" value={f.orderDate} onChange={(v) => { s.patch({ orderDate: v }); s.clearError("orderDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("orderDate")} />
+              <FLabel>Vendor Ref No</FLabel>
+              <FCell error={s.err("vendorRefNo")}><TextInput name="vendorRefNo" label="Vendor Ref No" value={f.vendorRefNo} onChange={(v) => s.patch({ vendorRefNo: v })} readOnly={ro} error={s.err("vendorRefNo")} /></FCell>
+              <DateCell name="vendorRefDate" label="Vendor Ref Date" value={f.vendorRefDate} onChange={(v) => { s.patch({ vendorRefDate: v }); s.clearError("vendorRefDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("vendorRefDate")} />
+              <DateCell name="expectedDate" label="Expected By" value={f.expectedDate} onChange={(v) => { s.patch({ expectedDate: v }); s.clearError("expectedDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("expectedDate")} />
+            </tr>
+            <VendorRow lk={lk} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} readOnly={ro} err={s.err} contextKey={String(p.companyId)} onChange={(c) => { s.patch(c); s.clearError("vendorGLId", "subLedgerId"); }} />
+            <tr>
+              <AgentCells lk={lk} agentId={f.agentId} readOnly={ro} err={s.err} contextKey={String(p.companyId)} onChange={(c) => s.patch(c)} />
+              <Filler pairs={4} />
+            </tr>
+          </FormTable>
           <h2 className="text-[13px] font-semibold">Lines</h2>
           <LinesGrid kind="order" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} />
+          <RemarksTable value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} companyId={p.companyId} error={s.err("remarks")} />
           {ro && doc && doc.lines.length > 0 && (
             <div className="overflow-x-auto rounded-sm border border-slate-300 bg-white/60" tabIndex={0} aria-label="Order line progress; scroll horizontally if needed">
               <div className="min-w-[760px]">

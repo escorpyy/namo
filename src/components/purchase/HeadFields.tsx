@@ -11,7 +11,7 @@ type Errs = Record<string, string | undefined>;
 // Ctrl+M on the Vendor field: a vendor is a Party of type VENDOR, and the option value is its ledger, not the party row.
 const VENDOR_PARTY: CreateMasterSpec = { key: "party", defaults: { glType: "VENDOR" }, valueFrom: (r) => String(r.generalLedgerId ?? r.id) };
 
-type VendorChange = { vendorGLId?: string; subLedgerId?: string; agentId?: string };
+export type VendorChange = { vendorGLId?: string; subLedgerId?: string; agentId?: string };
 
 // The vendor ledger the bill is from, with the pick-lists the three pickers below need.
 export function useVendorOptions(lookups: PLookups, vendorGLId: string) {

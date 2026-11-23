@@ -1,3 +1,4 @@
+import { DateCell, FCell, FLabel, Filler, FormTable, RemarksTable, TextInput } from "../../components/purchase/BillTables";
 import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import type { OpenRequest } from "../../lib/openRequest";
 import { RotateCcw, Send } from "lucide-react";
@@ -229,42 +230,51 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
           {notice && <div className="shrink-0 px-5 pt-2">{notice}</div>}
           {/* one screen: header on top, the lines take what is left, terms and totals stay at the bottom */}
           <div data-zone="form" onKeyDown={onFormKey} className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden px-5 py-3">
-            <section className="lg-card shrink-0 px-4 py-3" aria-label="Invoice header">
-              <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 md:grid-cols-4 2xl:grid-cols-6">
-                <NumberField label="Invoice No" documentType="SALES_INVOICE" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.invoiceNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => s.patch(c)} />
-                <DateField label="Invoice Date" name="invoiceDate" value={f.invoiceDate} calendar={p.calendar} readOnly={ro} error={s.err("invoiceDate")} required
-                  onChange={(v) => { const due = f.dueDays ? addDaysIso(v, Number(f.dueDays)) : ""; s.patch(due ? { invoiceDate: v, dueDate: due } : { invoiceDate: v }); s.clearError("invoiceDate"); }} />
-                <Field label="Invoice Type">
-                  <select data-field="invoiceType" disabled={ro} value={f.invoiceType} onChange={(e) => s.patch({ invoiceType: e.target.value as SForm["invoiceType"] })} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}><option value="LOCAL">Local</option><option value="EXPORT">Export</option></select>
-                </Field>
-                <Field label="Sales Type" error={s.err("salesType")}>
-                  <select data-field="salesType" disabled={ro} value={f.salesType} onChange={(e) => { s.patch({ salesType: e.target.value as SForm["salesType"] }); s.clearError("salesType"); }} className={`fld ${ro ? "bg-slate-100 text-slate-600" : ""}`}><option value="GOODS_SALES">Goods sales</option><option value="SERVICE_SALES">Service sales</option></select>
-                </Field>
-                <Field label="Customer" required error={s.err("customerGLId")} className="col-span-2">
-                  <MasterReferencePicker fieldName="customerGLId" label="Customer ledger" scopeKey="customer-ledgers" contextKey={String(p.companyId)} placeholder="Choose customer ledger…" required value={f.customerGLId} hasError={!!s.err("customerGLId")} options={customers} disabled={ro}
-                    createMaster={{ key: "party", defaults: { glType: "CUSTOMER" }, valueFrom: (r) => String(r.generalLedgerId ?? r.id) }}
-                    onChange={(v) => {
-                      // a new customer brings its credit days, unless due days are already filled
-                      const days = v && v !== f.customerGLId && !f.dueDays ? lk.vendors.find((x) => String(x.id) === v)?.paymentTermDays : null;
-                      s.patch(days ? { customerGLId: v, subLedgerId: "", dueDays: String(days), dueDate: f.invoiceDate ? addDaysIso(f.invoiceDate, days) : f.dueDate } : { customerGLId: v, subLedgerId: "" });
-                      s.clearError("customerGLId", "subLedgerId");
-                    }} onCommit={(el, dir) => focusStep(el, dir)} />
-                </Field>
-                <Field label={customer?.requiresSubLedger ? "Sub Ledger" : "Sub Ledger (not needed)"} required={!!customer?.requiresSubLedger} error={s.err("subLedgerId")}>
-                  <MasterReferencePicker fieldName="subLedgerId" label="Sub Ledger" scopeKey="sub-ledger" contextKey={`${p.companyId}:${f.customerGLId || "none"}`} placeholder={subs.length ? "Choose sub ledger…" : customer?.requiresSubLedger ? "None yet — Ctrl+M to create" : "—"} value={f.subLedgerId} hasError={!!s.err("subLedgerId")} options={subs}
-                    disabled={ro || (subs.length === 0 && !customer?.requiresSubLedger)} required={!!customer?.requiresSubLedger} createMaster={customer?.requiresSubLedger ? { key: "sub-ledger", defaults: { generalLedgerId: f.customerGLId } } : undefined}
-                    onChange={(v) => { s.patch({ subLedgerId: v }); s.clearError("subLedgerId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
-                </Field>
-                <Field label="Salesperson" error={s.err("agentId")}>
-                  <MasterReferencePicker fieldName="agentId" label="Salesperson" scopeKey="agents" contextKey={String(p.companyId)} placeholder="Salesperson (optional)" value={f.agentId} hasError={!!s.err("agentId")} options={agents} disabled={ro} createMaster={{ key: "agents" }}
-                    onChange={(v) => s.patch({ agentId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
-                </Field>
-                <TextField label="Due Days" name="dueDays" value={f.dueDays} max={4} readOnly={ro} error={s.err("dueDays")}
-                  onChange={(v) => { if (!/^\d{0,4}$/.test(v)) return; const due = v ? addDaysIso(f.invoiceDate, Number(v)) : ""; s.patch(due ? { dueDays: v, dueDate: due } : { dueDays: v }); if (due) s.clearError("dueDate"); }} />
-                <DateField label="Due Date" name="dueDate" value={f.dueDate} onChange={(v) => { s.patch({ dueDate: v }); s.clearError("dueDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("dueDate")} />
-                <TextField label="Remarks" name="remarks" value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} max={1024} narrationCompanyId={p.companyId} className="col-span-2 md:col-span-4 2xl:col-span-2" error={s.err("remarks")} />
-              </div>
-            </section>
+            <div className="shrink-0">
+              <FormTable label="Invoice header" pairs={5}>
+                <tr>
+                  <FLabel>Invoice No</FLabel>
+                  <FCell><NumberField bare label="Invoice No" documentType="SALES_INVOICE" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.invoiceNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => s.patch(c)} /></FCell>
+                  <DateCell name="invoiceDate" label="Invoice Date" value={f.invoiceDate} calendar={p.calendar} readOnly={ro} error={s.err("invoiceDate")}
+                    onChange={(v) => { const due = f.dueDays ? addDaysIso(v, Number(f.dueDays)) : ""; s.patch(due ? { invoiceDate: v, dueDate: due } : { invoiceDate: v }); s.clearError("invoiceDate"); }} />
+                  <FLabel>Invoice Type</FLabel>
+                  <FCell><select data-field="invoiceType" aria-label="Invoice Type" disabled={ro} value={f.invoiceType} onChange={(e) => s.patch({ invoiceType: e.target.value as SForm["invoiceType"] })} className="fld"><option value="LOCAL">Local</option><option value="EXPORT">Export</option></select></FCell>
+                  <FLabel>Sales Type</FLabel>
+                  <FCell error={s.err("salesType")}><select data-field="salesType" aria-label="Sales Type" disabled={ro} value={f.salesType} onChange={(e) => { s.patch({ salesType: e.target.value as SForm["salesType"] }); s.clearError("salesType"); }} className="fld"><option value="GOODS_SALES">Goods sales</option><option value="SERVICE_SALES">Service sales</option></select></FCell>
+                  <FLabel>Salesperson</FLabel>
+                  <FCell error={s.err("agentId")}>
+                    <MasterReferencePicker fieldName="agentId" label="Salesperson" scopeKey="agents" contextKey={String(p.companyId)} placeholder="Salesperson (optional)" value={f.agentId} hasError={!!s.err("agentId")} options={agents} disabled={ro} createMaster={{ key: "agents" }}
+                      onChange={(v) => s.patch({ agentId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
+                  </FCell>
+                </tr>
+                <tr>
+                  <FLabel required>Customer</FLabel>
+                  <FCell colSpan={3} error={s.err("customerGLId")}>
+                    <MasterReferencePicker fieldName="customerGLId" label="Customer ledger" scopeKey="customer-ledgers" contextKey={String(p.companyId)} placeholder="Choose customer ledger…" required value={f.customerGLId} hasError={!!s.err("customerGLId")} options={customers} disabled={ro}
+                      createMaster={{ key: "party", defaults: { glType: "CUSTOMER" }, valueFrom: (r) => String(r.generalLedgerId ?? r.id) }}
+                      onChange={(v) => {
+                        // a new customer brings its credit days, unless due days are already filled
+                        const days = v && v !== f.customerGLId && !f.dueDays ? lk.vendors.find((x) => String(x.id) === v)?.paymentTermDays : null;
+                        s.patch(days ? { customerGLId: v, subLedgerId: "", dueDays: String(days), dueDate: f.invoiceDate ? addDaysIso(f.invoiceDate, days) : f.dueDate } : { customerGLId: v, subLedgerId: "" });
+                        s.clearError("customerGLId", "subLedgerId");
+                      }} onCommit={(el, dir) => focusStep(el, dir)} />
+                  </FCell>
+                  <FLabel required={!!customer?.requiresSubLedger}>{customer?.requiresSubLedger ? "Sub Ledger" : "Sub Ledger (not needed)"}</FLabel>
+                  <FCell colSpan={5} error={s.err("subLedgerId")}>
+                    <MasterReferencePicker fieldName="subLedgerId" label="Sub Ledger" scopeKey="sub-ledger" contextKey={`${p.companyId}:${f.customerGLId || "none"}`} placeholder={subs.length ? "Choose sub ledger…" : customer?.requiresSubLedger ? "None yet — Ctrl+M to create" : "—"} value={f.subLedgerId} hasError={!!s.err("subLedgerId")} options={subs}
+                      disabled={ro || (subs.length === 0 && !customer?.requiresSubLedger)} required={!!customer?.requiresSubLedger} createMaster={customer?.requiresSubLedger ? { key: "sub-ledger", defaults: { generalLedgerId: f.customerGLId } } : undefined}
+                      onChange={(v) => { s.patch({ subLedgerId: v }); s.clearError("subLedgerId"); }} onCommit={(el, dir) => focusStep(el, dir)} />
+                  </FCell>
+                </tr>
+                <tr>
+                  <FLabel>Due Days</FLabel>
+                  <FCell error={s.err("dueDays")}><TextInput name="dueDays" label="Due Days" value={f.dueDays} max={4} readOnly={ro} error={s.err("dueDays")}
+                    onChange={(v) => { if (!/^\d{0,4}$/.test(v)) return; const due = v ? addDaysIso(f.invoiceDate, Number(v)) : ""; s.patch(due ? { dueDays: v, dueDate: due } : { dueDays: v }); if (due) s.clearError("dueDate"); }} /></FCell>
+                  <DateCell name="dueDate" label="Due Date" value={f.dueDate} onChange={(v) => { s.patch({ dueDate: v }); s.clearError("dueDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("dueDate")} />
+                  <Filler pairs={3} />
+                </tr>
+              </FormTable>
+            </div>
 
             {f.invoiceType === "EXPORT" && <ExportPanel value={f.exp} onChange={(exp) => { s.patch({ exp }); s.clearError("exportDetail"); }} readOnly={ro} errors={s.errors} calendar={p.calendar} />}
 
@@ -272,6 +282,7 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
               <LinesGrid fill kind="sales" currency={f.invoiceType === "EXPORT" && foreignCurrency(f.exp) ? f.exp.exportCurrency.trim().toUpperCase() : undefined} lines={f.lines} onChange={(lines) => T.updateLines(lines, (c) => s.patch(c))} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)}
                 onOpenTerms={(index, continueAfterApply) => T.open({ scope: "line", lineNumber: T.lineNumberAt(index), lineIndex: index, continueAfterApply })} termSummary={T.lineSummary} />
             </section>
+            <div className="shrink-0"><RemarksTable value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} companyId={p.companyId} error={s.err("remarks")} /></div>
 
             <section className="lg-card flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2" aria-label="Invoice terms">
               <div className="min-w-0 flex-1">

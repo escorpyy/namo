@@ -10,7 +10,7 @@ import { Combobox, type ComboOption } from "../Combobox";
 import { DateInput } from "../DateInput";
 import { NarrationInput } from "../NarrationInput";
 import { Pill, focusStep, formEnterKey, money } from "./Bits";
-import { AgentPicker, SubLedgerPicker, VendorPicker, useVendorOptions } from "./HeadFields";
+import { AgentPicker, SubLedgerPicker, VendorPicker, useVendorOptions, type VendorChange } from "./HeadFields";
 import { NumberField } from "./NumberField";
 import type { BForm } from "../../screens/purchase/PurchaseBillScreen";
 
@@ -42,11 +42,11 @@ const shown = (v: string) => (v === "" ? "—" : v.startsWith("-") ? `− ${mone
 
 // ---- label | value cells ----------------------------------------------------------------------------------------------------------
 
-function FLabel({ children, required, title }: { children: ReactNode; required?: boolean; title?: string }) {
+export function FLabel({ children, required, title }: { children: ReactNode; required?: boolean; title?: string }) {
   return <th scope="row" title={title} className="bg-slate-50 text-left align-middle text-[12px] font-semibold leading-snug text-slate-600">{children}{required && <span className="text-rose-600"> *</span>}</th>;
 }
 // p-0: the input fills the cell, like a spreadsheet cell
-function FCell({ children, error, colSpan, className = "" }: { children: ReactNode; error?: string; colSpan?: number; className?: string }) {
+export function FCell({ children, error, colSpan, className = "" }: { children: ReactNode; error?: string; colSpan?: number; className?: string }) {
   return (
     <td colSpan={colSpan} className={`p-0 align-top ${className}`}>
       {children}
@@ -55,15 +55,15 @@ function FCell({ children, error, colSpan, className = "" }: { children: ReactNo
   );
 }
 // a date field shows the same date in the other calendar under it: keep that hint off the cell edge
-const DATE_CELL = "[&_span]:px-2";
+export const DATE_CELL = "[&_span]:px-2";
 
-function TextInput({ name, label, value, onChange, readOnly, error, max = 60 }: { name: string; label: string; value: string; onChange: (v: string) => void; readOnly: boolean; error?: string; max?: number }) {
+export function TextInput({ name, label, value, onChange, readOnly, error, max = 60 }: { name: string; label: string; value: string; onChange: (v: string) => void; readOnly: boolean; error?: string; max?: number }) {
   return <input data-field={name} aria-label={label} value={value} maxLength={max} autoComplete="off" disabled={readOnly} onChange={(e) => onChange(e.target.value)} onFocus={(e) => e.currentTarget.select()} className={`fld min-w-0 ${error ? "fld-err" : ""}`} />;
 }
-function SelectInput({ name, label, value, onChange, disabled, children }: { name: string; label: string; value: string; onChange: (v: string) => void; disabled: boolean; children: ReactNode }) {
+export function SelectInput({ name, label, value, onChange, disabled, children }: { name: string; label: string; value: string; onChange: (v: string) => void; disabled: boolean; children: ReactNode }) {
   return <select data-field={name} aria-label={label} disabled={disabled} value={value} onChange={(e) => onChange(e.target.value)} className="fld">{children}</select>;
 }
-function DateCell({ name, label, value, onChange, calendar, readOnly, error, hint = true }: { name: string; label: string; value: string; onChange: (v: string) => void; calendar: "BS" | "AD"; readOnly: boolean; error?: string; hint?: boolean }) {
+export function DateCell({ name, label, value, onChange, calendar, readOnly, error, hint = true }: { name: string; label: string; value: string; onChange: (v: string) => void; calendar: "BS" | "AD"; readOnly: boolean; error?: string; hint?: boolean }) {
   return (
     <>
       <FLabel>{label} ({calendar})</FLabel>
@@ -73,7 +73,7 @@ function DateCell({ name, label, value, onChange, calendar, readOnly, error, hin
 }
 
 // Four label | value pairs (the bill header uses five). Rows that need fewer pairs fill the rest with a quiet cell.
-function FormTable({ label, children, className = "", pairs = 4 }: { label: string; children: ReactNode; className?: string; pairs?: number }) {
+export function FormTable({ label, children, className = "", pairs = 4 }: { label: string; children: ReactNode; className?: string; pairs?: number }) {
   return (
     <div className={`lg-grid min-w-0 border border-slate-200 bg-white [&_.fld:disabled]:text-slate-700 [&_select:disabled]:[-webkit-text-fill-color:#334155] ${className}`}>
       <table aria-label={label} className={`xl-table ${pairs >= 5 ? "min-w-[1180px]" : pairs > 1 ? "min-w-[960px]" : ""} table-fixed ${FRAME} ${NO_HOVER}`}>
@@ -83,7 +83,7 @@ function FormTable({ label, children, className = "", pairs = 4 }: { label: stri
     </div>
   );
 }
-const Filler = ({ pairs }: { pairs: number }) => (pairs > 0 ? <td colSpan={pairs * 2} className="bg-slate-50" /> : null);
+export const Filler = ({ pairs }: { pairs: number }) => (pairs > 0 ? <td colSpan={pairs * 2} className="bg-slate-50" /> : null);
 
 // ---- the header -------------------------------------------------------------------------------------------------------------------
 
@@ -196,19 +196,42 @@ export function BillHeaderTable(p: BillHeaderProps) {
   );
 }
 
-/** Remarks: a one-row table that sits right under the lines grid. */
-export function BillRemarksTable({ f, readOnly: ro, companyId, err, patch }: { f: BForm; readOnly: boolean; companyId: number; err: (k: string) => string | undefined; patch: (c: Partial<BForm>) => void }) {
+/** The vendor row of a purchase document header (five pairs wide): Vendor, then Sub Ledger. */
+export function VendorRow({ lk, vendorGLId, subLedgerId, readOnly, err, lockVendor, contextKey, onChange }: {
+  lk: PLookups; vendorGLId: string; subLedgerId: string; readOnly: boolean; err: Errs; lockVendor?: boolean; contextKey: string; onChange: (c: VendorChange) => void;
+}) {
+  const { vendor, vendors, subs } = useVendorOptions(lk, vendorGLId);
+  return (
+    <tr>
+      <FLabel required>Vendor</FLabel>
+      <FCell colSpan={3} error={err("vendorGLId")}><VendorPicker vendors={vendors} vendorGLId={vendorGLId} readOnly={readOnly} error={err("vendorGLId")} lockVendor={lockVendor} contextKey={contextKey} onChange={onChange} /></FCell>
+      <FLabel required={!!vendor?.requiresSubLedger}>{vendor?.requiresSubLedger ? "Sub Ledger" : "Sub Ledger (not needed)"}</FLabel>
+      <FCell colSpan={5} error={err("subLedgerId")}><SubLedgerPicker subs={subs} requiresSubLedger={!!vendor?.requiresSubLedger} vendorGLId={vendorGLId} subLedgerId={subLedgerId} readOnly={readOnly} error={err("subLedgerId")} contextKey={contextKey} onChange={onChange} /></FCell>
+    </tr>
+  );
+}
+/** Agent label | value pair. */
+export function AgentCells({ lk, agentId, readOnly, err, contextKey, onChange }: { lk: PLookups; agentId: string; readOnly: boolean; err: Errs; contextKey: string; onChange: (c: VendorChange) => void }) {
+  const { agents } = useVendorOptions(lk, "");
+  return (<><FLabel>Agent</FLabel><FCell error={err("agentId")}><AgentPicker agents={agents} agentId={agentId} readOnly={readOnly} error={err("agentId")} contextKey={contextKey} onChange={onChange} /></FCell></>);
+}
+
+/** Remarks: a one-row table that sits right under the lines grid (shared by the purchase and sales documents). */
+export function RemarksTable({ value, onChange, readOnly: ro, companyId, error }: { value: string; onChange: (v: string) => void; readOnly: boolean; companyId: number; error?: string }) {
   return (
     <FormTable label="Remarks" pairs={1}>
       <tr>
         <FLabel>Remarks</FLabel>
-        <FCell error={err("remarks")}>
-          <NarrationInput multiline rows={1} companyId={companyId} data-field="remarks" maxLength={1024} disabled={ro} value={f.remarks} onText={(v) => patch({ remarks: v })}
-            placeholder="Optional note for this bill…" className={`fld min-h-8 resize-y py-1.5 ${err("remarks") ? "fld-err" : ""}`} aria-label="Remarks" />
+        <FCell error={error}>
+          <NarrationInput multiline rows={1} companyId={companyId} data-field="remarks" maxLength={1024} disabled={ro} value={value} onText={onChange}
+            placeholder="Optional note…" className={`fld min-h-8 resize-y py-1.5 ${error ? "fld-err" : ""}`} aria-label="Remarks" />
         </FCell>
       </tr>
     </FormTable>
   );
+}
+export function BillRemarksTable({ f, readOnly, companyId, err, patch }: { f: BForm; readOnly: boolean; companyId: number; err: (k: string) => string | undefined; patch: (c: Partial<BForm>) => void }) {
+  return <RemarksTable value={f.remarks} onChange={(v) => patch({ remarks: v })} readOnly={readOnly} companyId={companyId} error={err("remarks")} />;
 }
 
 // ---- import details (customs, LC, transport, foreign currency) --------------------------------------------------------------------
