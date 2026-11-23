@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { PLookups } from "../../api";
 import { blankLine, blankTerm, derivedQty, isBlankLine, isBlankTerm, lineAmount, pickableTerms, trimDec, type LineKind, type LineRow, type Product, type Term, type TermRow } from "../../lib/purchaseForm";
-import { fmtPaise, toPaise } from "../../lib/money";
+import { toPaise } from "../../lib/money";
 import { fillDownRows } from "../../lib/tableKinds";
 import { useGridRows } from "../table/useGridRows";
 import { MasterReferencePicker, type ReferenceOption } from "../MasterReferencePicker";
@@ -127,13 +127,19 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
     onChange([...lines, blankLine()]);
     if (focus) setTimeout(() => document.querySelector<HTMLElement>(`[data-field="L.${lines.length}.p"]`)?.focus(), 40);
   };
+  useEffect(() => {
+    if (kind !== "bill" || readOnly) return;
+    const onRequest = () => addRow();
+    window.addEventListener("namo:bill-add-line", onRequest);
+    return () => window.removeEventListener("namo:bill-add-line", onRequest);
+  }, [kind, readOnly, lines]);
   const remove = (i: number, fromRowMode = false) => {
     const n = lines.filter((_, k) => k !== i);
     onChange(n.length ? n : [blankLine()]);
     if (fromRowMode) return;
     requestAnimationFrame(() => {
       const next = document.querySelector<HTMLElement>(`[data-field="L.${Math.min(i, n.length - 1)}.p"]:not(:disabled)`)
-        ?? document.querySelector<HTMLElement>('[data-nav="add-line"]:not(:disabled)');
+        ?? document.querySelector<HTMLElement>('[data-field^="L."]:not(:disabled)');
       next?.focus();
     });
   };
@@ -175,6 +181,13 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
     if (i === lines.length - 1 && lines.length > 1) { onChange(lines.slice(0, -1)); clearError(...Object.keys(errors).filter((k) => k.startsWith(`L.${i}.`)), "lines"); }
   };
   const onKeyCapture = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (kind === "bill" && e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !readOnly) {
+      const action = (e.target as HTMLElement).closest<HTMLElement>('[data-nav="remove-line"]');
+      const row = action?.closest<HTMLElement>("[data-row]");
+      const index = Number(row?.dataset.row);
+      if (row && index === lines.length - 1 && !isBlankLine(lines[index])) { e.preventDefault(); addRow(); }
+      return;
+    }
     if (e.key !== "Enter" || e.shiftKey || readOnly) return;
     const el = e.target as HTMLElement, m = /^L\.(\d+)\.p$/.exec(el.getAttribute("data-field") ?? "");
     if (!m || !isBlankLine(lines[Number(m[1])])) return;
@@ -182,7 +195,6 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
     leaveTable(el, Number(m[1]));
   };
 
-  const total = lines.reduce((a, l) => a + toPaise(lineAmount(l, products.get(l.productId)) || "0"), 0);
   const live = lines.filter((l) => !isBlankLine(l)).length;
 
   return (
@@ -279,10 +291,8 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
       })()}
       {errors.lines && <p className="px-3 py-1.5 text-[12px] text-rose-700">{errors.lines}</p>}
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200 bg-slate-50 px-3 py-2.5">
-        {!readOnly && <button type="button" data-nav="add-line" className="btn" onClick={() => addRow()}><Plus size={13} /> Add line {kind === "bill" && <span className="kbd">F6</span>}</button>}
         <span className="flex-1" />
         <span className="text-[12.5px] text-slate-600">Lines <b className="font-semibold tabular-nums text-ink">{live}</b></span>
-        <span className="text-[12.5px] text-slate-600">Basic amount <b className="ml-1 text-[14px] font-semibold tabular-nums text-ink">{fmtPaise(total)}</b></span>
       </div>
     </div>
   );

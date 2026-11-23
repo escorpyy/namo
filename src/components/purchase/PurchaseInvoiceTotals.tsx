@@ -1,5 +1,6 @@
 import { fmt, toMicro, ZERO } from "../../../shared/purchase-calculation";
 import type { PurchasePreview } from "../../../shared/purchase-preview";
+import type { ReactNode } from "react";
 import { money } from "./Bits";
 
 interface SavedDocTotals {
@@ -16,6 +17,10 @@ interface Props {
   hasLines: boolean;
   /** One centred line for the fixed footer of the bill entry screen; the explanation moves into a tooltip and only a problem is spelled out. */
   compact?: boolean;
+  /** Show only basic, net terms and net amount in a purchase bill footer. */
+  summaryOnly?: boolean;
+  /** Optional interactive control in place of the compact Net terms value. */
+  termsAction?: ReactNode;
   /** The totals as a small two-column table (label | amount) for a screen that is laid out in tables. */
   table?: boolean;
   /** what the document is called in the explanations ("bill" by default; "invoice" for a sales invoice) */
@@ -28,7 +33,7 @@ const signedMoney = (value: unknown) => {
   return text.startsWith("-") ? `− ${money(text.slice(1))}` : money(text);
 };
 
-export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, hasLines, compact, table, noun = "bill" }: Props) {
+export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, hasLines, compact, summaryOnly, termsAction, table, noun = "bill" }: Props) {
   const showSaved = readOnly && !!savedDoc;
   let savedAdditions = "0.00";
   let savedDeductions = "0.00";
@@ -90,9 +95,12 @@ export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, hasLines, c
   }
 
   if (compact) {
+    const compactEntries = summaryOnly ? entries.filter((entry) => ["Basic amount", "Net terms", "Net amount"].includes(entry.label)) : entries;
     return (
       <section aria-label="Purchase invoice totals" title={message} className="flex flex-wrap items-end gap-x-7 gap-y-2">
-        {entries.map((entry) => entry.total ? (
+        {compactEntries.map((entry) => entry.label === "Net terms" && termsAction ? (
+          <div key={entry.label} className="min-w-0">{termsAction}</div>
+        ) : entry.total ? (
           <div key={entry.label} className="flex min-w-0 items-end gap-3 border-l border-white/15 pl-7">
             <div className="min-w-0">
               <div className="text-[12px] font-medium text-white/65">{entry.label}</div>

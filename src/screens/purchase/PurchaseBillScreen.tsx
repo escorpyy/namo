@@ -5,7 +5,7 @@ import { type ComboOption } from "../../components/Combobox";
 import { Dialog, useDialog } from "../../components/Dialog";
 import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
 import { COMMON_HELP, HINTS, formEnterKey, money } from "../../components/purchase/Bits";
-import { BillHeaderTable, BillRemarksTable, HeaderTermsTable, ImportDetailsButton, ImportDetailsDialog, IMPORT_FIELDS, importFilled, LinkedCostsTable, VendorBillsTable, useVendorBills } from "../../components/purchase/BillTables";
+import { BillHeaderTable, BillRemarksTable, ImportDetailsButton, ImportDetailsDialog, IMPORT_FIELDS, importFilled, LinkedCostsTable, VendorBillsTable, useVendorBills } from "../../components/purchase/BillTables";
 import { LinesGrid } from "../../components/purchase/LinesGrid";
 import { ProductInfoPanel, useProductInfo } from "../../components/purchase/ProductInfo";
 import { RailPanel, useRail } from "../../components/purchase/Rails";
@@ -34,9 +34,10 @@ const HELP: [string, string][] = [
   ["Alt+W", "Close this tab"],
   ["Alt+1 / Alt+2", "Sidebar / the form"],
   ["Alt+Shift+H / V / S", "Fold or open the header / vendor / stock panel"],
+  ["Alt+Shift+T", "Open header terms"],
   ["Post", "Writes the journal voucher; a posted bill cannot be edited, only reversed"],
 ];
-const BILL_HINTS = HINTS.filter((h) => !h.startsWith("F4"));
+const BILL_HINTS = [...HINTS.filter((h) => !h.startsWith("F4")), "F6: Add line", "Alt+Shift+T: Terms"];
 
 export interface BForm {
   numberSeriesId: string; docNumber: string; invoiceDate: string; invoiceType: "LOCAL" | "IMPORT"; purchaseType: string; vendorGLId: string; subLedgerId: string; agentId: string; vendorInvoiceNo: string; vendorInvoiceDate: string;
@@ -170,12 +171,14 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     savedBasic: doc ? str(doc.basicAmount) : undefined, savedNet: doc ? str(doc.totalAmount) : undefined,
     errors: s.errors, clearError: s.clearError, setTerms: (terms) => s.patch({ terms }), contextKey: String(p.companyId), noun: "bill",
   });
+  const termsRef = useRef(T);
+  termsRef.current = T;
   const updateBillLines = (nextLines: LineRow[]) => T.updateLines(nextLines, (change) => s.patch(change));
   useEffect(() => {
     const onShortcut = (event: KeyboardEvent) => {
       if (event.key !== "F6" || T.isOpen || !f || ro) return;
       event.preventDefault();
-      document.querySelector<HTMLElement>('[data-grid="lines"] [data-nav="add-line"]')?.click();
+      window.dispatchEvent(new Event("namo:bill-add-line"));
     };
     window.addEventListener("keydown", onShortcut);
     return () => window.removeEventListener("keydown", onShortcut);
@@ -297,6 +300,11 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.altKey || !e.shiftKey || e.ctrlKey || e.metaKey) return;
+      if (e.code === "KeyT") {
+        e.preventDefault();
+        termsRef.current.open({ scope: "header" });
+        return;
+      }
       const set = e.code === "KeyH" ? setHdrOff : e.code === "KeyV" ? setVendOff : e.code === "KeyS" ? setStockOff : null;
       if (!set) return;
       e.preventDefault();
@@ -385,6 +393,18 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     // after the automatic dialog the flow carries on to the lines; after a manual one the cursor goes back to the button
     window.setTimeout(() => ((auto ? document.querySelector<HTMLElement>('[data-field="L.0.p"]:not(:disabled)') : null) ?? document.querySelector<HTMLElement>('[data-nav="import-details"]'))?.focus(), 40);
   };
+  const signedMoney = (value: string) => {
+    const formatted = money(value);
+    return formatted.startsWith("-") ? `− ${formatted.slice(1)}` : formatted;
+  };
+  const enteredHeaderTerms = f.terms.filter((term) => !isBlankTerm(term) && !masters.get(term.termId)?.isProductwise);
+  const termsTooltip = enteredHeaderTerms.length
+    ? enteredHeaderTerms.map((term) => {
+      const master = masters.get(term.termId);
+      return `${master?.name ?? master?.code ?? term.termId}: ${signedMoney(T.signedOf(term))}`;
+    }).join("\n")
+    : "No header terms entered.";
+  const termsError = s.err("terms");
 
   return (
     <>
@@ -435,10 +455,6 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
             <p className="shrink-0 text-[12px] text-slate-600">Landed cost per line: {doc.lines.map((l) => `${l.lineNumber}: ${money(l.landedAmount)}`).join(" · ")}</p>
           )}
 
-          <div className="grid shrink-0 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,300px)]">
-            <HeaderTermsTable terms={f.terms} masters={masters} signedOf={T.signedOf} total={T.header.amount} readOnly={ro} error={s.err("terms")} onOpen={() => T.open({ scope: "header" })} />
-            <PurchaseInvoiceTotals table preview={invoicePreview} savedDoc={doc} readOnly={ro} hasLines={liveLines > 0} />
-          </div>
           </div>
 
           <div className="flex min-h-0 shrink-0 flex-col items-end gap-3">
@@ -462,20 +478,31 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
           </div>}
         </div>
 
-        <footer className="tape flex shrink-0 flex-wrap items-center justify-end gap-2 px-5 py-3">
-          {!ro ? (
-            <>
-              <button data-nav className="btn btn-primary" disabled={s.saving} onClick={() => void s.save()}><Save size={14} /> {s.mode === "edit" ? "Update" : "Save"} <span className="kbd">Ctrl+S</span></button>
-              <button data-nav className="btn" onClick={() => (doc ? s.cancel() : s.guard(() => p.onClose(p.tabId)))}><X size={14} /> Cancel {doc && <span className="kbd">Esc</span>}</button>
-            </>
-          ) : (
-            <>
-              <button data-nav className="btn" onClick={() => p.onNew()}><Plus size={14} /> New <span className="kbd">F3</span></button>
-              <button data-nav className="btn" disabled={!doc || !cfg.editable(doc)} onClick={s.edit}><Pencil size={14} /> Edit <span className="kbd">F2</span></button>
-              <button data-nav className="btn" disabled={!doc || !cfg.deletable(doc)} onClick={s.askDelete}><Trash2 size={14} /> Delete <span className="kbd">Ctrl+Del</span></button>
-              {actions && <><span className="tape-sep mx-1" />{actions}</>}
-            </>
-          )}
+        <footer className="tape flex shrink-0 flex-wrap items-center justify-between gap-x-5 gap-y-2 px-5 py-3">
+          <div className="min-w-0 flex-1">
+            <PurchaseInvoiceTotals compact summaryOnly preview={invoicePreview} savedDoc={doc} readOnly={ro} hasLines={liveLines > 0}
+              termsAction={<button type="button" data-nav="header-terms" onClick={() => T.open({ scope: "header" })} title={`Alt+Shift+T · ${termsTooltip}`}
+                aria-label={`${ro ? "View terms" : "Net terms"}, ${signedMoney(T.header.amount)}. Alt+Shift+T opens header terms.`}
+                className={`flex flex-col items-start text-left ${termsError ? "text-rose-300 hover:text-rose-200" : "text-white hover:text-brass"}`}>
+                <span className="flex items-center gap-2 text-[12px] font-medium text-white/65">{ro ? "View terms" : "Net terms"}{termsError && <span className="font-semibold text-rose-300">Required</span>}</span>
+                <span className="flex items-center gap-2 text-[15px] font-semibold leading-tight tabular-nums">{signedMoney(T.header.amount)} <span className="kbd">Alt+Shift+T</span></span>
+              </button>} />
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            {!ro ? (
+              <>
+                <button data-nav className="btn btn-primary" disabled={s.saving} onClick={() => void s.save()}><Save size={14} /> {s.mode === "edit" ? "Update" : "Save"} <span className="kbd">Ctrl+S</span></button>
+                <button data-nav className="btn" onClick={() => (doc ? s.cancel() : s.guard(() => p.onClose(p.tabId)))}><X size={14} /> Cancel {doc && <span className="kbd">Esc</span>}</button>
+              </>
+            ) : (
+              <>
+                <button data-nav className="btn" onClick={() => p.onNew()}><Plus size={14} /> New <span className="kbd">F3</span></button>
+                <button data-nav className="btn" disabled={!doc || !cfg.editable(doc)} onClick={s.edit}><Pencil size={14} /> Edit <span className="kbd">F2</span></button>
+                <button data-nav className="btn" disabled={!doc || !cfg.deletable(doc)} onClick={s.askDelete}><Trash2 size={14} /> Delete <span className="kbd">Ctrl+Del</span></button>
+                {actions && <><span className="tape-sep mx-1" />{actions}</>}
+              </>
+            )}
+          </div>
         </footer>
       </section>
 
