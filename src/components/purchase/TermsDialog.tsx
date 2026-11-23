@@ -116,6 +116,7 @@ export function useTermsDialog(o: Opts) {
   const signedOf = (t: TermRow) => {
     const m = masters.get(t.termId);
     const live = o.preview.terms.get(t.key)?.signedAmount;
+    if (ro && t.finalAmount) return `${t.nature === "DEDUCTIVE" || m?.nature === "DEDUCTIVE" ? "-" : ""}${t.finalAmount}`;
     return live ?? (t.finalAmount && (ro || o.saved) ? `${t.nature === "DEDUCTIVE" || m?.nature === "DEDUCTIVE" ? "-" : ""}${t.finalAmount}` : "0");
   };
   const sumOf = (pick: (t: TermRow) => boolean) => {
@@ -168,8 +169,36 @@ export function useTermsDialog(o: Opts) {
     }
     const totalText = totalComplete ? fmt(totalMicro, 2) : "—";
     const line = dlg.scope === "line" ? lines[dlg.lineIndex] : undefined;
-    const basic = dlg.scope === "line" ? (line ? lineAmount(line, products.get(line.productId)) : "") : ro ? o.savedBasic ?? "" : live?.basicAmount ?? "";
-    const net = dlg.scope === "line" ? (basic && totalComplete ? fmt(toMicro(basic) + totalMicro, 2) : "") : ro ? o.savedNet ?? "" : live?.status === "ready" ? live.netAmount ?? "" : "";
+    const basicAfterLineTerms = (() => {
+      if (ro) {
+        try {
+          let total = toMicro(o.savedBasic ?? "0");
+          for (const term of terms) {
+            const master = masters.get(term.termId);
+            if (isBlankTerm(term) || !master?.isProductwise || !term.finalAmount) continue;
+            const amount = toMicro(term.finalAmount);
+            total += (term.nature ?? master.nature) === "DEDUCTIVE" ? -amount : amount;
+          }
+          return fmt(total, 2);
+        } catch { return o.savedBasic ?? ""; }
+      }
+      if (!live) return "";
+      const lineTerms = [...terms.filter((term) => !inScope(term, dlg)), ...draft];
+      const productwise = lineTerms.filter((term) => !isBlankTerm(term) && masters.get(term.termId)?.isProductwise);
+      if (live.status !== "ready") return productwise.length ? "" : live.basicAmount;
+      try {
+        let total = toMicro(live.basicAmount);
+        for (const term of productwise) {
+          const amount = live.terms.get(term.key)?.signedAmount;
+          if (amount) total += toMicro(amount);
+        }
+        return fmt(total, 2);
+      } catch { return ""; }
+    })();
+    const basic = dlg.scope === "line" ? (line ? lineAmount(line, products.get(line.productId)) : "") : basicAfterLineTerms;
+    const net = dlg.scope === "line"
+      ? (basic && totalComplete ? fmt(toMicro(basic) + totalMicro, 2) : "")
+      : ro ? o.savedNet ?? "" : live?.status === "ready" && basic ? fmt(toMicro(basic) + totalMicro, 2) : "";
     const filled = draft.filter((t) => !isBlankTerm(t) && (ro || !(() => { const v = (t.isOverridden ? t.overrideAmount : t.calcType === "PERCENT" ? t.rate : t.inputAmount).trim(); const x = parseDec(v); return v === "" || (!!x && x.n === 0n); })())).length;
     node = (
       <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-3" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
@@ -192,12 +221,13 @@ export function useTermsDialog(o: Opts) {
           </div>
           <div className="grid shrink-0 grid-cols-3 divide-x divide-slate-200 border-b border-slate-300 bg-white text-center" aria-live="polite">
             <Stat label={dlg.scope === "line" ? "Line amount" : "Basic amount"} value={shown(basic)} />
-            <Stat label="Terms" value={totalText === "—" ? "—" : shown(totalText)} />
-            <Stat label={dlg.scope === "line" ? "Net amount after terms" : `${o.noun.charAt(0).toUpperCase()}${o.noun.slice(1)} net amount`} value={shown(net)} strong />
+            <Stat label={dlg.scope === "line" ? "Line terms" : "Net terms"} value={totalText === "—" ? "—" : shown(totalText)} />
+            <Stat label={dlg.scope === "line" ? "Basic amount" : "Net amount"} value={shown(net)} strong />
           </div>
           <div className="min-h-0 flex-1 overflow-auto p-3">
             <TermsGrid terms={draft} onChange={setDraft} lookups={lookups!} masters={masters} lineCount={liveLines} readOnly={ro} errors={errs} clearError={clear} contextKey={o.contextKey}
-              calculationPreview={ro ? undefined : live?.terms} previewError={live?.message} excludeCategory="COSTING" productwiseOnly={dlg.scope === "line"} fixedLineNumber={dlg.scope === "line" ? dlg.lineNumber : undefined} fixedRows={!ro} />
+              calculationPreview={ro ? undefined : live?.terms} previewError={live?.message} excludeCategory="COSTING" productwiseOnly={dlg.scope === "line"} fixedLineNumber={dlg.scope === "line" ? dlg.lineNumber : undefined} fixedRows={!ro}
+              editableResult hideLineNumber={dlg.scope === "header"} />
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-300 bg-slate-50 px-3 py-2">
             <span className="text-[12px] text-slate-600">{filled} term(s) with a value</span>

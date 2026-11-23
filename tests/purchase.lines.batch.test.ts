@@ -6,7 +6,7 @@ import { hasBatch } from "../src/components/purchase/BatchDialog";
 import { blankLine, type Product } from "../src/lib/purchaseForm";
 import type { PLookups } from "../src/api";
 
-// Purchase bill lines: one "More" column (location, batch, expiry) after Net amount; the alternate qty / unit columns are always there.
+// Purchase bill lines: one "More" column (location, batch, expiry) after Basic amount; the alternate qty / unit columns are always there.
 
 const product: Product = { id: 1, code: "OIL", description: "Oil", type: "STOCK", isActive: true, baseUnitId: 1, tracksBatch: true, tracksExpiry: true, defaultLocationId: null, purchaseRate: "120", alternateUnits: [] };
 const lookups = { vendors: [], subLedgers: [], agents: [], locations: [], units: [{ id: 1, code: "LTR", name: "Litre", decimalPlaces: 2 }], products: [product], terms: [], fiscalYears: [] } as unknown as PLookups;
@@ -17,16 +17,16 @@ const render = (batchNo: string, kind: "bill" | "challan" = "bill", defaultMoreO
 const heads = (html: string) => [...html.matchAll(/<span class="(?:xl-rowhead|text-right|text-center|)">([^<]*)<\/span>/g)].map((m) => m[1]).filter(Boolean);
 
 describe("purchase bill lines grid", () => {
-  it("folds More away by default: the alternate columns are always there and Net amount is last", () => {
+  it("folds More away by default: the alternate columns are always there and Basic amount is last", () => {
     const h = heads(render(""));
     expect(h).toEqual(expect.arrayContaining(["Alt Qty", "Alt Unit"]));
     for (const gone of ["More", "Linked to", "Batch", "Mfg Date", "Expiry", "Location"]) expect(h).not.toContain(gone);
-    expect(h[h.length - 1]).toBe("Net Amount");
+    expect(h[h.length - 1]).toBe("Basic Amount");
     expect(render("")).toContain("Show More and Linked to columns");
   });
-  it("opened, one More column follows Net amount and shows what is filled", () => {
+  it("opened, one More column follows Basic amount and shows what is filled", () => {
     const h = heads(render("", "bill", true));
-    expect(h.indexOf("More")).toBe(h.indexOf("Net Amount") + 1);
+    expect(h.indexOf("More")).toBe(h.indexOf("Basic Amount") + 1);
     expect(h).not.toContain("Batch");
     expect(render("", "bill", true)).toContain("Add location");
     expect(render("B-17", "bill", true)).toContain("B-17");

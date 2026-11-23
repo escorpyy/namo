@@ -19,6 +19,8 @@ interface Props {
   compact?: boolean;
   /** Show only basic, net terms and net amount in a purchase bill footer. */
   summaryOnly?: boolean;
+  /** Purchase Bill display subtotal: item amounts plus the signed linewise terms. */
+  basicAmountOverride?: string;
   /** Optional interactive control in place of the compact Net terms value. */
   termsAction?: ReactNode;
   /** The totals as a small two-column table (label | amount) for a screen that is laid out in tables. */
@@ -33,7 +35,7 @@ const signedMoney = (value: unknown) => {
   return text.startsWith("-") ? `− ${money(text.slice(1))}` : money(text);
 };
 
-export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, hasLines, compact, summaryOnly, termsAction, table, noun = "bill" }: Props) {
+export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, hasLines, compact, summaryOnly, basicAmountOverride, termsAction, table, noun = "bill" }: Props) {
   const showSaved = readOnly && !!savedDoc;
   let savedAdditions = "0.00";
   let savedDeductions = "0.00";
@@ -55,7 +57,7 @@ export function PurchaseInvoiceTotals({ preview, savedDoc, readOnly, hasLines, c
   }
 
   const entries = [
-    { label: "Basic amount", value: showSaved ? safeMoney(savedDoc?.basicAmount) : money(preview.basicAmount) },
+    { label: "Basic amount", value: summaryOnly && basicAmountOverride !== undefined ? money(basicAmountOverride) : showSaved ? safeMoney(savedDoc?.basicAmount) : money(preview.basicAmount) },
     { label: "Additions", value: showSaved ? savedAdditions : preview.additions === null ? "—" : money(preview.additions) },
     { label: "Deductions", value: showSaved ? savedDeductions : preview.deductions === null ? "—" : money(preview.deductions) },
     { label: "Net terms", value: showSaved ? signedMoney(savedDoc?.termAmount) : preview.termAmount === null ? "—" : signedMoney(preview.termAmount) },

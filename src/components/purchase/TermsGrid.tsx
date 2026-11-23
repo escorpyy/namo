@@ -33,12 +33,19 @@ interface TProps {
   excludeCategory?: "COSTING";
   productwiseOnly?: boolean;
   fixedLineNumber?: number;
+  /** Simplified dialog mode: the Result field itself edits/clears an override. */
+  editableResult?: boolean;
+  /** Header terms have no line-number field. */
+  hideLineNumber?: boolean;
   /** The rows are a fixed list (every active term, in sequence): no term can be removed, replaced or added; only the values change. */
   fixedRows?: boolean;
 }
 
 // Billing terms: discount, VAT, freight ... The active preview is calculated by the same shared exact engine as the server.
-export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOnly, errors, clearError, contextKey, calculationPreview, previewError, category, excludeCategory, productwiseOnly, fixedLineNumber, fixedRows }: TProps) {
+export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOnly, errors, clearError, contextKey, calculationPreview, previewError, category, excludeCategory, productwiseOnly, fixedLineNumber, fixedRows, editableResult, hideLineNumber }: TProps) {
+  const gridCols = editableResult
+    ? ["34px", "minmax(210px,1.5fr)", ...(hideLineNumber ? [] : ["72px"]), "112px", "112px", "112px", "30px"].join(" ")
+    : TCOLS;
   const opts = useMemo<ReferenceOption[]>(() => pickableTerms(lookups.terms, { category, excludeCategory, productwiseOnly }).map((t) => ({ value: String(t.id), label: `${t.code} — ${t.name}`, code: t.code, name: t.name, detail: `${t.category} · ${t.nature} · ${t.calcBase.replaceAll("_", " ")} · seq ${t.sequence}`, searchText: `${t.sequence} ${t.isProductwise ? "productwise" : "document"}`, isActive: t.isActive, badge: t.nature === "DEDUCTIVE" ? "less" : undefined })), [lookups.terms, category, excludeCategory, productwiseOnly]);
   const patch = (i: number, p: Partial<TermRow>) => { onChange(terms.map((t, k) => (k === i ? { ...t, ...p } : t))); clearError(...Object.keys(errors).filter((k) => k.startsWith(`T.${i}.`))); };
   const pick = (i: number, id: string) => {
@@ -71,9 +78,10 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
       const above = terms[r - 1];
       if (!above || (fixedRows && col === "t")) return;
       if (col === "t") { if (above.termId) pick(r, above.termId); return; }
+      const aboveResult = calculationPreview?.get(above.key)?.finalAmount ?? (above.isOverridden ? above.overrideAmount : above.finalAmount);
       const one: Partial<TermRow> | undefined = col === "l" ? { lineNumber: above.lineNumber } : col === "c" ? { calcType: above.calcType }
         : col === "v" ? (terms[r].calcType === "PERCENT" ? { rate: above.calcType === "PERCENT" ? above.rate : above.inputAmount } : { inputAmount: above.calcType === "PERCENT" ? above.rate : above.inputAmount })
-        : col === "ov" ? { isOverridden: above.isOverridden } : col === "o" ? { overrideAmount: above.overrideAmount } : undefined;
+        : col === "ov" ? { isOverridden: above.isOverridden } : col === "o" ? (editableResult ? aboveResult ? { isOverridden: true, overrideAmount: aboveResult } : { isOverridden: false, overrideAmount: "" } : { overrideAmount: above.overrideAmount }) : undefined;
       if (one) patch(r, { ...one, finalAmount: "" });
     },
   });
@@ -84,8 +92,10 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
     <div className="lg-card lg-grid">
       <div className="lg-scroll overflow-x-auto focus-visible:outline-2 focus-visible:outline-cobalt-700" data-grid="terms" {...gridRows.gridProps} onKeyDown={gridRows.handleKey} aria-label="Billing terms; scroll horizontally to see all columns">
         <div className="min-w-max">
-          <div style={{ gridTemplateColumns: TCOLS }} className="lg-th xl-head">
-            <span className="xl-rowhead">#</span><span>Term</span><span className="text-right">Line</span><span>Calc</span><span className="text-right">Value</span><span className="text-center">Override</span><span className="text-right">Own amount</span><span className="text-right">Result</span><span></span>
+          <div style={{ gridTemplateColumns: gridCols }} className="lg-th xl-head">
+            <span className="xl-rowhead">#</span><span>Term</span>{!hideLineNumber && <span className="text-right">Line</span>}<span>Calc</span><span className="text-right">Value</span>
+            {!editableResult && <><span className="text-center">Override</span><span className="text-right">Own amount</span></>}
+            <span className="text-right">Result</span><span></span>
           </div>
           {terms.map((t, i) => {
             const m = masters.get(t.termId);
@@ -97,26 +107,37 @@ export function TermsGrid({ terms, onChange, lookups, masters, lineCount, readOn
             const msg = Object.entries(errors).find(([k, v]) => k.startsWith(`T.${i}.`) && v)?.[1];
             return (
               <div key={t.key} data-row={i} className={`border-b border-slate-100 transition-colors ${rowSel === i ? "bg-cobalt-50 ring-2 ring-inset ring-cobalt-700" : msg ? "bg-rose-50" : "hover:bg-slate-50/80"}`}>
-                <div style={{ gridTemplateColumns: TCOLS }} data-selected={rowSel === i} className="xl-row">
+                <div style={{ gridTemplateColumns: gridCols }} data-selected={rowSel === i} className="xl-row">
                   <button type="button" className="xl-rowhead" {...gridRows.rowHeadProps(i)}>{i + 1}</button>
                   <MasterReferencePicker fieldName={`T.${i}.t`} label="Term" required scopeKey="terms" createMaster={{ key: "terms" }} contextKey={contextKey} placeholder="Choose term…" value={t.termId} hasError={bad("t")} options={opts} disabled={off || fixedRows} onChange={(v) => pick(i, v)} onCommit={afterCombo} />
-                  <input data-field={`T.${i}.l`} disabled={off || fixedLineNumber !== undefined} inputMode="numeric" value={fixedLineNumber === undefined ? t.lineNumber : String(fixedLineNumber)} placeholder={m?.isProductwise ? "Line" : "—"} onChange={decOnly(INT, (v) => patch(i, { lineNumber: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("l", "text-right tabular-nums")} aria-label={fixedLineNumber === undefined ? `Line number (1-${lineCount})` : `Line ${fixedLineNumber}`} />
+                  {!hideLineNumber && <input data-field={`T.${i}.l`} disabled={off || fixedLineNumber !== undefined} inputMode="numeric" value={fixedLineNumber === undefined ? t.lineNumber : String(fixedLineNumber)} placeholder={m?.isProductwise ? "Line" : "—"} onChange={decOnly(INT, (v) => patch(i, { lineNumber: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("l", "text-right tabular-nums")} aria-label={fixedLineNumber === undefined ? `Line number (1-${lineCount})` : `Line ${fixedLineNumber}`} />}
                   <select data-field={`T.${i}.c`} disabled={off || !m || auto} value={t.calcType} onChange={(e) => patch(i, { calcType: e.target.value as TermRow["calcType"] })} className={cls("c")} aria-label="Calculated as">
                     <option value="PERCENT">Percent</option><option value="AMOUNT">Amount</option>
                   </select>
                   <input data-field={`T.${i}.v`} disabled={off || !m || auto} title={auto ? "Worked out automatically" : undefined} inputMode="decimal" autoComplete="off" placeholder={auto ? "Auto" : t.calcType === "PERCENT" ? "0.00 %" : "0.00"}
                     value={t.calcType === "PERCENT" ? t.rate : t.inputAmount} onChange={decOnly(RATE, (v) => patch(i, t.calcType === "PERCENT" ? { rate: v } : { inputAmount: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("v", "text-right tabular-nums")} aria-label="Value" />
-                  <label className="flex items-center justify-center gap-1 px-2 text-[12px]"><input data-field={`T.${i}.ov`} type="checkbox" disabled={off || !m || noOwn} checked={t.isOverridden && !noOwn} onChange={(e) => patch(i, { isOverridden: e.target.checked, overrideAmount: e.target.checked ? t.overrideAmount : "" })} /> use own</label>
-                  <input data-field={`T.${i}.o`} disabled={off || !t.isOverridden} inputMode="decimal" autoComplete="off" placeholder="0.00" value={t.overrideAmount} onChange={decOnly(RATE, (v) => patch(i, { overrideAmount: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("o", "text-right tabular-nums")} aria-label="Amount to use instead" />
+                  {!editableResult && <>
+                    <label className="flex items-center justify-center gap-1 px-2 text-[12px]"><input data-field={`T.${i}.ov`} type="checkbox" disabled={off || !m || noOwn} checked={t.isOverridden && !noOwn} onChange={(e) => patch(i, { isOverridden: e.target.checked, overrideAmount: e.target.checked ? t.overrideAmount : "" })} /> use own</label>
+                    <input data-field={`T.${i}.o`} disabled={off || !t.isOverridden} inputMode="decimal" autoComplete="off" placeholder="0.00" value={t.overrideAmount} onChange={decOnly(RATE, (v) => patch(i, { overrideAmount: v }))} onFocus={(e) => e.currentTarget.select()} className={cls("o", "text-right tabular-nums")} aria-label="Amount to use instead" />
+                  </>}
                   {(() => {
                     const live = calculationPreview !== undefined;
                     const result = calculationPreview?.get(t.key);
-                    const amount = live ? result?.finalAmount : t.finalAmount;
-                    const nature = live ? result?.nature : t.nature ?? m?.nature;
+                    const amount = live ? result?.finalAmount ?? (t.isOverridden && !auto ? t.overrideAmount : undefined) : t.finalAmount;
+                    const nature = result?.nature ?? t.nature ?? m?.nature;
                     const formula = result
-                      ? `${auto ? `Live: ${money(result.baseAmount)} rounded ${m?.roundingMethod === "UP" ? "up" : m?.roundingMethod === "DOWN" ? "down" : "to the nearest rupee"} = ${money(result.calculatedAmount)}` : t.calcType === "PERCENT" ? `Live: base ${money(result.baseAmount)} × ${t.rate || "0"}% = ${money(result.calculatedAmount)}` : `Live: fixed amount ${money(t.inputAmount || "0")} = ${money(result.calculatedAmount)}`}${t.isOverridden && !noOwn ? `; using override ${money(t.overrideAmount)}` : ""}.`
+                      ? `${auto ? `Live: ${money(result.baseAmount)} rounded ${m?.roundingMethod === "UP" ? "up" : m?.roundingMethod === "DOWN" ? "down" : "to the nearest rupee"} = ${money(result.calculatedAmount)}` : t.calcType === "PERCENT" ? `Live: base ${money(result.baseAmount)} × ${t.rate || "0"}% = ${money(result.calculatedAmount)}` : `Live: fixed amount ${money(t.inputAmount || "0")} = ${money(result.calculatedAmount)}`}${t.isOverridden && !auto ? `; manually set result ${money(t.overrideAmount)}` : ""}.`
                       : live ? (previewError || "Complete the bill inputs to calculate this term.") : "Calculated when the bill was last saved.";
                     const shown = amount !== undefined && amount !== "" ? `${nature === "DEDUCTIVE" ? "− " : "+ "}${money(amount)}` : "—";
+                    if (editableResult && !off) {
+                      const value = t.isOverridden && !auto ? t.overrideAmount : result?.finalAmount ?? (live ? "" : t.finalAmount);
+                      return <div className="flex min-w-0 items-center gap-1" title={`${formula} Edit the result to set an override; clear it to resume automatic calculation.`}>
+                        <span className="shrink-0 text-[12px] text-slate-500" aria-hidden>{nature === "DEDUCTIVE" ? "−" : "+"}</span>
+                        <input data-field={`T.${i}.o`} disabled={!m || noOwn} inputMode="decimal" autoComplete="off" value={value}
+                          onChange={decOnly(RATE, (v) => patch(i, v === "" ? { isOverridden: false, overrideAmount: "", finalAmount: "" } : { isOverridden: true, overrideAmount: v, finalAmount: "" }))}
+                          onFocus={(e) => e.currentTarget.select()} className={cls("o", "min-w-0 text-right tabular-nums")} aria-label={`Result amount for ${m?.name ?? "term"}`} />
+                      </div>;
+                    }
                     return <span className="text-right tabular-nums text-slate-700" title={formula} aria-label={`${m?.name ?? "Billing term"}: ${shown}. ${formula}`}>{shown}</span>;
                   })()}
                   {fixedRows ? <span /> : <button type="button" data-nav="remove-term" disabled={off} onClick={() => remove(i)} title="Remove term (Delete when the row is selected)" aria-label="Remove term" className="h-8 w-8 grid place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-2 focus-visible:outline-cobalt-700 disabled:opacity-30"><X size={14} /></button>}

@@ -29,6 +29,7 @@ interface Props {
   placeholder?: string;
   hasError?: boolean;
   disabled?: boolean;
+  className?: string;
   scopeKey: string;
   contextKey?: string;
   /**
@@ -66,7 +67,7 @@ const readHistory = (key: string): PickerHistory => {
   }
 };
 
-export function MasterReferencePicker({ fieldName, label, value, selectedSubtext, options, onChange, onCommit, onBlurField, placeholder, hasError, disabled, scopeKey, contextKey = "global", required = false, allowClear, createMaster }: Props) {
+export function MasterReferencePicker({ fieldName, label, value, selectedSubtext, options, onChange, onCommit, onBlurField, placeholder, hasError, disabled, className = "", scopeKey, contextKey = "global", required = false, allowClear, createMaster }: Props) {
   const clearable = allowClear ?? !required;
   const uid = useId().replace(/:/g, "");
   const dialogId = `master-picker-${uid}`;
@@ -358,7 +359,7 @@ export function MasterReferencePicker({ fieldName, label, value, selectedSubtext
               openDialog(event.key);
             }
           }}
-          className={`fld min-w-0 pr-8 text-left ${invalid ? "fld-err" : ""} ${disabled ? "bg-slate-100 text-slate-600" : "cursor-pointer"}`}
+          className={`fld min-w-0 pr-8 text-left ${invalid ? "fld-err" : ""} ${disabled ? "bg-slate-100 text-slate-600" : "cursor-pointer"} ${className}`}
         />
         <ChevronDown size={14} aria-hidden="true" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
       </div>

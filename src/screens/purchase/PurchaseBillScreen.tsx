@@ -16,6 +16,7 @@ import {
   type LineRow, type TermRow,
 } from "../../lib/purchaseForm";
 import { parseDec } from "../../../shared/decimal";
+import { fmt, toMicro } from "../../../shared/purchase-calculation";
 import { isForeign, nprRate } from "../../lib/foreignRate";
 import { adToBs } from "../../lib/nepaliDate";
 import { previewPurchase } from "../../../shared/purchase-preview";
@@ -33,7 +34,7 @@ const HELP: [string, string][] = [
   ["Alt+, / Alt+.", "Previous / next tab"],
   ["Alt+W", "Close this tab"],
   ["Alt+1 / Alt+2", "Sidebar / the form"],
-  ["Alt+Shift+H / V / S", "Open the header / vendor / stock panel"],
+  ["Alt+Shift+H / V / S", "Toggle the header or show/hide the Vendor / Stock rail"],
   ["Alt+Shift+T", "Open header terms"],
   ["Post", "Writes the journal voucher; a posted bill cannot be edited, only reversed"],
 ];
@@ -311,8 +312,9 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
       }
       if (e.code === "KeyV" || e.code === "KeyS") {
         e.preventDefault();
-        setRightTab(e.code === "KeyV" ? "vendor" : "stock");
-        setRightOff(false);
+        const tab = e.code === "KeyV" ? "vendor" : "stock";
+        if (!rightOff && rightTab === tab) setRightOff(true);
+        else { setRightTab(tab); setRightOff(false); }
         return;
       }
       if (e.code !== "KeyH") return;
@@ -322,7 +324,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [setRightOff]);
+  }, [rightOff, rightTab, setRightOff]);
   // a save that found a problem in a header field opens the header again, so the field can be seen and fixed
   useEffect(() => {
     if (Object.entries(s.errors).some(([key, message]) => message && !/^(L\.|T\.|imp\.)/.test(key) && key !== "lines" && key !== "terms")) setHdrOff(false);
@@ -402,6 +404,17 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     // after the automatic dialog the flow carries on to the lines; after a manual one the cursor goes back to the button
     window.setTimeout(() => ((auto ? document.querySelector<HTMLElement>('[data-field="L.0.p"]:not(:disabled)') : null) ?? document.querySelector<HTMLElement>('[data-nav="import-details"]'))?.focus(), 40);
   };
+  const billBasicAmount = (() => {
+    try {
+      let total = toMicro(ro && doc ? str(doc.basicAmount) : invoicePreview.basicAmount);
+      for (const term of f.terms) {
+        if (isBlankTerm(term) || !masters.get(term.termId)?.isProductwise) continue;
+        const signed = ro ? T.signedOf(term) : invoicePreview.status === "ready" ? invoicePreview.terms.get(term.key)?.signedAmount : undefined;
+        if (signed) total += toMicro(signed);
+      }
+      return fmt(total, 2);
+    } catch { return invoicePreview.basicAmount; }
+  })();
   const signedMoney = (value: string) => {
     const formatted = money(value);
     return formatted.startsWith("-") ? `− ${formatted.slice(1)}` : formatted;
@@ -500,7 +513,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
 
         <footer className="tape flex shrink-0 flex-wrap items-center justify-between gap-x-5 gap-y-2 px-5 py-3">
           <div className="min-w-0 flex-1">
-            <PurchaseInvoiceTotals compact summaryOnly preview={invoicePreview} savedDoc={doc} readOnly={ro} hasLines={liveLines > 0}
+            <PurchaseInvoiceTotals compact summaryOnly basicAmountOverride={billBasicAmount} preview={invoicePreview} savedDoc={doc} readOnly={ro} hasLines={liveLines > 0}
               termsAction={<button type="button" data-nav="header-terms" onClick={() => T.open({ scope: "header" })} title={`Alt+Shift+T · ${termsTooltip}`}
                 aria-label={`${ro ? "View terms" : "Net terms"}, ${signedMoney(T.header.amount)}. Alt+Shift+T opens header terms.`}
                 className={`flex flex-col items-start text-left ${termsError ? "text-rose-300 hover:text-rose-200" : "text-white hover:text-brass"}`}>
