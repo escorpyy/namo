@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "rea
 import { flushSync } from "react-dom";
 import { codeSpec } from "../../shared/codeRules";
 import { MASTERS, matchWhere, type MasterDef, type Opt } from "../../shared/masters";
-import { ApiError, codeRulesApi, ledgerReassignApi, masterApi } from "../api";
+import { ApiError, codeRulesApi, ledgerReassignApi, masterApi, productGLDefaultsApi, type ProductGLDefaults } from "../api";
 import { useOnMasterChanged } from "../lib/masterEvents";
 import { emptyForm, recordLabel, recordTitle, sameForm, tabsOf, toForm, toPayload, validate, type Errors, type FormState, type Row } from "../lib/form";
 import type { Mode, MsgKind, StatusInfo } from "../types";
@@ -41,6 +41,8 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [mode, setMode] = useState<Mode>("new");
   const [form, setForm] = useState<FormState>(() => emptyForm(def));
+  const [productGLDefaults, setProductGLDefaults] = useState<ProductGLDefaults | null>(null);
+  const lastProductDefaults = useRef<Record<string, string>>({});
   const [errors, setErrors] = useState<Errors>({});
   const [search, setSearch] = useState("");
   const [dialog, setDialog] = useState<DialogSpec | null>(null);
@@ -70,6 +72,34 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
     setTimeout(() => rawFocus(n), f?.tab ? 40 : 0);
   };
   const selected = items.find((i) => i.id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (def.key !== "products") { setProductGLDefaults(null); return; }
+    let live = true;
+    productGLDefaultsApi.get(companyId).then((defaults) => { if (live) setProductGLDefaults(defaults); })
+      .catch(() => { if (live) setProductGLDefaults(null); });
+    return () => { live = false; };
+  }, [companyId, def.key]);
+  const withProductGLDefaults = (value: FormState, previous = lastProductDefaults.current): FormState => {
+    if (def.key !== "products" || !productGLDefaults || mode !== "new") return value;
+    const type = String(value.type ?? "STOCK");
+    const defaults = type === "STOCK" ? productGLDefaults.stock : type === "NON_STOCK" ? productGLDefaults.nonStock : {};
+    const supported = ["openingGLId", "closingPLGLId", "closingBSGLId", "purchaseGLId", "purchaseReturnGLId", "salesGLId", "salesReturnGLId"];
+    const next = { ...value };
+    for (const key of supported) {
+      const current = String(value[key] ?? "");
+      const oldDefault = previous[key] ?? "";
+      if (!current || current === oldDefault) next[key] = defaults[key as keyof typeof defaults] == null ? "" : String(defaults[key as keyof typeof defaults]);
+    }
+    lastProductDefaults.current = Object.fromEntries(supported.map((key) => [key, defaults[key as keyof typeof defaults] == null ? "" : String(defaults[key as keyof typeof defaults])]));
+    return next;
+  };
+  useEffect(() => {
+    if (def.key !== "products" || !productGLDefaults || mode !== "new") return;
+    setForm((current) => withProductGLDefaults(current));
+    // Defaults load after the form is mounted; fill only blank or previously inherited values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productGLDefaults, def.key, mode, companyId]);
 
   const baseline = mode === "edit" && selected ? toForm(def, selected) : mode === "new" && autoCode ? { ...emptyForm(def), code: autoCode } : emptyForm(def); // a suggested code alone is not a change
   const dirty = mode !== "view" && !sameForm(def, form, baseline);
@@ -188,7 +218,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
   };
 
   const newRec = () => guard(resetToNew);
-  const clear = () => (dirty ? guard(resetToNew) : (setForm(emptyForm(def)), setErrors({}), focusField(firstField)));
+  const clear = () => (dirty ? guard(resetToNew) : (setForm(withProductGLDefaults(emptyForm(def))), setErrors({}), focusField(firstField)));
   const edit = () => { if (mode === "view" && selected) { setMode("edit"); setErrors({}); setTimeout(() => focusField(firstField), 0); } };
   const cancelEdit = () => guard(() => {
     if (!selected) return;
@@ -326,7 +356,7 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
 
   const onChangeForm = (raw: FormState) => {
     if (codeSpecOf && mode === "new" && raw.code !== form.code) codeTouched.current = !!raw.code && raw.code !== autoRef.current; // typing a code takes over; clearing it hands it back to the rule
-    const f = suggested(raw);
+    const f = withProductGLDefaults(suggested(raw));
     const next: Errors = { ...errors };
     for (const k of Object.keys(f)) if (f[k] !== form[k]) delete next[k]; // typing shuru, purana error hatao
     setForm(f); setErrors(next);

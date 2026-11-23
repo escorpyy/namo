@@ -111,8 +111,38 @@ export function productRouter(def: MasterDef) {
     }
   }
 
+  const PRODUCT_GL_SOURCES = {
+    STOCK: [
+      ["openingGLId", "openingGLDefaulted", "OPENING_STOCK_PL"],
+      ["closingPLGLId", "closingPLGLDefaulted", "CLOSING_STOCK_PL"],
+      ["closingBSGLId", "closingBSGLDefaulted", "CLOSING_STOCK_BS"],
+      ["purchaseGLId", "purchaseGLDefaulted", "PURCHASE_ACCOUNT"],
+      ["purchaseReturnGLId", "purchaseReturnGLDefaulted", "PURCHASE_RETURN_ACCOUNT"],
+      ["salesGLId", "salesGLDefaulted", "SALES_ACCOUNT"],
+      ["salesReturnGLId", "salesReturnGLDefaulted", "SALES_RETURN_ACCOUNT"],
+    ],
+    NON_STOCK: [
+      ["purchaseGLId", "purchaseGLDefaulted", "PURCHASE_ACCOUNT"],
+      ["salesGLId", "salesGLDefaulted", "SALES_ACCOUNT"],
+    ],
+  } as const;
+
+  async function defaultSources(companyId: number, d: Record<string, any>, old?: Record<string, any>) {
+    const mapRows = await db.select({ role: S.generalLedgerSetup.role, generalLedgerId: S.generalLedgerSetup.generalLedgerId })
+      .from(S.generalLedgerSetup).where(eq(S.generalLedgerSetup.companyId, companyId));
+    const mappings = new Map(mapRows.map((row) => [row.role, row.generalLedgerId]));
+    const fields = PRODUCT_GL_SOURCES[d.type as keyof typeof PRODUCT_GL_SOURCES] ?? [];
+    return Object.fromEntries(fields.map(([valueKey, sourceKey, role]) => {
+      const value = d[valueKey];
+      const inherited = old
+        ? old[sourceKey] === true && old[valueKey] === value
+        : value != null && mappings.get(role) === value;
+      return [sourceKey, inherited];
+    }));
+  }
+
   // Type ke hisaab se detail table + child rows likho
-  async function writeDetail(tx: any, id: number, d: Record<string, any>, create: boolean) {
+  async function writeDetail(tx: any, id: number, d: Record<string, any>, create: boolean, sources: Record<string, boolean>) {
     const upsert = async (table: any, vals: Record<string, any>): Promise<number> => {
       if (create) return (await tx.insert(table).values({ productId: id, ...vals }).returning({ id: table.id }))[0].id;
       const hit = await tx.update(table).set(vals).where(eq(table.productId, id)).returning({ id: table.id });
@@ -127,13 +157,16 @@ export function productRouter(def: MasterDef) {
           minStock: str(d.minStock), maxStock: str(d.maxStock), reorderLevel: str(d.reorderLevel), reorderQty: str(d.reorderQty),
           openingGLId: d.openingGLId, closingPLGLId: d.closingPLGLId, closingBSGLId: d.closingBSGLId,
           purchaseGLId: d.purchaseGLId, purchaseReturnGLId: d.purchaseReturnGLId, salesGLId: d.salesGLId, salesReturnGLId: d.salesReturnGLId,
+          openingGLDefaulted: sources.openingGLDefaulted, closingPLGLDefaulted: sources.closingPLGLDefaulted, closingBSGLDefaulted: sources.closingBSGLDefaulted,
+          purchaseGLDefaulted: sources.purchaseGLDefaulted, purchaseReturnGLDefaulted: sources.purchaseReturnGLDefaulted,
+          salesGLDefaulted: sources.salesGLDefaulted, salesReturnGLDefaulted: sources.salesReturnGLDefaulted,
           defaultVendorId: d.defaultVendorId,
         });
         await tx.delete(AU).where(eq(AU.stockDetailId, sdId));
         if (d.alternateUnits.length) await tx.insert(AU).values(d.alternateUnits.map((a: any) => ({ stockDetailId: sdId, unitId: a.unitId, conversionFactor: String(a.conversionFactor) })));
         break;
       }
-      case "NON_STOCK": await upsert(NS, { unitId: d.unitId, salesGLId: d.salesGLId, purchaseGLId: d.purchaseGLId }); break;
+      case "NON_STOCK": await upsert(NS, { unitId: d.unitId, salesGLId: d.salesGLId, purchaseGLId: d.purchaseGLId, salesGLDefaulted: sources.salesGLDefaulted, purchaseGLDefaulted: sources.purchaseGLDefaulted }); break;
       case "SERVICE": await upsert(SV, { unitId: d.serviceUnitId, salesGLId: d.salesGLId, purchaseGLId: d.purchaseGLId }); break;
       case "FIXED_ASSET":
         await upsert(FA, {
@@ -164,9 +197,10 @@ export function productRouter(def: MasterDef) {
     if (!Number.isInteger(companyId)) throw new HttpError(400, "companyId is required.");
     const d = parse(req.body);
     await check(d, companyId);
+    const sources = await defaultSources(companyId, d);
     const id = await inActorTx(await actorOf(req), undefined, async (tx: any) => {
       const [p] = await tx.insert(P).values({ companyId, type: d.type, ...headerVals(d) }).returning({ id: P.id });
-      await writeDetail(tx, p.id, d, true);
+      await writeDetail(tx, p.id, d, true, sources);
       return p.id;
     });
     res.status(201).json((await selectRows({ id }))[0]);
@@ -191,9 +225,13 @@ export function productRouter(def: MasterDef) {
       changes.push({ side, from: cur.ledgerId, to: Number(next), periods: cur.periods, scope: scope === "ALL" ? "ALL" : "UPCOMING" });
     }
     const label = `${ex.code} — ${ex.description}`;
+    const old = d.type === "STOCK"
+      ? await db.select().from(SD).where(eq(SD.productId, id)).then((rows) => rows[0])
+      : await db.select().from(NS).where(eq(NS.productId, id)).then((rows) => rows[0]);
+    const sources = await defaultSources(ex.companyId, d, old as Record<string, any> | undefined);
     const windowTo = await inActorTx(changes.length ? { ...actor, reason: `Ledger of product "${label}" changed in the master (${changes.map((c) => `${c.side.toLowerCase()}: ${c.scope === "ALL" ? "transactions to date are reassigned" : "upcoming transactions only"}`).join("; ")})` } : actor, undefined, async (tx: any) => {
       await tx.update(P).set(headerVals(d)).where(eq(P.id, id));
-      await writeDetail(tx, id, d, false);
+      await writeDetail(tx, id, d, false, sources);
       return ((await tx.execute(sql`select to_char(clock_timestamp() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as at`)) as any)[0].at as string;
     });
     const jobs: { id: number; total: number }[] = [];

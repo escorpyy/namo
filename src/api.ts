@@ -86,6 +86,18 @@ export const glSetupApi = {
   save: (companyId: number, userId: number, roles: GLSetupRole[]) =>
     req<{ roles: GLSetupRole[]; ledgers: GLSetupLedger[] }>("/api/gl-setup", { method: "PUT", body: JSON.stringify({ companyId, userId, roles }) }),
 };
+export interface ProductGLDefaults {
+  companyId: number;
+  stock: { openingGLId: number | null; closingPLGLId: number | null; closingBSGLId: number | null; purchaseGLId: number | null; purchaseReturnGLId: number | null; salesGLId: number | null; salesReturnGLId: number | null };
+  nonStock: { purchaseGLId: number | null; salesGLId: number | null };
+}
+export const productGLDefaultsApi = {
+  get: (companyId: number) => req<ProductGLDefaults>(`/api/product-gl-defaults?companyId=${companyId}`),
+  apply: (companyId: number, userId: number, roles: GlRoleKey[], mode: "UPDATE_ALL" | "PRESERVE_EXPLICIT") =>
+    req<{ ok: true; affected: number; mode: "UPDATE_ALL" | "PRESERVE_EXPLICIT" }>("/api/product-gl-defaults/apply", {
+      method: "POST", body: JSON.stringify({ companyId, userId, roles, mode }),
+    }),
+};
 
 // Ledger change on a master: how many transactions already carry the old ledger, and the background job that moves them
 export type LedgerJobKind = "PURCHASE_TERM" | "SALES_TERM" | "PRODUCT_PURCHASE" | "PRODUCT_SALES";

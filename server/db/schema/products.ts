@@ -243,25 +243,32 @@ export const stockDetail = pgTable(
     openingGLId: integer().references(() => generalLedger.id, {
       onDelete: "restrict",
     }),
+    openingGLDefaulted: boolean().notNull().default(false),
     closingPLGLId: integer().references(() => generalLedger.id, {
       onDelete: "restrict",
     }),
+    closingPLGLDefaulted: boolean().notNull().default(false),
     closingBSGLId: integer().references(() => generalLedger.id, {
       onDelete: "restrict",
     }),
+    closingBSGLDefaulted: boolean().notNull().default(false),
 
     purchaseGLId: integer().references(() => generalLedger.id, {
       onDelete: "restrict",
     }),
+    purchaseGLDefaulted: boolean().notNull().default(false),
     purchaseReturnGLId: integer().references(() => generalLedger.id, {
       onDelete: "restrict",
     }),
+    purchaseReturnGLDefaulted: boolean().notNull().default(false),
     salesGLId: integer().references(() => generalLedger.id, {
       onDelete: "restrict",
     }),
+    salesGLDefaulted: boolean().notNull().default(false),
     salesReturnGLId: integer().references(() => generalLedger.id, {
       onDelete: "restrict",
     }),
+    salesReturnGLDefaulted: boolean().notNull().default(false),
 
     defaultVendorId: integer().references(() => party.id, {
       onDelete: "set null",
@@ -330,9 +337,11 @@ export const nonStockDetail = pgTable(
     salesGLId: integer()
       .notNull()
       .references(() => generalLedger.id, { onDelete: "restrict" }),
+    salesGLDefaulted: boolean().notNull().default(false),
     purchaseGLId: integer()
       .notNull()
       .references(() => generalLedger.id, { onDelete: "restrict" }),
+    purchaseGLDefaulted: boolean().notNull().default(false),
 
     createdAt: createdAt(),
     updatedAt: updatedAt(),
