@@ -406,3 +406,22 @@ export const salesInvoiceApi = {
   post: (id: number, companyId: number, userId: number) => req<SalesInvoiceWrite>(`/api/sales/invoices/${id}/post?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId }) }),
   reverse: (id: number, companyId: number, userId: number, reason: string, date?: string) => req<{ result: Record<string, any>; document: SalesInvoiceDoc }>(`/api/sales/invoices/${id}/reverse?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId, reason, date }) }),
 };
+
+export interface SalesChallanRow {
+  id: number; challanNumber: string; challanDate: string; fiscalYear: string; customerGLId: number; customerName: string; isConfirmed: boolean; totalAmount: string; status: "DRAFT" | "CONFIRMED";
+}
+export interface SalesChallanInvoiceSeed {
+  salesChallanId: number; challanNumber: string; customerGLId: number; subLedgerId: number | null; agentId: number | null; branchId: number;
+  lines: { challanLineId: number; lineNumber?: number; productId: number; qty: string; unitId: number; rate: string; locationId: number | null; batchNo: string | null; expiryDate: string | null }[];
+}
+export const salesChallanApi = {
+  lookups: (p: { companyId: number; branchId: number; userId?: number }) => req<SalesLookups>(`/api/sales/challans/lookups?${qstr(p)}`),
+  list: (p: { companyId: number; branchId: number; fiscalYear: string; status?: string; search?: string; customerGLId?: number; limit?: number }) =>
+    req<SalesChallanRow[]>(`/api/sales/challans?${qstr(p)}`).then((rows) => ({ total: rows.length, rows })),
+  get: (id: number, companyId: number) => req<Record<string, any>>(`/api/sales/challans/${id}?companyId=${companyId}`),
+  create: (body: Record<string, unknown>) => req<{ result: Record<string, any>; document: Record<string, any> }>("/api/sales/challans", { method: "POST", body: JSON.stringify(body) }),
+  update: (id: number, companyId: number, body: Record<string, unknown>) => req<{ result: Record<string, any>; document: Record<string, any> }>(`/api/sales/challans/${id}?companyId=${companyId}`, { method: "PUT", body: JSON.stringify(body) }),
+  remove: (id: number, companyId: number, userId?: number) => req<{ result: { id: number } }>(`/api/sales/challans/${id}?${qstr({ companyId, userId })}`, { method: "DELETE" }),
+  confirm: (id: number, companyId: number, userId?: number) => req<{ result: Record<string, any>; document: Record<string, any> }>(`/api/sales/challans/${id}/confirm?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId }) }),
+  invoiceSeed: (companyId: number, challanId: number) => req<SalesChallanInvoiceSeed>(`/api/sales/invoices/from-challan/${challanId}?companyId=${companyId}`),
+};

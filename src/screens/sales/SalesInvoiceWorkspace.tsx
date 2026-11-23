@@ -1,12 +1,13 @@
 import { useMemo } from "react";
 import { Receipt } from "lucide-react";
-import { salesInvoiceApi, type PLookups, type SalesInvoiceRow } from "../../api";
+import { salesChallanApi, salesInvoiceApi, type PLookups, type SalesInvoiceRow } from "../../api";
+import { blankLine, lineFromDoc, str } from "../../lib/purchaseForm";
 import { Pill, money } from "../../components/purchase/Bits";
 import DocWorkspace, { type DocWorkspaceConfig } from "../../components/purchase/DocWorkspace";
-import SalesInvoiceEntry, { STATE_OPTIONS, STATE_TONE, toPLookups, type SForm, type SalesScreenProps } from "./SalesInvoiceScreen";
+import SalesInvoiceEntry, { STATE_OPTIONS, STATE_TONE, blankSForm, toPLookups, type SForm, type SalesScreenProps } from "./SalesInvoiceScreen";
 
 // The Sales Invoice screen: a tab strip with the invoice list first and one tab per invoice being entered or viewed.
-export default function SalesInvoiceWorkspace(p: SalesScreenProps) {
+export default function SalesInvoiceWorkspace(p: SalesScreenProps & { fromChallan?: { id: number; n: number } | null }) {
   const cfg = useMemo<DocWorkspaceConfig<SForm, SalesInvoiceRow, PLookups>>(() => ({
     plural: "Sales invoices", singular: "invoice", tabsLabel: "Sales invoice tabs", icon: <Receipt size={20} />,
     grid: "grid-cols-[130px_108px_minmax(220px,2fr)_112px_132px]", minWidth: "min-w-[760px]",
@@ -24,5 +25,18 @@ export default function SalesInvoiceWorkspace(p: SalesScreenProps) {
     list: (q) => salesInvoiceApi.list(q),
     remove: (id, companyId, userId) => salesInvoiceApi.remove(id, companyId, userId),
   }), [p.branchId, p.userId]);
-  return <DocWorkspace cfg={cfg} ctx={p} renderEntry={(e) => <SalesInvoiceEntry {...p} {...e} />} />;
+  // "Create Invoice" on a delivered challan: a new invoice tab with the customer and the still-unbilled lines filled in
+  const seed = useMemo(() => p.fromChallan ? {
+    n: p.fromChallan.n,
+    build: async (lk: PLookups): Promise<SForm> => {
+      const c = await salesChallanApi.invoiceSeed(p.companyId, p.fromChallan!.id);
+      if (!c.lines.length) throw new Error(`Challan ${c.challanNumber} is already fully billed.`);
+      const prods = new Map(lk.products.map((x) => [String(x.id), x]));
+      return {
+        ...blankSForm(lk, p.fyCode), customerGLId: str(c.customerGLId), subLedgerId: str(c.subLedgerId), agentId: str(c.agentId), salesChallanId: str(c.salesChallanId), remarks: `Against challan ${c.challanNumber}`,
+        lines: c.lines.map((l) => ({ ...lineFromDoc(l as any, prods.get(str(l.productId))), challanLineId: str(l.challanLineId), link: `Challan ${c.challanNumber}` })),
+      };
+    },
+  } : null, [p.fromChallan, p.companyId, p.fyCode]);
+  return <DocWorkspace cfg={cfg} ctx={p} seed={seed} renderEntry={(e) => <SalesInvoiceEntry {...p} {...e} />} />;
 }

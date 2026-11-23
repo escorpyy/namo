@@ -39,6 +39,7 @@ export interface SalesScreenProps {
 export interface SForm {
   numberSeriesId: string; docNumber: string; invoiceDate: string; invoiceType: "LOCAL" | "EXPORT"; salesType: "GOODS_SALES" | "SERVICE_SALES"; exp: ExportValues; customerGLId: string; subLedgerId: string; agentId: string;
   dueDays: string; dueDate: string; remarks: string; lines: LineRow[]; terms: TermRow[];
+  salesChallanId: string; // the delivery note this invoice bills ("" = a direct invoice)
 }
 
 export const STATE_TONE: Record<string, "slate" | "green" | "amber" | "red" | "blue"> = { DRAFT: "slate", POSTED: "green", REVERSED: "red", REVERSAL: "amber" };
@@ -69,6 +70,11 @@ export function toPLookups(l: SalesLookups): PLookups {
   };
 }
 
+export const blankSForm = (lk: PLookups, fyCode: string): SForm => ({
+  numberSeriesId: "", docNumber: "", invoiceDate: defaultDate(lk.fiscalYears.find((y) => y.code === fyCode)), invoiceType: "LOCAL", salesType: "GOODS_SALES", exp: blankExport(), customerGLId: "", subLedgerId: "", agentId: "", dueDays: "", dueDate: "", remarks: "",
+  lines: [blankLine()], terms: alwaysShowTerms(lk.terms), salesChallanId: "",
+});
+
 export const salesDocApi = (companyId: number, branchId: number, userId: number): DocApi => ({
   lookups: async () => toPLookups(await salesInvoiceApi.lookups({ companyId, branchId, userId })),
   list: (p) => salesInvoiceApi.list(p) as any,
@@ -88,15 +94,12 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
   const lookupsRef = useMemo(() => ({ current: null as ReturnType<typeof useDocScreen>["lookups"] }), []);
   const cfg = useMemo<DocConfig<SForm>>(() => ({
     kind: "sales-invoice", api, title: "Sales Invoice", singular: "Invoice", statusOptions: STATE_OPTIONS,
-    emptyForm: (lk) => ({
-      numberSeriesId: "", docNumber: "", invoiceDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), invoiceType: "LOCAL", salesType: "GOODS_SALES", exp: blankExport(), customerGLId: "", subLedgerId: "", agentId: "", dueDays: "", dueDate: "", remarks: "",
-      lines: [blankLine()], terms: alwaysShowTerms(lk.terms),
-    }),
+    emptyForm: (lk) => blankSForm(lk, p.fyCode),
     toForm: (d: PDoc, lk) => {
       const prods = new Map(lk.products.map((x) => [String(x.id), x]));
       return {
         numberSeriesId: str(d.numberSeriesId), docNumber: str(d.invoiceNumber), invoiceDate: str(d.invoiceDate), invoiceType: d.invoiceType === "EXPORT" ? "EXPORT" : "LOCAL", salesType: d.salesType === "SERVICE_SALES" ? "SERVICE_SALES" : "GOODS_SALES", exp: exportFromDoc(d.exportDetail), customerGLId: str(d.customerGLId), subLedgerId: str(d.subLedgerId), agentId: str(d.agentId),
-        dueDays: d.dueDays ? str(d.dueDays) : "", dueDate: str(d.dueDate), remarks: str(d.remarks),
+        dueDays: d.dueDays ? str(d.dueDays) : "", dueDate: str(d.dueDate), remarks: str(d.remarks), salesChallanId: str(d.salesChallanId),
         lines: d.lines.length ? d.lines.map((l) => { const row = lineFromDoc(l, prods.get(str(l.productId))); return d.exportDetail?.exportCurrency && l.foreignRate != null ? { ...row, rate: trimDec(l.foreignRate) } : row; }) : [blankLine()], terms: (d.terms ?? []).map(termFromDoc),
       };
     },
@@ -106,7 +109,7 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
       const nn = (s: string) => (s.trim() === "" ? null : s.trim());
       return {
         invoiceDate: f.invoiceDate, invoiceType: f.invoiceType, salesType: f.salesType, fiscalYear: p.fyCode, customerGLId: Number(f.customerGLId), subLedgerId: f.subLedgerId ? Number(f.subLedgerId) : null, agentId: f.agentId ? Number(f.agentId) : null,
-        dueDays: f.dueDays ? Number(f.dueDays) : 0, dueDate: f.dueDate || null, remarks: nn(f.remarks),
+        dueDays: f.dueDays ? Number(f.dueDays) : 0, dueDate: f.dueDate || null, remarks: nn(f.remarks), salesChallanId: f.salesChallanId ? Number(f.salesChallanId) : null,
         ...(doc ? { invoiceNumber: doc.invoiceNumber, numberSeriesId: doc.numberSeriesId ?? null } : { invoiceNumber: nn(f.docNumber), numberSeriesId: f.numberSeriesId ? Number(f.numberSeriesId) : null }),
         lines: f.lines.filter((l) => !isBlankLine(l)).map((l) => {
           const row = lineToPayload(l, prods.get(l.productId), "sales");
@@ -279,7 +282,7 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
             {f.invoiceType === "EXPORT" && <ExportPanel value={f.exp} onChange={(exp) => { s.patch({ exp }); s.clearError("exportDetail"); }} readOnly={ro} errors={s.errors} calendar={p.calendar} />}
 
             <section className="lg-card flex min-h-0 flex-1 flex-col">
-              <LinesGrid fill kind="sales" currency={f.invoiceType === "EXPORT" && foreignCurrency(f.exp) ? f.exp.exportCurrency.trim().toUpperCase() : undefined} lines={f.lines} onChange={(lines) => T.updateLines(lines, (c) => s.patch(c))} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)}
+              <LinesGrid fill kind="sales" currency={f.invoiceType === "EXPORT" && foreignCurrency(f.exp) ? f.exp.exportCurrency.trim().toUpperCase() : undefined} lines={f.lines} onChange={(lines) => T.updateLines(lines, (c) => s.patch(c))} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
                 onOpenTerms={(index, continueAfterApply) => T.open({ scope: "line", lineNumber: T.lineNumberAt(index), lineIndex: index, continueAfterApply })} termSummary={T.lineSummary} />
             </section>
             <div className="shrink-0"><RemarksTable value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} companyId={p.companyId} error={s.err("remarks")} /></div>

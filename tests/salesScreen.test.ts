@@ -36,9 +36,9 @@ describe("sales screen pick-lists", () => {
 describe("sales line payload", () => {
   const p = toPLookups(sales).products[0];
   it("sends product, quantity, rate and where the stock comes from: no order links", () => {
-    expect(lineToPayload(blankLine({ productId: "5", qty: "2", rate: "120" }), p, "sales")).toEqual({ productId: 5, qty: "2", rate: "120", locationId: null, batchNo: null, expiryDate: null });
+    expect(lineToPayload(blankLine({ productId: "5", qty: "2", rate: "120" }), p, "sales")).toEqual({ productId: 5, qty: "2", rate: "120", locationId: null, batchNo: null, expiryDate: null, challanLineId: null });
   });
   it("sends the alternate quantity and unit instead of the quantity when one is used", () => {
-    expect(lineToPayload(blankLine({ productId: "5", altQty: "2", altUnitId: "6", qty: "50", rate: "120" }), p, "sales")).toEqual({ productId: 5, altQty: "2", altUnitId: 6, rate: "120", locationId: null, batchNo: null, expiryDate: null });
+    expect(lineToPayload(blankLine({ productId: "5", altQty: "2", altUnitId: "6", qty: "50", rate: "120" }), p, "sales")).toEqual({ productId: 5, altQty: "2", altUnitId: 6, rate: "120", locationId: null, batchNo: null, expiryDate: null, challanLineId: null });
   });
 });

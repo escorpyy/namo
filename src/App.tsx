@@ -17,6 +17,7 @@ import JournalVoucherWorkspace from "./screens/accounting/JournalVoucherWorkspac
 import AgeingScreen from "./screens/reports/AgeingScreen";
 import LedgerReportScreen from "./screens/reports/LedgerReportScreen";
 import SalesInvoiceWorkspace from "./screens/sales/SalesInvoiceWorkspace";
+import SalesChallanWorkspace from "./screens/sales/SalesChallanWorkspace";
 import PurchaseBillWorkspace from "./screens/purchase/PurchaseBillWorkspace";
 import PurchaseOrderWorkspace from "./screens/purchase/PurchaseOrderWorkspace";
 import PurchaseChallanWorkspace from "./screens/purchase/PurchaseChallanWorkspace";
@@ -47,6 +48,7 @@ export default function App() {
   const [note, setNote] = useState<{ text: string; n: number } | null>(null);
   const [openReq, setOpenReq] = useState<(OpenRequest & { screen: string }) | null>(null);
   const [fromChallan, setFromChallan] = useState<{ id: number; n: number } | null>(null);
+  const [salesFromChallan, setSalesFromChallan] = useState<{ id: number; n: number } | null>(null);
   const dirtyRef = useRef(false);
   const dlg = useDialog();
   const shortcutActionRef = useRef<(actionId: string) => void>(() => {});
@@ -217,9 +219,16 @@ export default function App() {
             fyStart={co.fiscalYears.find((y) => y.id === fyId)?.startDate ?? ""} fyEnd={co.fiscalYears.find((y) => y.id === fyId)?.endDate ?? ""}
             calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} onOpenSource={openSource}
           />
+        ) : screen === "sales-challans" ? (
+          <SalesChallanWorkspace
+            key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} userId={ctx.user.id}
+            branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
+            calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} openRequest={openRequest}
+            onCreateInvoice={(id) => { setSalesFromChallan({ id, n: Date.now() }); dirtyRef.current = false; setScreen("sales-invoices"); }}
+          />
         ) : screen === "sales-invoices" ? (
           <SalesInvoiceWorkspace
-            key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} userId={ctx.user.id}
+            key={`${screen}:${companyId}:${branchId}:${fyId}`} fromChallan={salesFromChallan} companyId={companyId} branchId={branchId} userId={ctx.user.id}
             branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
             calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} openRequest={openRequest}
           />

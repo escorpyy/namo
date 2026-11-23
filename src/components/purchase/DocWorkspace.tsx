@@ -61,8 +61,12 @@ export interface DocWorkspaceConfig<F extends object, R extends { id: number }, 
 interface EntryTab<F extends object> { id: number; docId: number | null; title: string; dirty: boolean; initialForm?: F }
 type Active = "list" | number;
 
-export default function DocWorkspace<F extends object, R extends { id: number }, L>({ cfg, ctx, renderEntry }: {
-  cfg: DocWorkspaceConfig<F, R, L>; ctx: WorkspaceCtx; renderEntry: (e: EntryTabProps<F, L>) => ReactNode;
+// A request from another screen to open a new, pre-filled document (e.g. "Create Invoice" on a challan). Acted on once per n.
+let consumedSeed = 0;
+export interface NewSeed<F, L> { n: number; build: (lookups: L) => Promise<F> }
+
+export default function DocWorkspace<F extends object, R extends { id: number }, L>({ cfg, ctx, renderEntry, seed }: {
+  cfg: DocWorkspaceConfig<F, R, L>; ctx: WorkspaceCtx; renderEntry: (e: EntryTabProps<F, L>) => ReactNode; seed?: NewSeed<F, L> | null;
 }) {
   const { singular, plural } = cfg;
   const Singular = singular.charAt(0).toUpperCase() + singular.slice(1);
@@ -141,6 +145,12 @@ export default function DocWorkspace<F extends object, R extends { id: number },
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addTab]);
   useOpenRequest(ctx.openRequest, openDocId);
+  useEffect(() => {
+    if (!seed || !lookups || consumedSeed === seed.n) return;
+    consumedSeed = seed.n;
+    seed.build(lookups).then((prefill) => openNew(prefill)).catch((e: Error) => void dlg.error(e.message));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed, lookups]);
   const closeTab = useCallback(async (id: number, force = false) => {
     if (!force && tabsRef.current.find((t) => t.id === id)?.dirty
       && !(await dlg.confirm(`This ${singular} has unsaved changes. Close the tab and lose them?`, { title: "Close this tab?", variant: "warning", confirmLabel: "Close tab", cancelLabel: "Keep editing" }))) return;

@@ -111,6 +111,7 @@ export function lineToPayload(l: LineRow, p: Product | undefined, kind: LineKind
   if (kind === "order") out.expectedDate = nn(l.expectedDate);
   else if (kind === "sales") { // a sales invoice line also says where a stock product is taken from
     out.locationId = l.locationId ? Number(l.locationId) : null; out.batchNo = nn(l.batchNo); out.expiryDate = nn(l.expiryDate);
+    out.challanLineId = l.challanLineId ? Number(l.challanLineId) : null; // bills a delivery-note line: no second stock out
   } else {
     out.locationId = l.locationId ? Number(l.locationId) : null;
     out.batchNo = nn(l.batchNo); out.manufactureDate = nn(l.manufactureDate); out.expiryDate = nn(l.expiryDate);
