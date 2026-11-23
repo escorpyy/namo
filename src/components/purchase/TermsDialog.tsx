@@ -233,7 +233,10 @@ export function useTermsDialog(o: Opts) {
             <span className="text-[12px] text-slate-600">{filled} term(s) with a value</span>
             <div className="flex gap-2">
               <button type="button" className="btn" onClick={() => close()}>Cancel</button>
-              {!ro && <button type="button" className="btn btn-primary" onClick={apply}>Apply to {o.noun} <span className="kbd">Ctrl+S</span></button>}
+              {!ro && <button type="button" data-nav="terms-apply" aria-keyshortcuts="Enter Control+S" className="btn btn-primary" onClick={apply}
+                onKeyDown={(e) => { if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); e.stopPropagation(); focusStep(e.currentTarget, -1); } }}>
+                Apply to {o.noun} <span className="kbd">Enter / Ctrl+S</span>
+              </button>}
             </div>
           </div>
         </div>
