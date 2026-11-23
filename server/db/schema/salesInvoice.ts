@@ -20,7 +20,7 @@ import { numberSeries } from "./numberSeries";
 import { generalLedger, subLedger } from "./accounting";
 import { journalVoucher } from "./vouchers";
 import { agent } from "./parties";
-import { product, productUnit } from "./products";
+import { location, product, productUnit } from "./products";
 
 // ============================================================
 // SALES INVOICE  (direct customer invoice: no challan / order yet)
@@ -201,6 +201,10 @@ export const salesInvoiceLine = pgTable(
     // export invoice in a foreign currency: the rate and amount as typed, in that currency (rate/basicAmount above stay NPR)
     foreignRate: numeric({ precision: 18, scale: 6 }),
     foreignAmount: numeric({ precision: 18, scale: 6 }),
+    // stock products: where the goods are taken from. Posting takes this qty out of stock in this location and batch.
+    locationId: integer().references(() => location.id, { onDelete: "restrict" }),
+    batchNo: varchar({ length: 50 }),
+    expiryDate: date({ mode: "date" }),
 
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -210,6 +214,7 @@ export const salesInvoiceLine = pgTable(
     index("SalesInvoiceLine_productId_idx").on(t.productId),
     index("SalesInvoiceLine_unitId_idx").on(t.unitId),
     index("SalesInvoiceLine_altUnitId_idx").on(t.altUnitId),
+    index("SalesInvoiceLine_locationId_idx").on(t.locationId),
     check("SalesInvoiceLine_lineNumber_check", sql`${t.lineNumber} > 0`),
     check(
       "SalesInvoiceLine_amounts_check",

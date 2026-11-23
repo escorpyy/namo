@@ -344,9 +344,11 @@ export interface SalesLookups {
   customers: { id: number; code: string; name: string; requiresSubLedger: boolean; isCashOrBank: boolean; creditLimit: string | null; creditDays: number | null }[];
   subLedgers: { id: number; code: string; name: string; generalLedgerId: number | null }[];
   agents: { id: number; code: string; name: string }[];
+  locations: { id: number; code: string; name: string; isActive: boolean }[];
   products: {
     id: number; code: string; description: string; type: "STOCK" | "NON_STOCK" | "SERVICE";
     unitId: number | null; unitCode: string; salesRate: string | null; salesGLId: number | null;
+    tracksBatch: boolean; tracksExpiry: boolean; defaultLocationId: number | null;
     alternateUnits: { unitId: number; unitCode: string; conversionFactor: string }[];
   }[];
   units: { id: number; code: string; name: string; decimalPlaces: number }[];

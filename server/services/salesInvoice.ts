@@ -10,6 +10,7 @@ import { cleanExport, EXPORT_COLUMNS, NO_EXPORT, type ExportInput } from "./sale
 import { assertMandatorySalesTerms, recalcSalesTerms, saveSalesTerms, type SalesTermInput } from "./salesInvoiceTerms";
 import { mergeRows, writeVoucher, type JvRow } from "./voucherWriter";
 import { assertGlEntryAllowed } from "./glEntryControl";
+import { assertStockCovers, recordMovements, reverseMovements } from "./stockLedger";
 import { assertLinesMatchSalesType, type SalesType } from "./salesTypes";
 
 type SaveInput = {
@@ -28,7 +29,7 @@ type SaveInput = {
   dueDays?: number;
   dueDate?: string | Date | null;
   remarks?: string | null;
-  lines: (LineInput & { foreignRate?: string | number | null })[];
+  lines: (LineInput & { foreignRate?: string | number | null; locationId?: number | null; batchNo?: string | null; expiryDate?: string | Date | null })[];
   terms?: SalesTermInput[];
   exportDetail?: ExportInput | null; // EXPORT invoices only
 };
@@ -86,7 +87,7 @@ function voucherNumber(invoice: { id?: number; invoiceNumber: string; fiscalYear
 // Read-only form lookups: active customer/control ledgers, sub-ledgers, salesperson, sellable products, sales terms, years and series.
 export function salesInvoiceLookups(companyId: number, branchId: number, userId: number | null, opts: { tx?: any } = {}) {
   return inTx(opts.tx, async (tx) => {
-    const [customers, subLedgers, agents, products, stock, nonStock, services, allUnits, alternateUnits, terms, fiscalYears, series] = await Promise.all([
+    const [customers, subLedgers, agents, products, locations, stock, nonStock, services, allUnits, alternateUnits, terms, fiscalYears, series] = await Promise.all([
       tx.select({ id: S.generalLedger.id, code: S.generalLedger.code, name: S.generalLedger.name, requiresSubLedger: S.generalLedger.requiresSubLedger, isCashOrBank: S.generalLedger.isCashOrBank, creditLimit: S.customerDetail.creditLimit, creditDays: S.customerDetail.creditDays })
         .from(S.generalLedger).leftJoin(S.party, eq(S.party.generalLedgerId, S.generalLedger.id)).leftJoin(S.customerDetail, eq(S.customerDetail.partyId, S.party.id)).where(and(eq(S.generalLedger.companyId, companyId), eq(S.generalLedger.isActive, true), or(inArray(S.generalLedger.glType, ["CUSTOMER", "BOTH"]), eq(S.generalLedger.isCashOrBank, true)))).orderBy(asc(S.generalLedger.code)),
       tx.select({ id: S.subLedger.id, code: S.subLedger.code, name: S.subLedger.name, generalLedgerId: S.subLedger.generalLedgerId })
@@ -95,6 +96,7 @@ export function salesInvoiceLookups(companyId: number, branchId: number, userId:
       tx.select({ id: S.agent.id, code: S.agent.code, name: S.agent.name }).from(S.agent).where(and(eq(S.agent.companyId, companyId), eq(S.agent.isActive, true))).orderBy(asc(S.agent.code)),
       tx.select({ id: S.product.id, code: S.product.code, description: S.product.description, type: S.product.type }).from(S.product)
         .where(and(eq(S.product.companyId, companyId), eq(S.product.isActive, true), inArray(S.product.type, ["STOCK", "NON_STOCK", "SERVICE"]))).orderBy(asc(S.product.code)),
+      tx.select({ id: S.location.id, code: S.location.code, name: S.location.name, isActive: S.location.isActive }).from(S.location).where(and(eq(S.location.companyId, companyId), eq(S.location.isActive, true))).orderBy(asc(S.location.code)),
       tx.select().from(S.stockDetail).innerJoin(S.product, eq(S.product.id, S.stockDetail.productId)).where(and(eq(S.product.companyId, companyId), eq(S.product.isActive, true))),
       tx.select().from(S.nonStockDetail).innerJoin(S.product, eq(S.product.id, S.nonStockDetail.productId)).where(and(eq(S.product.companyId, companyId), eq(S.product.isActive, true))),
       tx.select().from(S.serviceDetail).innerJoin(S.product, eq(S.product.id, S.serviceDetail.productId)).where(and(eq(S.product.companyId, companyId), eq(S.product.isActive, true))),
@@ -126,10 +128,11 @@ export function salesInvoiceLookups(companyId: number, branchId: number, userId:
         salesRate: p.type === "STOCK" ? detail?.salesRate ?? null : null,
         salesGLId: detail?.salesGLId ?? null,
         alternateUnits: p.type === "STOCK" ? altsByProduct.get(p.id) ?? [] : [],
+        tracksBatch: p.type === "STOCK" ? !!detail?.tracksBatch : false, tracksExpiry: p.type === "STOCK" ? !!detail?.tracksExpiry : false, defaultLocationId: p.type === "STOCK" ? detail?.defaultLocationId ?? null : null,
       };
     });
     return {
-      customers, subLedgers, agents, products: sellable.filter((p: any) => p.unitId), units: allUnits, terms, fiscalYears: fiscalYears.map((f: any) => ({ ...f, startDate: iso(f.startDate), endDate: iso(f.endDate) })),
+      customers, subLedgers, agents, locations, products: sellable.filter((p: any) => p.unitId), units: allUnits, terms, fiscalYears: fiscalYears.map((f: any) => ({ ...f, startDate: iso(f.startDate), endDate: iso(f.endDate) })),
       series: series.map((s) => ({ id: s.id, name: s.name, mode: s.mode, isDefault: s.isDefault })),
     };
   });
@@ -275,6 +278,7 @@ export async function saveSalesInvoice(input: SaveInput, actor: Actor, opts: Wri
         salesInvoiceId: id, lineNumber: line.lineNumber, productId: line.productId, altQty: line.altQty === null ? null : fmt(line.altQty),
         altUnitId: line.altUnitId, qty: fmt(line.qty), unitId: line.unitId, rate: fmt(line.rate), basicAmount: fmt(line.basicAmount),
         foreignRate: fr === null ? null : fmt(fr), foreignAmount: fr === null ? null : fmt(roundTo(mul(line.qty, fr), 2)),
+        locationId: input.lines[i].locationId ?? null, batchNo: input.lines[i].batchNo?.trim() || null, expiryDate: optDate(input.lines[i].expiryDate, "expiryDate"),
       }).returning({ id: S.salesInvoiceLine.id, lineNumber: S.salesInvoiceLine.lineNumber });
       lineIdByNumber.set(created.lineNumber, created.id);
     }
@@ -302,6 +306,14 @@ export function postSalesInvoice(id: number, actor: Actor, opts: WriteOpts = {})
     const totals = await recalcSalesTerms(tx, id);
     if (totals.total <= ZERO) throw new HttpError(409, "A posted sales invoice must have a positive total.");
     await assertMandatorySalesTerms(tx, invoice.companyId, id);
+    // stock products: batch / expiry where the product tracks them, and the stock must cover what the invoice takes out
+    for (const { line, type } of lines) {
+      if (type !== "STOCK") continue;
+      const [sd] = await tx.select({ tracksBatch: S.stockDetail.tracksBatch, tracksExpiry: S.stockDetail.tracksExpiry }).from(S.stockDetail).where(eq(S.stockDetail.productId, line.productId));
+      if (sd?.tracksBatch && !line.batchNo) throw new HttpError(409, `Line ${line.lineNumber}: this product is batch-tracked; choose the batch it is sold from.`, "lines");
+      if (sd?.tracksExpiry && !line.expiryDate) throw new HttpError(409, `Line ${line.lineNumber}: this product expires; enter the expiry date of the batch.`, "lines");
+    }
+    await assertStockCovers(tx, { companyId: invoice.companyId, branchId: invoice.branchId }, lines.map((l) => l.line));
     const rows: JvRow[] = [];
     for (const { line, code, type, isActive } of lines) {
       if (!isActive) throw new HttpError(409, `Product ${code} is inactive and cannot be posted.`);
@@ -337,6 +349,7 @@ export function postSalesInvoice(id: number, actor: Actor, opts: WriteOpts = {})
       fiscalYear: invoice.fiscalYear, remarks: `Sales invoice ${invoice.invoiceNumber}`, reversalOfId: null,
     }, journalRows, actor);
     await tx.update(S.salesInvoice).set({ isPosted: true, postedAt: new Date(), postedBy: actor.userId, journalVoucherId, updatedAt: new Date() }).where(eq(S.salesInvoice.id, id));
+    await recordMovements(tx, { companyId: invoice.companyId, branchId: invoice.branchId, date: invoice.invoiceDate, source: "SALES_INVOICE", sourceId: id, direction: "OUT" }, lines.map((l) => l.line));
     return { id, invoiceNumber: invoice.invoiceNumber, journalVoucherId, totalAmount: fmt(totals.total, 2) };
   });
 }
@@ -397,9 +410,12 @@ export function reverseSalesInvoice(id: number, actor: Actor, opts: WriteOpts & 
       const [created] = await tx.insert(S.salesInvoiceLine).values({
         salesInvoiceId: reversal.id, lineNumber: line.lineNumber, productId: line.productId, altQty: line.altQty, altUnitId: line.altUnitId,
         qty: line.qty, unitId: line.unitId, rate: line.rate, basicAmount: line.basicAmount, foreignRate: line.foreignRate, foreignAmount: line.foreignAmount,
+        locationId: line.locationId, batchNo: line.batchNo, expiryDate: line.expiryDate,
       }).returning({ id: S.salesInvoiceLine.id });
       newLineByOld.set(line.id, created.id);
     }
+    // the goods the invoice took out of stock come back
+    await reverseMovements(tx, { source: "SALES_INVOICE", originalSourceId: original.id, newSourceId: reversal.id, date }, newLineByOld);
     for (const term of originalTerms) {
       await tx.insert(S.salesDocumentTerm).values({
         companyId: original.companyId, documentType: "SALES_INVOICE", documentId: reversal.id,

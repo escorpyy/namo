@@ -1,5 +1,6 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import * as S from "../db/schema";
+import { HttpError } from "../routes/_util";
 import { fmt, toMicro, ZERO } from "./purchase/money";
 import type { Tx } from "./purchase/common";
 import type { db } from "../db";
@@ -50,4 +51,30 @@ export async function stockBalance(tx: Tx | typeof db, q: { companyId: number; b
     .groupBy(m.productId, S.product.code, S.product.description, m.locationId, m.batchNo, m.expiryDate)
     .having(sql`sum(${m.qty}) <> 0`).orderBy(S.product.code, m.locationId, m.batchNo);
   return rows.map((r) => ({ ...r, qty: fmt(toMicro(r.qty)), expiryDate: r.expiryDate ? new Date(r.expiryDate).toISOString().slice(0, 10) : null }));
+}
+
+/** Refuses an issue the stock cannot cover. Stock is counted in the exact bucket (product, location, batch) the line names; a line that
+ *  names no location draws on the stock that was received with no location. Lines taking from the same bucket are added up first. */
+export async function assertStockCovers(tx: Tx, h: { companyId: number; branchId: number }, lines: { lineNumber: number; productId: number; qty: string | number; locationId?: number | null; batchNo?: string | null }[]) {
+  const m = S.stockMovement;
+  const stock = new Set((await tx.select({ id: S.product.id }).from(S.product).where(and(inArray(S.product.id, [...new Set(lines.map((l) => l.productId))]), eq(S.product.type, "STOCK")))).map((p) => p.id));
+  const need = new Map<string, { first: number; productId: number; locationId: number | null; batchNo: string | null; qty: bigint }>();
+  for (const l of lines) {
+    if (!stock.has(l.productId)) continue;
+    const key = `${l.productId}|${l.locationId ?? ""}|${l.batchNo ?? ""}`;
+    const cur = need.get(key);
+    if (cur) cur.qty += toMicro(l.qty);
+    else need.set(key, { first: l.lineNumber, productId: l.productId, locationId: l.locationId ?? null, batchNo: l.batchNo ?? null, qty: toMicro(l.qty) });
+  }
+  for (const n of need.values()) {
+    const [r] = await tx.select({ qty: sql<string>`coalesce(sum(${m.qty}), 0)` }).from(m).where(and(
+      eq(m.companyId, h.companyId), eq(m.branchId, h.branchId), eq(m.productId, n.productId),
+      n.locationId === null ? sql`${m.locationId} is null` : eq(m.locationId, n.locationId),
+      n.batchNo === null ? sql`${m.batchNo} is null` : eq(m.batchNo, n.batchNo)));
+    const have = toMicro(r.qty);
+    if (have < n.qty) {
+      const where = [n.locationId === null ? "no location" : `location ${n.locationId}`, n.batchNo ? `batch ${n.batchNo}` : ""].filter(Boolean).join(", ");
+      throw new HttpError(409, `Line ${n.first}: not enough stock (${where}): ${fmt(have)} on hand, ${fmt(n.qty)} needed.`, "lines");
+    }
+  }
 }

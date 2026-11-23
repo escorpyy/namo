@@ -109,7 +109,9 @@ export function lineToPayload(l: LineRow, p: Product | undefined, kind: LineKind
   if (p && !p.baseUnitId && l.unitId) out.unitId = Number(l.unitId);
   out.rate = nn(l.rate);
   if (kind === "order") out.expectedDate = nn(l.expectedDate);
-  else if (kind !== "sales") { // a sales invoice line is product, quantity and rate only
+  else if (kind === "sales") { // a sales invoice line also says where a stock product is taken from
+    out.locationId = l.locationId ? Number(l.locationId) : null; out.batchNo = nn(l.batchNo); out.expiryDate = nn(l.expiryDate);
+  } else {
     out.locationId = l.locationId ? Number(l.locationId) : null;
     out.batchNo = nn(l.batchNo); out.manufactureDate = nn(l.manufactureDate); out.expiryDate = nn(l.expiryDate);
     out.purchaseOrderLineId = l.purchaseOrderLineId ? Number(l.purchaseOrderLineId) : null;

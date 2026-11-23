@@ -8,7 +8,7 @@ import { whole, optWhole, q, companyOf, idOf, lockOverrideOf, actorOf, pick, row
 
 export const salesRouter = Router();
 const MAX_LINES = 500, MAX_TERMS = 100;
-const LINE = { productId: "int", altQty: "num", altUnitId: "int", qty: "num", unitId: "int", rate: "num", foreignRate: "num" } as const satisfies Record<string, Kind>;
+const LINE = { productId: "int", altQty: "num", altUnitId: "int", qty: "num", unitId: "int", rate: "num", foreignRate: "num", locationId: "int", batchNo: "str", expiryDate: "date" } as const satisfies Record<string, Kind>;
 const TERM = { termId: "int", lineNumber: "int", calcType: ["PERCENT", "AMOUNT"], rate: "num", inputAmount: "num", isOverridden: "bool", overrideAmount: "num" } as const satisfies Record<string, Kind>;
 const HEAD = { invoiceNumber: "str", numberSeriesId: "int", invoiceDate: "date", invoiceType: ["LOCAL", "EXPORT"], salesType: ["GOODS_SALES", "SERVICE_SALES"], fiscalYear: "str", customerGLId: "int", subLedgerId: "int", agentId: "int", dueDays: "int", dueDate: "date", remarks: "str" } as const satisfies Record<string, Kind>;
 

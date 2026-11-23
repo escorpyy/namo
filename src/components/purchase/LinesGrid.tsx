@@ -41,9 +41,9 @@ function lineColumns(kind: LineKind, showAlt: boolean, showLoc: boolean, showBat
   const cols: ColKey[] = ["n", "p"];
   void showAlt; // the alternate qty and unit columns are always there (blank for a product without alternate units)
   cols.push("aq", "au", "q", "u", "r", "amt");
-  if (kind === "sales") { // product, quantity, rate, amount, then the line's terms and net when the screen offers them
+  if (kind === "sales") { // product, quantity, rate, amount, then the line's terms and net when the screen offers them, then where the stock comes from
     if (showTerms) cols.push("terms", "net");
-    cols.push("rm");
+    cols.push("more", "rm");
     return cols;
   }
   if (kind === "bill") {
@@ -90,6 +90,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
   const productOpts = useMemo<ReferenceOption[]>(() => lookups.products.map((p) => ({ value: String(p.id), label: `${p.code} — ${p.description}`, code: p.code, name: p.description, detail: p.type.replaceAll("_", " "), searchText: `${p.type} ${p.tracksBatch ? "batch" : ""} ${p.tracksExpiry ? "expiry" : ""}`, isActive: p.isActive, badge: p.type === "STOCK" ? undefined : p.type.replace("_", " ").toLowerCase() })), [lookups.products]);
   const locOpts = useMemo<ReferenceOption[]>(() => lookups.locations.map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, isActive: l.isActive })), [lookups.locations]);
   const hasTerms = (kind === "bill" || kind === "sales") && !!onOpenTerms; // a per-line "Term Amount" cell that opens the terms dialog
+  const hasMore = kind === "bill" || kind === "sales"; // the "More" cell: location, batch, expiry
   const stockish = kind === "challan" || kind === "bill"; // order and sales lines have no location, batch or expiry columns
   // bill lines: the "More" and "Linked to" columns are folded away until the arrow at the right edge opens them (remembered in this browser)
   const [moreOpen, setMoreOpen] = useState(() => { try { const saved = localStorage.getItem("namo.bill.lines.more"); return saved === null ? !!defaultMoreOpen : saved === "1"; } catch { return !!defaultMoreOpen; } });
@@ -108,7 +109,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
       if (stockish && row.link) showLink = true;
     }
     if (stockish && lines.some((row) => row.link)) showLink = true;
-    const cols = lineColumns(kind, showAlt, showLoc, showBatch, showExpiry, showLink, hasTerms, moreOpen);
+    const cols = lineColumns(kind, showAlt, showLoc, showBatch, showExpiry, showLink, hasTerms, kind === "sales" || moreOpen);
     return { cols, showAlt, showLoc, showBatch, showExpiry, showLink, template: cols.map((c) => COL_SIZE[c]).join(" "), heads: cols.map((c) => (currency && (c === "r" || c === "amt") ? `${COL_HEAD[c]} (${currency})` : COL_HEAD[c])) };
   }, [kind, lines, products, onOpenTerms, currency, moreOpen]);
 
@@ -145,7 +146,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
   const fillCell = (i: number, col: string) => {
     const f = FIELD_OF[col], above = lines[i - 1];
     if (readOnly || !f || !above || (f === "productId" && lockProducts && lines[i].link)) return;
-    if (col === "more" && kind === "bill") { patch(i, { locationId: above.locationId, batchNo: above.batchNo, manufactureDate: above.manufactureDate, expiryDate: above.expiryDate }); return; }
+    if (col === "more" && hasMore) { patch(i, { locationId: above.locationId, batchNo: above.batchNo, manufactureDate: above.manufactureDate, expiryDate: above.expiryDate }); return; }
     if (f === "productId") { if (above.productId) pick(i, above.productId); return; }
     patch(i, { [f]: above[f] } as Partial<LineRow>);
   };
@@ -160,7 +161,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
     cellSelector: '[data-field^="L."]', fieldOf: (r, c) => `L.${r}.${c}`, endOfRow: "row",
     onAddRow: () => addRow(), lastRowBlank: () => isBlankLine(lines[lines.length - 1]), leave: (el, dir) => focusStep(el, dir),
     onCellEnter: (cell, el) => {
-      if (cell.col === "more" && kind === "bill") { setBatchFor(cell.row); return true; }
+      if (cell.col === "more" && hasMore) { setBatchFor(cell.row); return true; }
       if (cell.col === "terms" && hasTerms && onOpenTerms && lines[cell.row]?.productId) { onOpenTerms(cell.row, () => gridRows.stepFrom(el, 1)); return true; }
       return false;
     },
@@ -237,7 +238,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
                   {kind !== "bill" && layout.showLoc && (
                     <MasterReferencePicker fieldName={`L.${i}.lc`} label="Location" required={p?.type === "STOCK"} scopeKey="locations" createMaster={{ key: "locations" }} contextKey={contextKey} placeholder={p?.type === "STOCK" ? "Choose location" : "—"} value={l.locationId} hasError={bad("lc")} options={locOpts} disabled={off || p?.type !== "STOCK"} onChange={(v) => patch(i, { locationId: v })} onCommit={afterCombo} />
                   )}
-                  {kind === "bill" && layout.cols.includes("more") && (() => {
+                  {hasMore && layout.cols.includes("more") && (() => {
                     // "More": location, batch and expiry of the line in one cell; Enter or a click opens the dialog (like the line's terms)
                     const isStock = p?.type === "STOCK", tracked = !!p && (isStock || p.tracksBatch || p.tracksExpiry);
                     const locCode = l.locationId ? lookups.locations.find((x) => String(x.id) === l.locationId)?.code ?? "" : "";

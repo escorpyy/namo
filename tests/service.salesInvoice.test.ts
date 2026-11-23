@@ -198,6 +198,53 @@ describe.skipIf(!DB_READY)("sales invoice service layer", () => {
     });
   });
 
+  it("stock: posting takes the goods out of the location and batch named on the line, refuses what stock cannot cover, and a reversal brings them back", async () => {
+    await run(async (tx, w) => {
+      const tag = uniq();
+      const sub = (await rows(tx, sql`select "productSubGroupId" as id from "Product" where id = ${w.productId}`))[0].id;
+      const goods = async (code: string, extra: Record<string, unknown> = {}) => {
+        const id = await ins(tx, "Product", { companyId: w.companyId, code: `${code}${tag}`.slice(0, 10), description: code, type: "STOCK", productSubGroupId: sub, updatedAt: NOW });
+        await ins(tx, "StockDetail", { productId: id, baseUnitId: w.unitId, salesGLId: w.salesGLId, purchaseGLId: w.purchaseGLId, updatedAt: NOW, ...extra });
+        return id;
+      };
+      const plain = await goods("PLAIN"), batchy = await goods("BATCHY", { tracksBatch: true });
+      const wh = await ins(tx, "Location", { companyId: w.companyId, code: `WH${tag}`.slice(0, 10), name: "Warehouse", updatedAt: NOW });
+      const shop = await ins(tx, "Location", { companyId: w.companyId, code: `SH${tag}`.slice(0, 10), name: "Shop", updatedAt: NOW });
+      const stockIn = (productId: number, locationId: number | null, batchNo: string | null, qty: number) =>
+        ins(tx, "StockMovement", { companyId: w.companyId, branchId: w.branchId, productId, locationId, batchNo, movementDate: "2025-10-01", qty, sourceType: "PURCHASE_BILL", sourceId: 1, sourceLineId: 1 });
+      await stockIn(plain, wh, null, 10); await stockIn(batchy, wh, "B1", 5);
+      const on = async (productId: number, locationId: number | null, batchNo: string | null = null) =>
+        Number((await rows(tx, sql`select coalesce(sum(qty), 0) as q from "StockMovement" where "productId" = ${productId} and "locationId" ${locationId === null ? sql`is null` : sql`= ${locationId}`} and "batchNo" ${batchNo === null ? sql`is null` : sql`= ${batchNo}`}`))[0].q);
+      const sell = (lines: any[]) => svc.saveSalesInvoice(draftInput(w, { lines }), ACTOR, { tx });
+
+      const a = await sell([{ productId: plain, qty: 4, unitId: w.unitId, rate: 100, locationId: wh }]);
+      await svc.postSalesInvoice(a.id, ACTOR, { tx });
+      expect(await on(plain, wh)).toBe(6);
+
+      // from the wrong place, too much, or without the batch the product tracks
+      const wrong = await sell([{ productId: plain, qty: 1, unitId: w.unitId, rate: 100, locationId: shop }]);
+      await expect(svc.postSalesInvoice(wrong.id, ACTOR, { tx })).rejects.toMatchObject({ status: 409 });
+      const tooMuch = await sell([{ productId: plain, qty: 7, unitId: w.unitId, rate: 100, locationId: wh }]);
+      await expect(svc.postSalesInvoice(tooMuch.id, ACTOR, { tx })).rejects.toMatchObject({ status: 409 });
+      const twice = await sell([{ productId: plain, qty: 4, unitId: w.unitId, rate: 100, locationId: wh }, { productId: plain, qty: 3, unitId: w.unitId, rate: 100, locationId: wh }]);
+      await expect(svc.postSalesInvoice(twice.id, ACTOR, { tx })).rejects.toMatchObject({ status: 409 }); // 4 + 3 > 6
+      const noBatch = await sell([{ productId: batchy, qty: 1, unitId: w.unitId, rate: 100, locationId: wh }]);
+      await expect(svc.postSalesInvoice(noBatch.id, ACTOR, { tx })).rejects.toMatchObject({ status: 409 });
+      expect(await on(plain, wh)).toBe(6); // nothing moved by the refused ones
+
+      const b = await sell([{ productId: batchy, qty: 2, unitId: w.unitId, rate: 100, locationId: wh, batchNo: "B1" }]);
+      await svc.postSalesInvoice(b.id, ACTOR, { tx });
+      expect(await on(batchy, wh, "B1")).toBe(3);
+
+      // a non-stock item never touches stock, and a reversal puts the goods back
+      const n = await sell([{ productId: w.productId, qty: 1, unitId: w.unitId, rate: 100 }]);
+      await svc.postSalesInvoice(n.id, ACTOR, { tx });
+      expect((await rows(tx, sql`select count(*)::int as c from "StockMovement" where "sourceType" = 'SALES_INVOICE' and "sourceId" = ${n.id}`))[0].c).toBe(0);
+      await svc.reverseSalesInvoice(a.id, ACTOR, { tx, date: "2025-10-20", reason: "stock back" });
+      expect(await on(plain, wh)).toBe(10);
+    });
+  });
+
   it("refuses a draft with no lines", async () => {
     await run(async (tx, w) => {
       await expect(svc.saveSalesInvoice(draftInput(w, { lines: [] }), ACTOR, { tx })).rejects.toMatchObject({ status: 400 });
