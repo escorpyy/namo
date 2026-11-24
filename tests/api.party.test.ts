@@ -9,7 +9,9 @@ describe.skipIf(!DB_READY)("Party master (API)", () => {
   let companyId = 0;
   let otherCompanyId = 0;
   let debtorsSg = 0;
+  let debtorsGroup = 0;
   let creditorsSg = 0;
+  let creditorsGroup = 0;
   const created: number[] = []; // party ids, deleted in afterAll
   const tag = uniq();
 
@@ -19,8 +21,12 @@ describe.skipIf(!DB_READY)("Party master (API)", () => {
     const ctx = (await call("GET", "/api/context")).body;
     otherCompanyId = ctx.companies.find((c: any) => c.id !== companyId).id;
     const parties = (await call("GET", `/api/masters/party?companyId=${companyId}`)).body;
-    debtorsSg = parties.find((p: any) => p.code === "C001").accountSubGroupId;
-    creditorsSg = parties.find((p: any) => p.code === "V001").accountSubGroupId;
+    const debtor = parties.find((p: any) => p.code === "C001");
+    const creditor = parties.find((p: any) => p.code === "V001");
+    debtorsSg = debtor.accountSubGroupId;
+    debtorsGroup = debtor.accountGroupId;
+    creditorsSg = creditor.accountSubGroupId;
+    creditorsGroup = creditor.accountGroupId;
   });
   afterAll(async () => {
     for (const id of created.reverse()) await call("DELETE", `/api/masters/party/${id}`);
@@ -31,7 +37,7 @@ describe.skipIf(!DB_READY)("Party master (API)", () => {
   const glById = async (id: number) =>
     ((await call("GET", `/api/masters/general-ledger?companyId=${companyId}`)).body as any[]).find((g) => g.id === id);
   const base = (over: Record<string, unknown> = {}) => ({
-    code: `P${tag}`, name: "Test Party", accountSubGroupId: debtorsSg, glType: "CUSTOMER", isActive: true, isVatRegistered: false, ...over,
+    code: `P${tag}`, name: "Test Party", accountGroupId: debtorsGroup, accountSubGroupId: debtorsSg, glType: "CUSTOMER", isActive: true, isVatRegistered: false, ...over,
   });
   const post = async (body: Record<string, unknown>, cid = companyId) => {
     const r = await call("POST", `/api/masters/party?companyId=${cid}`, body);
@@ -66,7 +72,7 @@ describe.skipIf(!DB_READY)("Party master (API)", () => {
   });
 
   it("creates a VENDOR: vendor detail only, normal balance CREDIT", async () => {
-    const r = await post(base({ code: `V${tag}`, glType: "VENDOR", accountSubGroupId: creditorsSg, paymentTermDays: 45, creditLimit: 777 }));
+    const r = await post(base({ code: `V${tag}`, glType: "VENDOR", accountGroupId: creditorsGroup, accountSubGroupId: creditorsSg, paymentTermDays: 45, creditLimit: 777 }));
     expect(r.status).toBe(201);
     expect(r.body.paymentTermDays).toBe(45);
     expect(r.body.creditLimit).toBeNull();
@@ -142,7 +148,7 @@ describe.skipIf(!DB_READY)("Party master (API)", () => {
 
   it("changing the type keeps the old detail row (no data loss); changing the Sub Group re-derives the normal balance", async () => {
     const id = (await list()).find((p) => p.code === `P${tag}`).id;
-    const toVendor = await call("PUT", `/api/masters/party/${id}`, base({ glType: "VENDOR", accountSubGroupId: creditorsSg, paymentTermDays: 21 }));
+    const toVendor = await call("PUT", `/api/masters/party/${id}`, base({ glType: "VENDOR", accountGroupId: creditorsGroup, accountSubGroupId: creditorsSg, paymentTermDays: 21 }));
     expect(toVendor.status).toBe(200);
     expect(toVendor.body.paymentTermDays).toBe(21);
     expect(Number(toVendor.body.creditLimit)).toBe(9000); // customer detail from the previous test survives
@@ -157,7 +163,7 @@ describe.skipIf(!DB_READY)("Party master (API)", () => {
     const p = await post(base({ code: `D${tag}` }));
     expect(p.status).toBe(201);
     const child = await call("POST", `/api/masters/general-ledger?companyId=${companyId}`, {
-      code: `DC${tag}`, name: "Child", accountSubGroupId: debtorsSg, normalBalance: "DEBIT", glType: "OTHER", parentId: p.body.generalLedgerId, isActive: true,
+      code: `DC${tag}`, name: "Child", accountGroupId: debtorsGroup, accountSubGroupId: debtorsSg, normalBalance: "DEBIT", glType: "OTHER", parentId: p.body.generalLedgerId, isActive: true,
       isCashOrBank: false, postsToCashBook: false, requiresSubLedger: false, allowDocAdjust: false,
     });
     expect(child.status).toBe(201);

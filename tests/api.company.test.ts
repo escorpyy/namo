@@ -142,7 +142,7 @@ describe.skipIf(!DB_READY)("Company, Branch and Fiscal Year masters (API)", () =
       const g = await call("POST", `/api/masters/account-groups?companyId=${tc}`, { code: `EQ${tag}`, description: `Equity ${tag}`, type: "EQUITY", isActive: true });
       const sg = await call("POST", `/api/masters/account-sub-groups?companyId=${tc}`, { accountGroupId: g.body.id, code: `S1${tag}`, description: `Reserves ${tag}`, isActive: true });
       const gl = await call("POST", `/api/masters/general-ledger?companyId=${tc}`, {
-        code: `RE${tag}`, name: "Retained earnings", accountSubGroupId: sg.body.id, normalBalance: "CREDIT", glType: "OTHER", isActive: true,
+        code: `RE${tag}`, name: "Retained earnings", accountGroupId: g.body.id, accountSubGroupId: sg.body.id, normalBalance: "CREDIT", glType: "OTHER", isActive: true,
         isCashOrBank: false, postsToCashBook: false, requiresSubLedger: false, allowDocAdjust: false,
       });
       expect([g.status, sg.status, gl.status]).toEqual([201, 201, 201]);

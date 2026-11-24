@@ -46,7 +46,7 @@ describe.skipIf(!DB_READY)("audit trail (database level)", () => {
     const fy = await ins(tx, "FiscalYear", { companyId: co, code: "2082/83", startDate: "2025-07-17", endDate: "2026-07-16", isCurrent: true, updatedAt: NOW });
     const grp = await ins(tx, "AccountGroup", { companyId: co, code: c("G"), description: "Grp", type: "EXPENSE", updatedAt: NOW });
     const sg = await ins(tx, "AccountSubGroup", { code: c("S"), description: "Sub", accountGroupId: grp, updatedAt: NOW });
-    const gl = (code: string, normal = "DEBIT") => ins(tx, "GeneralLedger", { companyId: co, code: c(code), name: code, accountSubGroupId: sg, normalBalance: normal, updatedAt: NOW });
+    const gl = (code: string, normal = "DEBIT") => ins(tx, "GeneralLedger", { companyId: co, code: c(code), name: code, accountGroupId: grp, accountSubGroupId: sg, normalBalance: normal, updatedAt: NOW });
     const vendor = await gl("VEND", "CREDIT"), purchase = await gl("PURCH"), rent = await gl("RENT"), cash = await gl("CASH");
     const pcs = await ins(tx, "ProductUnit", { companyId: co, code: c("PCS"), name: "Pcs", updatedAt: NOW });
     const pg = await ins(tx, "ProductGroup", { companyId: co, code: c("PG"), name: "PG", updatedAt: NOW });
@@ -427,7 +427,7 @@ describe.skipIf(!DB_READY)("audit trail (database level)", () => {
       fy = await ins(db, "FiscalYear", { companyId: co, code: "2082/83", startDate: "2025-07-17", endDate: "2026-07-16", updatedAt: NOW });
       grp = await ins(db, "AccountGroup", { companyId: co, code: c("G"), description: "Grp", type: "ASSET", updatedAt: NOW });
       sg = await ins(db, "AccountSubGroup", { code: c("S"), description: "Sub", accountGroupId: grp, updatedAt: NOW });
-      gl = await ins(db, "GeneralLedger", { companyId: co, code: c("L"), name: "Cash", accountSubGroupId: sg, normalBalance: "DEBIT", updatedAt: NOW });
+      gl = await ins(db, "GeneralLedger", { companyId: co, code: c("L"), name: "Cash", accountGroupId: grp, accountSubGroupId: sg, normalBalance: "DEBIT", updatedAt: NOW });
     });
     afterAll(async () => {
       await db.execute(sql`delete from "OpeningBalance" where "companyId" = ${co}`);

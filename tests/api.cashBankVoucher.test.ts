@@ -80,7 +80,7 @@ describe.skipIf(!DB_READY)("Cash / Bank Voucher (API)", () => {
     W.fy = await ins("FiscalYear", { companyId: W.co, code: "2082/83", startDate: "2025-07-17", endDate: "2026-07-16", isCurrent: true, updatedAt: NOW });
     const grp = await ins("AccountGroup", { companyId: W.co, code: c("G"), description: "Grp", type: "ASSET", updatedAt: NOW });
     const sg = await ins("AccountSubGroup", { code: c("S"), description: "Sub", accountGroupId: grp, updatedAt: NOW });
-    const gl = (code: string, extra: Record<string, unknown> = {}) => ins("GeneralLedger", { companyId: W.co, code: c(code), name: `${code} ${tag}`, accountSubGroupId: sg, normalBalance: "DEBIT", updatedAt: NOW, ...extra });
+    const gl = (code: string, extra: Record<string, unknown> = {}) => ins("GeneralLedger", { companyId: W.co, code: c(code), name: `${code} ${tag}`, accountGroupId: grp, accountSubGroupId: sg, normalBalance: "DEBIT", updatedAt: NOW, ...extra });
     W.bank = await gl("BANK", { isCashOrBank: true });
     W.bank2 = await gl("BANK2", { isCashOrBank: true });
     W.bankSubLed = await gl("BANKSUB", { isCashOrBank: true, requiresSubLedger: true }); // a bank ledger with one sub-ledger per account
@@ -97,7 +97,7 @@ describe.skipIf(!DB_READY)("Cash / Bank Voucher (API)", () => {
     const grp2 = await ins("AccountGroup", { companyId: co2, code: c("H"), description: "Grp2", type: "ASSET", updatedAt: NOW });
     const sg2 = await ins("AccountSubGroup", { code: c("T2"), description: "Sub2", accountGroupId: grp2, updatedAt: NOW });
     W.co2 = co2;
-    W.foreign = await ins("GeneralLedger", { companyId: co2, code: c("F"), name: `Foreign ${tag}`, accountSubGroupId: sg2, normalBalance: "DEBIT", updatedAt: NOW });
+    W.foreign = await ins("GeneralLedger", { companyId: co2, code: c("F"), name: `Foreign ${tag}`, accountGroupId: grp2, accountSubGroupId: sg2, normalBalance: "DEBIT", updatedAt: NOW });
     // opening balance of the bank: 12,84,500.00 (as on the design screen)
     await ins("OpeningBalance", { companyId: W.co, branchId: W.br, fiscalYearId: W.fy, generalLedgerId: W.bank, debit: "1284500", credit: 0, updatedAt: NOW });
   });

@@ -38,7 +38,7 @@ describe.skipIf(!DB_READY)("Changing a term's ledger in the master moves posted 
     await ins("FiscalYear", { companyId: W.co, code: "2082/83", startDate: "2025-07-17", endDate: "2026-07-16", isCurrent: true, updatedAt: NOW });
     const grp = await ins("AccountGroup", { companyId: W.co, code: c("G"), description: "Grp", type: "EXPENSE", updatedAt: NOW });
     const sg = await ins("AccountSubGroup", { code: c("S"), description: "Sub", accountGroupId: grp, updatedAt: NOW });
-    const gl = (code: string, normal = "DEBIT") => ins("GeneralLedger", { companyId: W.co, code: c(code), name: code, accountSubGroupId: sg, normalBalance: normal, updatedAt: NOW });
+    const gl = (code: string, normal = "DEBIT") => ins("GeneralLedger", { companyId: W.co, code: c(code), name: code, accountGroupId: grp, accountSubGroupId: sg, normalBalance: normal, updatedAt: NOW });
     W.vendor = await gl("VEND", "CREDIT"); W.wrong = await gl("PURCH"); W.right = await gl("DISC", "CREDIT");
     const pg = await ins("ProductGroup", { companyId: W.co, code: c("PG"), name: "PG", updatedAt: NOW });
     const psg = await ins("ProductSubGroup", { code: c("PSG"), name: "PSG", productGroupId: pg, updatedAt: NOW });
@@ -133,7 +133,7 @@ describe.skipIf(!DB_READY)("Changing a term's ledger in the master moves posted 
 
   it("a product's purchase ledger: changing it moves the bills posted with the old one, not the ones posted after", async () => {
     // fresh bills with the product (the term is not used here); the product posts to W.wrong (Purchase) and should post to W.purch2
-    W.purch2 = await ins("GeneralLedger", { companyId: W.co, code: c("PUR2"), name: "Purchase 2", accountSubGroupId: (await rows(sql`select "accountSubGroupId" as g from "GeneralLedger" where id = ${W.wrong}`))[0].g, normalBalance: "DEBIT", updatedAt: NOW });
+    W.purch2 = await ins("GeneralLedger", { companyId: W.co, code: c("PUR2"), name: "Purchase 2", accountGroupId: (await rows(sql`select "accountGroupId" as g from "GeneralLedger" where id = ${W.wrong}`))[0].g, accountSubGroupId: (await rows(sql`select "accountSubGroupId" as g from "GeneralLedger" where id = ${W.wrong}`))[0].g, normalBalance: "DEBIT", updatedAt: NOW });
     const mk = async (date: string, n: number) => {
       const r = await call("POST", "/api/purchase/bills", { companyId: W.co, branchId: W.br, invoiceDate: date, vendorGLId: W.vendor, vendorInvoiceNo: `P${n}${tag}`, lines: [{ productId: W.rice, qty: 10, rate: 100 }] });
       expect(r.status, JSON.stringify(r.body)).toBe(201);

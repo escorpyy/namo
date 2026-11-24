@@ -30,12 +30,14 @@ describe.skipIf(!DB_READY)("bill-wise settlement", () => {
     const branchId = await ins(tx, "Branch", { companyId, code: code("BR"), name: `Branch ${tag}`, updatedAt: NOW });
     await ins(tx, "FiscalYear", { companyId, code: "2082/83", startDate: "2025-07-17", endDate: "2026-07-16", isCurrent: true, updatedAt: NOW });
     const group = async (type: string, label: string) => {
-      const id = await ins(tx, "AccountGroup", { companyId, code: code(`G${label}`), description: label, type, updatedAt: NOW });
-      return ins(tx, "AccountSubGroup", { code: code(`S${label}`), description: label, accountGroupId: id, updatedAt: NOW });
+      const groupId = await ins(tx, "AccountGroup", { companyId, code: code(`G${label}`), description: label, type, updatedAt: NOW });
+      const subGroupId = await ins(tx, "AccountSubGroup", { code: code(`S${label}`), description: label, accountGroupId: groupId, updatedAt: NOW });
+      return { groupId, subGroupId };
     };
-    const assetSub = await group("ASSET", "ASSET"), revenueSub = await group("REVENUE", "REV");
+    const asset = await group("ASSET", "ASSET"), revenue = await group("REVENUE", "REV");
+    const assetSub = asset.subGroupId, revenueSub = revenue.subGroupId;
     const gl = (sub: number, key: string, normal: string, glType = "OTHER", extra: Record<string, unknown> = {}) =>
-      ins(tx, "GeneralLedger", { companyId, code: code(key), name: key, accountSubGroupId: sub, normalBalance: normal, glType, updatedAt: NOW, ...extra });
+      ins(tx, "GeneralLedger", { companyId, code: code(key), name: key, accountGroupId: sub === assetSub ? asset.groupId : revenue.groupId, accountSubGroupId: sub, normalBalance: normal, glType, updatedAt: NOW, ...extra });
     const customerGLId = await gl(assetSub, "CUST", "DEBIT", "CUSTOMER"), otherCustomerGLId = await gl(assetSub, "CUST2", "DEBIT", "CUSTOMER");
     const salesGLId = await gl(revenueSub, "SALES", "CREDIT"), cashGLId = await gl(assetSub, "CASH", "DEBIT", "OTHER", { isCashOrBank: true });
     const rebateGLId = await gl(assetSub, "REBATE", "DEBIT");

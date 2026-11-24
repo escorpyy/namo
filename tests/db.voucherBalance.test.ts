@@ -32,8 +32,8 @@ describe.skipIf(!DB_READY)("voucher balance Dr = Cr (database level)", () => {
     const br = await ins(tx, "Branch", { companyId: co, code: c("B"), name: `Branch ${tag}`, updatedAt: NOW });
     const grp = await ins(tx, "AccountGroup", { companyId: co, code: c("G"), description: "Grp", type: "LIABILITY", updatedAt: NOW });
     const sg = await ins(tx, "AccountSubGroup", { code: c("S"), description: "Sub", accountGroupId: grp, updatedAt: NOW });
-    const rent = await ins(tx, "GeneralLedger", { companyId: co, code: c("L1"), name: "Rent", accountSubGroupId: sg, normalBalance: "DEBIT", updatedAt: NOW });
-    const cash = await ins(tx, "GeneralLedger", { companyId: co, code: c("L2"), name: "Cash", accountSubGroupId: sg, normalBalance: "DEBIT", updatedAt: NOW });
+    const rent = await ins(tx, "GeneralLedger", { companyId: co, code: c("L1"), name: "Rent", accountGroupId: grp, accountSubGroupId: sg, normalBalance: "DEBIT", updatedAt: NOW });
+    const cash = await ins(tx, "GeneralLedger", { companyId: co, code: c("L2"), name: "Cash", accountGroupId: grp, accountSubGroupId: sg, normalBalance: "DEBIT", updatedAt: NOW });
     return { co, br, rent, cash, tag };
   }
 

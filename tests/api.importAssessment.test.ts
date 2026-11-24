@@ -45,7 +45,7 @@ describe.skipIf(!DB_READY)("Import cost assessment (API)", () => {
     await ins("FiscalYear", { companyId: W.co, code: "2082/83", startDate: "2025-07-17", endDate: "2026-07-16", isCurrent: true, updatedAt: NOW });
     const grp = await ins("AccountGroup", { companyId: W.co, code: c("G"), description: "Test", type: "EXPENSE", updatedAt: NOW });
     const sub = await ins("AccountSubGroup", { code: c("SG"), description: "Test", accountGroupId: grp, updatedAt: NOW });
-    const gl = (code: string, normalBalance = "DEBIT") => ins("GeneralLedger", { companyId: W.co, code: c(code), name: code, accountSubGroupId: sub, normalBalance, updatedAt: NOW });
+    const gl = (code: string, normalBalance = "DEBIT") => ins("GeneralLedger", { companyId: W.co, code: c(code), name: code, accountGroupId: grp, accountSubGroupId: sub, normalBalance, updatedAt: NOW });
     W.vendor = await gl("VENDOR", "CREDIT");
     W.purchase = await gl("PURCH");
     W.inputTax = await gl("INPUTVAT");
@@ -282,7 +282,7 @@ describe.skipIf(!DB_READY)("Import cost assessment (API)", () => {
     expect((await call("POST", `${api("import-assessments")}/${reversed}/reverse?companyId=${W.co}`, { userId, reason: "Wrong charge basis", date: "2025-10-20" })).status).toBe(200);
 
     const oldGl = (await rows(sql`select "generalLedgerId" as g from "PurchaseTerm" where id = ${W.duty}`))[0].g as number;
-    const newGl = await ins("GeneralLedger", { companyId: W.co, code: c("DUTY2"), name: "Duty 2", accountSubGroupId: (await rows(sql`select "accountSubGroupId" as g from "GeneralLedger" where id = ${oldGl}`))[0].g, normalBalance: "DEBIT", updatedAt: NOW });
+    const newGl = await ins("GeneralLedger", { companyId: W.co, code: c("DUTY2"), name: "Duty 2", accountGroupId: (await rows(sql`select "accountGroupId" as g from "GeneralLedger" where id = ${oldGl}`))[0].g, accountSubGroupId: (await rows(sql`select "accountSubGroupId" as g from "GeneralLedger" where id = ${oldGl}`))[0].g, normalBalance: "DEBIT", updatedAt: NOW });
     const bal = async (gl: number) => Number((await rows(sql`select coalesce(sum(l.debit - l.credit), 0) as b from "JournalVoucherLine" l join "JournalVoucher" v on v.id = l."journalVoucherId" where v."companyId" = ${W.co} and l."generalLedgerId" = ${gl}`))[0].b);
     const before = await bal(oldGl);
     expect(before).toBeGreaterThanOrEqual(100); // the applied assessment: Dr duty 100 (the reversed one nets to zero)

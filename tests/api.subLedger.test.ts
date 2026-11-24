@@ -26,7 +26,7 @@ describe.skipIf(!DB_READY)("Sub Ledger master (API)", () => {
   const put = (sid: number, body: Record<string, unknown>) => call("PUT", `/api/masters/sub-ledger/${sid}`, body);
   const base = (over: Record<string, unknown> = {}) => ({ generalLedgerId: glReq, code: `SL${tag}`, name: "Test sub ledger", partyId: null, isActive: true, ...over });
   const glBody = (over: Record<string, unknown> = {}) => ({
-    code: `GL${tag}`, name: "Test ledger", accountSubGroupId: bankSg, normalBalance: "DEBIT", glType: "OTHER", isActive: true,
+    code: `GL${tag}`, name: "Test ledger", accountGroupId: bankGroup, accountSubGroupId: bankSg, normalBalance: "DEBIT", glType: "OTHER", isActive: true,
     isCashOrBank: false, postsToCashBook: false, requiresSubLedger: true, allowDocAdjust: false, ...over,
   });
   const makeGl = async (over: Record<string, unknown>) => {
@@ -42,7 +42,9 @@ describe.skipIf(!DB_READY)("Sub Ledger master (API)", () => {
     const ctx = (await call("GET", "/api/context")).body;
     otherCompanyId = ctx.companies.find((c: any) => c.id !== companyId).id;
 
-    bankSg = (await rows("account-sub-groups")).find((s) => s.description === "Bank Accounts").id;
+    const bank = (await rows("account-sub-groups")).find((s) => s.description === "Bank Accounts");
+    bankSg = bank.id;
+    bankGroup = bank.accountGroupId;
     partyId = (await rows("party")).find((p) => p.code === "C001").id;
     seededGl = (await rows("general-ledger")).find((g) => g.code === "GL002").id;
     glReq = await makeGl({ code: `GR${tag}`, name: "Test ledger with sub ledgers", requiresSubLedger: true });
@@ -55,7 +57,7 @@ describe.skipIf(!DB_READY)("Sub Ledger master (API)", () => {
     const sg = await call("POST", `/api/masters/account-sub-groups?companyId=${otherCompanyId}`, { accountGroupId: otherGroup, code: `SG${tag}`, description: `Other sub ${tag}`, isActive: true });
     expect(sg.status).toBe(201);
     otherSg = sg.body.id;
-    const gl = await call("POST", `/api/masters/general-ledger?companyId=${otherCompanyId}`, glBody({ code: `OG${tag}`, name: "Other company ledger", accountSubGroupId: otherSg }));
+    const gl = await call("POST", `/api/masters/general-ledger?companyId=${otherCompanyId}`, glBody({ code: `OG${tag}`, name: "Other company ledger", accountGroupId: otherGroup, accountSubGroupId: otherSg }));
     expect(gl.status, JSON.stringify(gl.body)).toBe(201);
     otherGl = gl.body.id;
   });

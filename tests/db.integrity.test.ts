@@ -35,7 +35,7 @@ describe.skipIf(!DB_READY)("account hierarchy: company consistency enforced by t
       return { co, grp, sg };
     };
     const a = await mk("A"), b = await mk("B");
-    const glA = await one(tx, sql`insert into "GeneralLedger"("companyId",code,name,"accountSubGroupId","normalBalance","updatedAt") values (${a.co},'L1','Ledger A',${a.sg},'DEBIT',now()) returning id`);
+    const glA = await one(tx, sql`insert into "GeneralLedger"("companyId",code,name,"accountGroupId","accountSubGroupId","normalBalance","updatedAt") values (${a.co},'L1','Ledger A',${a.grp},${a.sg},'DEBIT',now()) returning id`);
     return { coA: a.co, coB: b.co, sgA: a.sg, sgB: b.sg, grpA: a.grp, glA };
   }
 
@@ -49,7 +49,7 @@ describe.skipIf(!DB_READY)("account hierarchy: company consistency enforced by t
     expect(cause.message).toMatch(msg);
   };
   const gl = (co: number, sg: number, code: string, parent: number | null = null) =>
-    sql`insert into "GeneralLedger"("companyId",code,name,"accountSubGroupId","normalBalance","parentId","updatedAt") values (${co},${code},'x',${sg},'DEBIT',${parent},now())`;
+    sql`insert into "GeneralLedger"("companyId",code,name,"accountGroupId","accountSubGroupId","normalBalance","parentId","updatedAt") values (${co},${code},'x',(select "accountGroupId" from "AccountSubGroup" where id = ${sg}),${sg},'DEBIT',${parent},now())`;
 
   it("control: a consistent ledger and a same-company parent are accepted", async () => {
     await run(async (tx, f) => {
@@ -72,7 +72,7 @@ describe.skipIf(!DB_READY)("account hierarchy: company consistency enforced by t
 
   it("rejects a parent ledger from another company (INSERT and UPDATE)", async () => {
     await run(async (tx, f) => {
-      const glB = await one(tx, sql`insert into "GeneralLedger"("companyId",code,name,"accountSubGroupId","normalBalance","updatedAt") values (${f.coB},'LB','B',${f.sgB},'DEBIT',now()) returning id`);
+      const glB = await one(tx, sql`insert into "GeneralLedger"("companyId",code,name,"accountGroupId","accountSubGroupId","normalBalance","updatedAt") values (${f.coB},'LB','B',(select "accountGroupId" from "AccountSubGroup" where id = ${f.sgB}),${f.sgB},'DEBIT',now()) returning id`);
       await refused(tx, gl(f.coA, f.sgA, "CH", glB), /parent/i);
       await refused(tx, sql`update "GeneralLedger" set "parentId" = ${glB} where id = ${f.glA}`, /parent/i);
     });

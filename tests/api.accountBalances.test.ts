@@ -67,7 +67,7 @@ describe.skipIf(!DB_READY)("Account balances (API)", () => {
     W.fy = await ins("FiscalYear", { companyId: W.co, code: FY, startDate: "2025-07-17", endDate: "2026-07-16", isCurrent: true, updatedAt: NOW });
     const grp = await ins("AccountGroup", { companyId: W.co, code: c("G"), description: "Grp", type: "ASSET", updatedAt: NOW });
     const sg = await ins("AccountSubGroup", { code: c("S"), description: "Sub", accountGroupId: grp, updatedAt: NOW });
-    const gl = (code: string, extra: Record<string, unknown> = {}) => ins("GeneralLedger", { companyId: W.co, code: c(code), name: `${code} ${tag}`, accountSubGroupId: sg, normalBalance: "DEBIT", updatedAt: NOW, ...extra });
+    const gl = (code: string, extra: Record<string, unknown> = {}) => ins("GeneralLedger", { companyId: W.co, code: c(code), name: `${code} ${tag}`, accountGroupId: grp, accountSubGroupId: sg, normalBalance: "DEBIT", updatedAt: NOW, ...extra });
     W.a = await gl("A");
     W.b = await gl("B");
     W.party = await gl("PARTY", { requiresSubLedger: true });

@@ -35,7 +35,7 @@ describe.skipIf(!DB_READY)("Cost assessment: local and import, against ledgers, 
     await ins("FiscalYear", { companyId: W.co, code: "2082/83", startDate: "2025-07-17", endDate: "2026-07-16", isCurrent: true, updatedAt: NOW });
     const grp = await ins("AccountGroup", { companyId: W.co, code: c("G"), description: "Test", type: "EXPENSE", updatedAt: NOW });
     const sub = await ins("AccountSubGroup", { code: c("SG"), description: "Test", accountGroupId: grp, updatedAt: NOW });
-    const gl = (code: string, normalBalance = "DEBIT") => ins("GeneralLedger", { companyId: W.co, code: c(code), name: code, accountSubGroupId: sub, normalBalance, updatedAt: NOW });
+    const gl = (code: string, normalBalance = "DEBIT") => ins("GeneralLedger", { companyId: W.co, code: c(code), name: code, accountGroupId: grp, accountSubGroupId: sub, normalBalance, updatedAt: NOW });
     W.vendor = await gl("VENDOR", "CREDIT");
     W.purchase = await gl("PURCH");
     W.inputTax = await gl("INPUTVAT");

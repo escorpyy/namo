@@ -78,9 +78,9 @@ describe.skipIf(!DB_READY)("company consistency across all tenant-scoped tables 
     const fy = await ins(tx, "FiscalYear", { companyId: co, code: c("F"), startDate: "2025-07-16", endDate: "2026-07-15", updatedAt: NOW });
     const grp = await ins(tx, "AccountGroup", { companyId: co, code: c("G"), description: "Grp", type: "ASSET", updatedAt: NOW });
     const sg = await ins(tx, "AccountSubGroup", { code: c("S"), description: "Sub", accountGroupId: grp, updatedAt: NOW });
-    const gl = await ins(tx, "GeneralLedger", { companyId: co, code: c("L1"), name: "L1", accountSubGroupId: sg, normalBalance: "DEBIT", updatedAt: NOW });
-    const gl2 = await ins(tx, "GeneralLedger", { companyId: co, code: c("L2"), name: "L2", accountSubGroupId: sg, normalBalance: "DEBIT", updatedAt: NOW });
-    const vendorGl = await ins(tx, "GeneralLedger", { companyId: co, code: c("L3"), name: "L3", accountSubGroupId: sg, normalBalance: "CREDIT", updatedAt: NOW });
+    const gl = await ins(tx, "GeneralLedger", { companyId: co, code: c("L1"), name: "L1", accountGroupId: grp, accountSubGroupId: sg, normalBalance: "DEBIT", updatedAt: NOW });
+    const gl2 = await ins(tx, "GeneralLedger", { companyId: co, code: c("L2"), name: "L2", accountGroupId: grp, accountSubGroupId: sg, normalBalance: "DEBIT", updatedAt: NOW });
+    const vendorGl = await ins(tx, "GeneralLedger", { companyId: co, code: c("L3"), name: "L3", accountGroupId: grp, accountSubGroupId: sg, normalBalance: "CREDIT", updatedAt: NOW });
     const agent = await ins(tx, "Agent", { companyId: co, code: c("AG"), name: "Agent", updatedAt: NOW });
     const party = await ins(tx, "Party", { companyId: co, generalLedgerId: vendorGl, updatedAt: NOW });
     const unit = await ins(tx, "ProductUnit", { companyId: co, code: c("U"), name: "Unit", updatedAt: NOW });

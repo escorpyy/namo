@@ -67,7 +67,7 @@ describe.skipIf(!DB_READY)("Company lock date (API)", () => {
     await ins("FiscalYear", { companyId: W.co, code: "2082/83", startDate: "2025-07-17", endDate: "2026-07-16", isCurrent: true, updatedAt: NOW });
     const grp = await ins("AccountGroup", { companyId: W.co, code: c("G"), description: "Grp", type: "EXPENSE", updatedAt: NOW });
     const sg = await ins("AccountSubGroup", { code: c("S"), description: "Sub", accountGroupId: grp, updatedAt: NOW });
-    const gl = (code: string, normal = "DEBIT") => ins("GeneralLedger", { companyId: W.co, code: c(code), name: code, accountSubGroupId: sg, normalBalance: normal, updatedAt: NOW });
+    const gl = (code: string, normal = "DEBIT") => ins("GeneralLedger", { companyId: W.co, code: c(code), name: code, accountGroupId: grp, accountSubGroupId: sg, normalBalance: normal, updatedAt: NOW });
     W.vendor = await gl("VEND", "CREDIT");
     W.purchase = await gl("PURCH");
     W.pcs = await ins("ProductUnit", { companyId: W.co, code: c("PCS").slice(0, 10), name: `Pcs ${tag}`, updatedAt: NOW });
