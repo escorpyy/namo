@@ -4,6 +4,8 @@ import { formatPaise } from "../../shared/cashBankVoucher";
 import { HttpError } from "../routes/_util";
 import { signedPaise } from "./accountBalances";
 import { parseDate, type Tx } from "./purchase/common";
+import { ZERO, fmt } from "./purchase/money";
+import { stockLedgerBalances } from "./stockLedgerAuto";
 
 // The "account panel" beside the voucher screens: for ONE ledger (or one party sub-ledger of it) the balance on the voucher date and the
 // last few posted entries. Read-only. The balance follows exactly the rules of services/accountBalances.ts (opening balance + posted journal and
@@ -98,7 +100,11 @@ export async function accountPeek(o: AccountPeekInput, tx: Pick<Tx, "execute"> =
     )
     SELECT COALESCE(SUM(amount), 0)::text AS net FROM movements
   `)) as any[];
-  const net = signedPaise(String(bal?.net ?? "0"));
+  let net = signedPaise(String(bal?.net ?? "0"));
+  if (sub === null) { // a stock ledger also carries the stock value that moves by itself (see stockLedgerAuto)
+    const [fy] = (await tx.execute(sql`SELECT id, "startDate"::text AS s FROM "FiscalYear" WHERE "companyId" = ${o.companyId} AND code = ${o.fiscalYear}`)) as any[];
+    if (fy) net += signedPaise(fmt((await stockLedgerBalances(tx as any, { companyId: o.companyId, branchId: o.branchId, fiscalYearId: Number(fy.id), fyStart: String(fy.s), asOf })).get(Number(o.generalLedgerId)) ?? ZERO, 6));
+  }
 
   // Newest first: voucher date, then the later voucher, then the later line.
   const recent = (await tx.execute(sql`

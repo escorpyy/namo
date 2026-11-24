@@ -80,7 +80,7 @@ describe.skipIf(!DB_READY)("Account peek (API)", () => {
     const sg = await ins("AccountSubGroup", { code: c("S"), description: "Sub", accountGroupId: grp, updatedAt: NOW });
     const grp2 = await ins("AccountGroup", { companyId: W.co2, code: c("H"), description: "Grp2", type: "ASSET", updatedAt: NOW });
     const sg2 = await ins("AccountSubGroup", { code: c("R"), description: "Sub2", accountGroupId: grp2, updatedAt: NOW });
-    const gl = (code: string, co: number, sub: number, extra: Record<string, unknown> = {}) => ins("GeneralLedger", { companyId: co, code: c(code), name: `${code} ${tag}`, accountSubGroupId: sub, normalBalance: "DEBIT", updatedAt: NOW, ...extra });
+    const gl = (code: string, co: number, sub: number, extra: Record<string, unknown> = {}) => ins("GeneralLedger", { companyId: co, code: c(code), name: `${code} ${tag}`, accountGroupId: sub === sg ? grp : grp2, accountSubGroupId: sub, normalBalance: "DEBIT", updatedAt: NOW, ...extra });
     W.a = await gl("A", W.co, sg);
     W.b = await gl("B", W.co, sg);
     W.party = await gl("PARTY", W.co, sg, { requiresSubLedger: true });

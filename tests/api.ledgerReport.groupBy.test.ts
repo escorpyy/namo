@@ -30,7 +30,7 @@ describe.skipIf(!DB_READY)("Ledger report — Group By (API)", () => {
     const bank = subs.find((s) => s.description === "Bank Accounts");
     const other = subs.find((s) => s.id !== bank.id);
     const mk = async (suffix: string, accountSubGroupId: number) => {
-      const r = await call("POST", `/api/masters/general-ledger?companyId=${companyId}`, { code: `GB${suffix}${tag}`, name: `Group by ${suffix}`, accountSubGroupId, normalBalance: "DEBIT", glType: "OTHER", isActive: true, isCashOrBank: false, postsToCashBook: false, requiresSubLedger: false, allowDocAdjust: false });
+      const r = await call("POST", `/api/masters/general-ledger?companyId=${companyId}`, { code: `GB${suffix}${tag}`, name: `Group by ${suffix}`, accountGroupId: subs.find((s) => s.id === accountSubGroupId).accountGroupId, accountSubGroupId, normalBalance: "DEBIT", glType: "OTHER", isActive: true, isCashOrBank: false, postsToCashBook: false, requiresSubLedger: false, allowDocAdjust: false });
       expect(r.status, JSON.stringify(r.body)).toBe(201);
       return r.body.id as number;
     };

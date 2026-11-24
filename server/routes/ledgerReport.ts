@@ -4,6 +4,7 @@ import { db } from "../db";
 import { HttpError, wrap } from "./_util";
 import { companyOf, q, whole } from "./_input";
 import { parseDate } from "../services/purchase/common";
+import { stockAutoRows, stockAutoSql } from "../services/stockLedgerAuto";
 
 export const ledgerReportRouter = Router();
 const GROUP_FIELDS = ["accountGroup", "accountSubGroup", "generalLedger", "subLedger", "agent", "invoiceAgent", "area", "subArea", "month", "source", "postingStatus", "postedBy"];
@@ -68,6 +69,10 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
   const fromTs = `${start}`;
   const toTs = `${end}`;
 
+  // Stock ledgers move by themselves with the stock (see stockLedgerAuto); not for a sub-ledger statement.
+  const auto = subLedgerId ? [] : await stockAutoRows(db, { companyId, branchId, fiscalYear, start, end });
+  const autoSql = stockAutoSql(auto);
+
   // Summary grouping stays stable at the ledger/party-master level; transaction totals remain calculated independently below.
   const summary = await db.execute(sql`
     WITH chosen AS (
@@ -91,6 +96,8 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
       WHERE o."companyId" = ${companyId} AND o."branchId" = ${branchId} AND fy.code = ${fiscalYear} ${subOnOpening}
       GROUP BY o."generalLedgerId"
     ), tx AS (
+      SELECT sa.gl, sa.d, sa.dr, sa.cr FROM ${autoSql} JOIN chosen c ON c.id = sa.gl
+      UNION ALL
       SELECT l."generalLedgerId" AS gl, v."voucherDate" AS d, l."debit" AS dr, l."credit" AS cr
       FROM "JournalVoucherLine" l JOIN "JournalVoucher" v ON v.id = l."journalVoucherId"
       JOIN chosen c ON c.id = l."generalLedgerId"
@@ -233,6 +240,8 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
           SELECT l."generalLedgerId" gl, l.debit dr, l.credit cr FROM "JournalVoucherLine" l JOIN "JournalVoucher" v ON v.id=l."journalVoucherId" WHERE v."companyId"=${companyId} AND v."branchId"=${branchId} AND v."fiscalYear"=${fiscalYear} AND v."isPosted"=true AND v."voucherDate" < ${start}::date ${subOnLine}
           UNION ALL
           SELECT l."generalLedgerId", l.debit, l.credit FROM "CashBankVoucherLine" l JOIN "CashBankVoucher" v ON v.id=l."cashBankVoucherId" WHERE v."companyId"=${companyId} AND v."branchId"=${branchId} AND v."fiscalYear"=${fiscalYear} AND v."isPosted"=true AND v."voucherDate" < ${start}::date ${subOnLine}
+          UNION ALL
+          SELECT sa.gl, sa.dr, sa.cr FROM ${autoSql} WHERE sa.d < ${start}::date
         ) before_rows GROUP BY gl
       ) p ON p.gl=c.id
     ), numbered AS (

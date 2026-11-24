@@ -33,8 +33,8 @@ describe.skipIf(!DB_READY)("Ledger report — sub-ledger scope (API)", () => {
     const ctx = (await call("GET", "/api/context")).body;
     const fy = ctx.companies.find((c: any) => c.id === companyId).fiscalYears.find((y: any) => y.id === fyId);
     fiscalYear = fy.code; from = fy.startDate; to = fy.endDate;
-    const sg = (await call("GET", `/api/masters/account-sub-groups?companyId=${companyId}`)).body.find((s: any) => s.description === "Bank Accounts").id;
-    const g = await call("POST", `/api/masters/general-ledger?companyId=${companyId}`, { code: `SLS${tag}`, name: "Sub-ledger scope test", accountSubGroupId: sg, normalBalance: "DEBIT", glType: "OTHER", isActive: true, isCashOrBank: false, postsToCashBook: false, requiresSubLedger: true, allowDocAdjust: false });
+    const sgRow = (await call("GET", `/api/masters/account-sub-groups?companyId=${companyId}`)).body.find((s: any) => s.description === "Bank Accounts"), sg = sgRow.id;
+    const g = await call("POST", `/api/masters/general-ledger?companyId=${companyId}`, { code: `SLS${tag}`, name: "Sub-ledger scope test", accountGroupId: sgRow.accountGroupId, accountSubGroupId: sg, normalBalance: "DEBIT", glType: "OTHER", isActive: true, isCashOrBank: false, postsToCashBook: false, requiresSubLedger: true, allowDocAdjust: false });
     expect(g.status, JSON.stringify(g.body)).toBe(201);
     gl = g.body.id;
     const mk = async (suffix: string) => {

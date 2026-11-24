@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { DB_READY, uniq } from "./helpers";
 import { stockBalance, syncOpeningMovements } from "../server/services/stockLedger";
 import { stockValuation } from "../server/services/stockValuation";
+import { stockLedgerBalances, stockAutoRows, stockAutoSql } from "../server/services/stockLedgerAuto";
 
 // The purchase service layer end to end: order -> challan -> bill -> journal, with the rules the database cannot
 // express (pricing, landed cost, quantity limits, balanced posting, reversal). Every test runs inside one transaction
@@ -453,6 +454,44 @@ describe.skipIf(!DB_READY)("purchase service layer", () => {
         expect((await stockBalance(tx, { companyId: W.co, productId: W.rice.id })).reduce((a, r) => a + Number(r.qty), 0)).toBe(8);
         expect((await stockValuation(tx, { companyId: W.co, productId: W.rice.id })).rows[0]).toMatchObject({ qty: "8.000000", value: "400.00" });
         expect((await stockValuation(tx, { companyId: W.co, productId: W.rice.id, asOf: "2025-07-01" })).rows).toHaveLength(0); // before the year began
+      });
+    });
+
+    it("automatic stock ledgers: closing stock (P&L, B/S) and opening stock (P&L) follow the stock, and always balance", async () => {
+      await run(async (tx, W) => {
+        const fy = (await tx.execute(sql`select id from "FiscalYear" where "companyId" = ${W.co}`))[0].id as number;
+        const br = (await tx.execute(sql`select id from "Branch" where "companyId" = ${W.co}`))[0].id as number;
+        const sd = (await tx.execute(sql`select id from "StockDetail" where "productId" = ${W.rice.id}`))[0].id as number;
+        const [opl, cpl, cbs] = [await ins(tx, "GeneralLedger", { companyId: W.co, code: `OPL${uniq()}`.slice(0, 10), name: "Opening stock", accountGroupId: (await tx.execute(sql`select "accountGroupId" as id from "GeneralLedger" where id = ${W.purchase}`))[0].id, normalBalance: "DEBIT", updatedAt: NOW }),
+          await ins(tx, "GeneralLedger", { companyId: W.co, code: `CPL${uniq()}`.slice(0, 10), name: "Closing stock P&L", accountGroupId: (await tx.execute(sql`select "accountGroupId" as id from "GeneralLedger" where id = ${W.purchase}`))[0].id, normalBalance: "CREDIT", updatedAt: NOW }),
+          await ins(tx, "GeneralLedger", { companyId: W.co, code: `CBS${uniq()}`.slice(0, 10), name: "Closing stock B/S", accountGroupId: (await tx.execute(sql`select "accountGroupId" as id from "GeneralLedger" where id = ${W.purchase}`))[0].id, normalBalance: "DEBIT", updatedAt: NOW })];
+        await tx.execute(sql`update "StockDetail" set "valuationMethod" = 'WEIGHTED_AVERAGE', "openingGLId" = ${opl}, "closingPLGLId" = ${cpl}, "closingBSGLId" = ${cbs} where id = ${sd}`);
+        await ins(tx, "StockOpeningBalance", { branchId: br, fiscalYearId: fy, stockDetailId: sd, quantity: 8, rate: 50, value: 400, updatedAt: NOW });
+        await syncOpeningMovements(tx, { companyId: W.co, branchId: br, fiscalYearId: fy });
+        const direct = await svc.savePurchaseBill(billIn(W, { lines: [{ productId: W.rice.id, qty: 10, rate: 100 }] }), ACTOR, { tx });
+        await svc.postPurchaseBill(direct.id, ACTOR, { tx });
+        const at = (asOf: string) => stockLedgerBalances(tx, { companyId: W.co, branchId: br, fiscalYearId: fy, fyStart: "2025-07-17", asOf });
+        const num = (m: Map<number, bigint>, id: number) => Number(m.get(id) ?? 0n) / 1e6;
+        let b = await at("2026-07-16");
+        // 8 @ 50 + 10 @ 100 = 18 units worth 1400: closing 1400 (Cr), opening 400 (Dr), B/S carries the rest (1000) on top of its opening balance
+        expect([num(b, cpl), num(b, opl), num(b, cbs)]).toEqual([-1400, 400, 1000]);
+        expect([...b.values()].reduce((a, v) => a + v, 0n)).toBe(0n);
+        // a sale of 5 lowers the closing value at once; the three still balance
+        const [m] = (await tx.execute(sql`select "companyId", "branchId" from "StockMovement" where "productId" = ${W.rice.id} limit 1`)) as any[];
+        await tx.execute(sql`insert into "StockMovement" ("companyId","branchId","productId","movementDate","qty","sourceType","sourceId","sourceLineId") values (${m.companyId}, ${m.branchId}, ${W.rice.id}, '2026-01-10', -5, 'SALES_INVOICE', 1, 1)`);
+        b = await at("2026-07-16");
+        expect(num(b, cpl)).toBeCloseTo(-1011.11, 2);
+        expect([...b.values()].reduce((a, v) => a + v, 0n)).toBe(0n);
+        // before the year there is nothing; as on a date before the sale the sale is not counted
+        expect((await at("2025-07-16")).size).toBe(0);
+        expect(num(await at("2025-12-31"), cpl)).toBe(-1400);
+        // report rows for a period: what stood before it, and the change inside it
+        const rows = await stockAutoRows(tx, { companyId: W.co, branchId: br, fiscalYear: "2082/83", start: "2025-12-01", end: "2026-07-16" });
+        expect(rows.filter((r) => r.generalLedgerId === cpl).map((r) => [r.d, Number(r.cr) / 1e6, Number(r.dr) / 1e6])).toEqual([["2025-11-30", 1400, 0], ["2026-07-16", 0, expect.closeTo(388.89, 2)]]);
+        // the SQL form the reports join onto: net of the rows = the balance at the end
+        const sums = (await tx.execute(sql`select sa.gl, sum(sa.dr - sa.cr)::text as net from ${stockAutoSql(rows)} group by sa.gl`)) as any[];
+        expect(Number(sums.find((r) => Number(r.gl) === cpl).net)).toBeCloseTo(-1011.11, 2);
+        expect(await tx.execute(sql`select * from ${stockAutoSql([])}`)).toHaveLength(0);
       });
     });
 
