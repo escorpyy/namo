@@ -17,6 +17,7 @@ import JournalVoucherWorkspace from "./screens/accounting/JournalVoucherWorkspac
 import AgeingScreen from "./screens/reports/AgeingScreen";
 import StockValuationScreen from "./screens/reports/StockValuationScreen";
 import LedgerReportScreen from "./screens/reports/LedgerReportScreen";
+import FinancialStatementScreen from "./screens/reports/FinancialStatementScreen";
 import SalesInvoiceWorkspace from "./screens/sales/SalesInvoiceWorkspace";
 import SalesChallanWorkspace from "./screens/sales/SalesChallanWorkspace";
 import PurchaseBillWorkspace from "./screens/purchase/PurchaseBillWorkspace";
@@ -224,6 +225,13 @@ export default function App() {
             branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
             fyStart={co.fiscalYears.find((y) => y.id === fyId)?.startDate ?? ""} fyEnd={co.fiscalYears.find((y) => y.id === fyId)?.endDate ?? ""}
             calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} onOpenSource={openSource}
+          />
+        ) : screen === "fs-trial-balance" || screen === "fs-profit-loss" || screen === "fs-balance-sheet" ? (
+          <FinancialStatementScreen
+            key={`${screen}:${companyId}:${branchId}:${fyId}`} kind={screen === "fs-trial-balance" ? "trial-balance" : screen === "fs-profit-loss" ? "profit-loss" : "balance-sheet"}
+            companyId={companyId} branchId={branchId} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
+            fyStart={co.fiscalYears.find((y) => y.id === fyId)?.startDate ?? ""} fyEnd={co.fiscalYears.find((y) => y.id === fyId)?.endDate ?? ""}
+            setStatus={setStatus} dirtyRef={dirtyRef}
           />
         ) : screen === "sales-challans" ? (
           <SalesChallanWorkspace

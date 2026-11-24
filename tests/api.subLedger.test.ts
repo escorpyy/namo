@@ -11,7 +11,7 @@ describe.skipIf(!DB_READY)("Sub Ledger master (API)", () => {
   let call: (m: string, p: string, b?: unknown) => Promise<Res>;
   let close: () => Promise<void>;
   let companyId = 0, otherCompanyId = 0;
-  let bankSg = 0, glReq = 0, glPlain = 0, otherGl = 0, otherSg = 0, otherGroup = 0, partyId = 0, seededGl = 0;
+  let bankSg = 0, bankGroup = 0, glReq = 0, glPlain = 0, otherGl = 0, otherSg = 0, otherGroup = 0, partyId = 0, seededGl = 0;
   const createdSub: number[] = [];
   const createdGl: number[] = [];
   const tag = uniq();

@@ -82,8 +82,8 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
         COALESCE(p."agentId", g."agentId") AS "agentId", a.code AS "agentCode", a.name AS "agentName",
         COALESCE(p."subAreaId", g."subAreaId") AS "subAreaId", sa.code AS "subAreaCode", sa.name AS "subAreaName", ar.id AS "areaId", ar.code AS "areaCode", ar.name AS "areaName"
       FROM "GeneralLedger" g
-      JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId"
-      JOIN "AccountGroup" ag ON ag.id = sg."accountGroupId"
+      LEFT JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId"
+      JOIN "AccountGroup" ag ON ag.id = g."accountGroupId"
       LEFT JOIN "Party" p ON p."generalLedgerId" = g.id
       LEFT JOIN "Agent" a ON a.id = COALESCE(p."agentId", g."agentId")
       LEFT JOIN "SubArea" sa ON sa.id = COALESCE(p."subAreaId", g."subAreaId")

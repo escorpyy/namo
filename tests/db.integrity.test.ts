@@ -63,7 +63,7 @@ describe.skipIf(!DB_READY)("account hierarchy: company consistency enforced by t
   });
 
   it("rejects UPDATE that moves a ledger under another company's Sub Group", async () => {
-    await run(async (tx, f) => refused(tx, sql`update "GeneralLedger" set "accountSubGroupId" = ${f.sgB} where id = ${f.glA}`, /company/i));
+    await run(async (tx, f) => refused(tx, sql`update "GeneralLedger" set "accountSubGroupId" = ${f.sgB} where id = ${f.glA}`, /subgroup/i));
   });
 
   it("rejects UPDATE that changes a ledger's company", async () => {

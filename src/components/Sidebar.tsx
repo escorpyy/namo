@@ -23,6 +23,9 @@ import {
     "rpt-outstanding",
     "rpt-ageing",
     "fs-ledgers",
+    "fs-trial-balance",
+    "fs-profit-loss",
+    "fs-balance-sheet",
     "code-numbering",
     "number-series",
     "gl-setup",
@@ -119,7 +122,7 @@ const sections: Section[] = [
     items: [
       { id: "fs-ledgers", label: "Ledgers" },
       { id: "fs-trial-balance", label: "Trial Balance" },
-      { id: "fs-income-statement", label: "Income Statement" },
+      { id: "fs-profit-loss", label: "Profit & Loss" },
       { id: "fs-balance-sheet", label: "Balance Sheet" },
       { id: "fs-cash-flow", label: "Cash Flow Statement" },
       { id: "fs-owners-equity", label: "Statement of Changes in Owner's Equity" },

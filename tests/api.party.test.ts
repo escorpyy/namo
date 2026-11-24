@@ -118,7 +118,7 @@ describe.skipIf(!DB_READY)("Party master (API)", () => {
   it("rejects links that do not exist or belong to another company (400, with the field named)", async () => {
     const other = await post(base({ code: `O${tag}` }), otherCompanyId); // company 1's Sub Group used in company 2
     expect(other.status).toBe(400);
-    expect(other.body.field).toBe("accountSubGroupId");
+    expect(other.body.field).toBe("accountGroupId");
     expect((await post(base({ code: `O2${tag}`, accountSubGroupId: 999999 }))).status).toBe(400);
     const sa = await post(base({ code: `O3${tag}`, subAreaId: 999999 }));
     expect(sa.status).toBe(400);

@@ -432,3 +432,21 @@ export interface StockValuationRow {
   qty: string; rate: string; value: string; missingCost: boolean; negative: boolean;
   buckets: { locationId: number | null; locationName: string | null; batchNo: string | null; qty: string; value: string }[];
 }
+
+
+export type FinancialReportKind = "trial-balance" | "profit-loss" | "balance-sheet";
+export interface FinancialReportRow {
+  generalLedgerId: number; code: string; name: string;
+  accountGroupId: number; accountGroupCode: string; accountGroupName: string; accountType: "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE";
+  accountSubGroupId: number | null; accountSubGroupCode: string | null; accountSubGroupName: string | null;
+  opening: string; debit: string; credit: string; closing: string; net: string; closingDebit: string; closingCredit: string;
+}
+export interface FinancialReportResult {
+  kind: FinancialReportKind; fiscalYear: string; from: string; to: string;
+  rows: FinancialReportRow[];
+  totals: { opening: number; debit: number; credit: number; closing: number; currentResult: string; balanced?: boolean };
+}
+export const financialReportsApi = {
+  get: (kind: FinancialReportKind, p: { companyId: number; branchId: number; fiscalYear: string; from: string; to: string }) =>
+    req<FinancialReportResult>(`/api/financial-reports/${kind}?${qstr(p)}`),
+};
