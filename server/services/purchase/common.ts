@@ -64,10 +64,15 @@ export async function resolveFiscalYear(tx: Tx, companyId: number, date: Date, c
   const where = code
     ? and(eq(S.fiscalYear.companyId, companyId), eq(S.fiscalYear.code, code))
     : and(eq(S.fiscalYear.companyId, companyId), lte(S.fiscalYear.startDate, date), gte(S.fiscalYear.endDate, date));
-  const [fy] = await tx.select().from(S.fiscalYear).where(where).limit(1);
+  const [fy] = await tx.select().from(S.fiscalYear).where(where).limit(1).for("share");
   if (!fy) throw new HttpError(400, code ? `Fiscal year ${code} does not exist in this company.` : "No fiscal year covers this date.", "fiscalYear");
   if (!fy.isActive) throw new HttpError(409, `Fiscal year ${fy.code} is not active.`, "fiscalYear");
   if (fy.isClosed) throw new HttpError(409, `Fiscal year ${fy.code} is closed.`, "fiscalYear");
+  const [closeOperation] = await tx.execute(sql`select current_setting('namo.year_end_close_operation', true) as allowed`) as any[];
+  if (closeOperation?.allowed !== "true") {
+    const activeClose = await tx.execute(sql`SELECT 1 FROM "FiscalYearClose" WHERE "fiscalYearId"=${fy.id} AND status='CLOSED' LIMIT 1`) as any[];
+    if (activeClose.length) throw new HttpError(409, `Fiscal year ${fy.code} has an active year-end close. Reopen it before posting.`, "fiscalYear");
+  }
   if (date.getTime() < fy.startDate.getTime() || date.getTime() > fy.endDate.getTime()) {
     throw new HttpError(400, `The date is outside fiscal year ${fy.code}.`, "date");
   }

@@ -102,3 +102,28 @@ Add a new `NFRS Reporting` navigation section with an `SMEs` subsection, then bu
 ## Design
 
 Reuse Namo's dense ERP visual language: slate navigation, blue active states, keyboard-friendly tables, compact report filters, clear posted/draft states, and validation banners. Avoid decorative dashboard graphics; financial clarity and traceability take priority.
+
+
+# Year-End Profit and Loss Close — Implementation Plan
+
+## Goal and accounting behavior
+
+Add an explicit, reviewable year-end close that moves the calculated fiscal-year result into the company’s mapped `PROFIT_AND_LOSS` General Ledger Setup account. Calculating or refreshing an ordinary report remains read-only. The close is company-wide because `FiscalYear` and GL Setup are company-scoped: preview and post all active branches together, on the fiscal-year end date, in one atomic operation. For every branch, post a balanced Journal Voucher that clears that branch’s revenue and expense ledgers to zero and posts the net profit (credit) or loss (debit) to the mapped P&L clearing ledger. Keep the separate Company retained-earnings field untouched; this operation honors the specifically mapped P&L clearing account and does not claim to implement opening-balance carry-forward.
+
+The close preview shows the mapped account, fiscal-year dates, branch-level results, journal line summaries, and any blocking setup/accounting errors. Posting requires explicit user confirmation. A close record plus linked posted vouchers makes the operation identifiable and prevents duplicate closes. Closing and the fiscal-year `isClosed` transition occur in the same transaction as voucher creation/posting; ordinary posting remains blocked for that fiscal year. Reopen is explicit and reasoned: reverse every linked closing voucher through the existing journal reversal service, update the close history, and reopen the fiscal year atomically so the P&L can be corrected and closed again.
+
+The original P&L statement must remain meaningful after close. Financial-report aggregation will omit active close-generated vouchers from P&L statements only; the posted journals remain in the ledger, trial balance, and balance sheet. Once reopened, close and reversal vouchers net to zero and are included normally. The close service validates that the selected `PROFIT_AND_LOSS` mapping is an active, company-owned equity ledger permitted for journal posting, and that the fiscal year is not already closed. It uses the existing posted transaction/opening-balance calculation and journal save/post/reversal services rather than bypassing accounting rules.
+
+## Project structure
+
+- `server/db/schema/` and `drizzle/`: persist close history and closing-voucher links, with unique/foreign-key constraints and audit-safe status transitions.
+- `server/services/yearEndClose.ts`: calculate branch previews, validate the mapping and fiscal-year state, create/post balanced closing vouchers transactionally, and perform reasoned reopen/reversal.
+- `server/routes/yearEndClose.ts` and `server/app.ts`: company-scoped preview, close, status, and reopen endpoints with actor attribution and server-side duplicate safeguards.
+- `server/services/purchase/common.ts` and `server/services/journalVoucher.ts`: enforce that an active close blocks normal postings and edits/reversals; allow the controlled reopen path to reverse its own vouchers.
+- `server/routes/financialReports.ts`: preserve posted-ledger report results by excluding only active, identified close vouchers from P&L calculations.
+- `src/api.ts` and `src/screens/reports/FinancialStatementScreen.tsx`: add a P&L-only preview/review/confirm close flow and explicit reasoned reopen action; do not add a report-refresh side effect.
+- `tests/`: focused tests for the close arithmetic, duplicate/closed-year safeguards, mapping validation, branch-wide atomicity, reopen reversals, and historical P&L visibility where the current harness supports them.
+
+## Constraints and design
+
+Reuse Namo’s existing dense slate/blue ERP style and journal-voucher audit/period-lock rules. The close journal date is the fiscal-year end date and each branch retains its own journal voucher. The calculation includes fiscal-year opening balances and posted activity through year end. Use two-decimal accounting amounts and do not silently fall back to the retained-earnings mapping or another ledger. Missing, inactive, non-equity, cross-company, locked, or journal-disallowed P&L mappings block posting with an actionable message. The close record is the idempotency/audit anchor; no report calculation creates ledger entries. No production/shared database migration, seed, or journal posting is permitted during development; add migration source only and use a disposable local database if one is explicitly configured.

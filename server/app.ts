@@ -26,6 +26,7 @@ import { codeRulesRouter } from "./routes/codeRules";
 import { numberSeriesRouter } from "./routes/numberSeries";
 import { glSetupRouter } from "./routes/glSetup";
 import { productGlDefaultsRouter } from "./routes/productGlDefaults";
+import { yearEndCloseRouter } from "./routes/yearEndClose";
 import { HttpError, pgError } from "./routes/_util";
 
 export const app = express();
@@ -64,6 +65,7 @@ app.use("/api/code-rules", codeRulesRouter);
 app.use("/api/number-series", numberSeriesRouter);
 app.use("/api/gl-setup", glSetupRouter);
 app.use("/api/product-gl-defaults", productGlDefaultsRouter);
+app.use("/api/year-end-close", yearEndCloseRouter);
 for (const { key, router } of masterRouters) app.use(`/api/masters/${key}`, router);
 
 // Production: build ki hui React app yahin se serve hoti hai (npm run build && npm start)

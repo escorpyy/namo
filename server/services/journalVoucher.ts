@@ -10,6 +10,14 @@ import { type Actor, type Opts, type Tx, assertBranch, inActorTx, parseDate, res
 import { ZERO, fmt, toMicro, type Micro } from "./purchase/money";
 import { assertGlEntryAllowed } from "./glEntryControl";
 
+async function assertNotActiveClose(tx: Tx, companyId: number, fiscalYearCode: string) {
+  const [operation] = await tx.execute(sql`select current_setting('namo.year_end_close_operation', true) as allowed`) as any[];
+  if (operation?.allowed === "true") return;
+  const rows = await tx.execute(sql`SELECT 1 FROM "FiscalYearClose" c JOIN "FiscalYear" f ON f.id=c."fiscalYearId"
+    WHERE c."companyId"=${companyId} AND f.code=${fiscalYearCode} AND c.status='CLOSED' LIMIT 1`) as any[];
+  if (rows.length) throw new HttpError(409, `Fiscal year ${fiscalYearCode} has an active year-end close. Reopen it before changing or reversing vouchers.`);
+}
+
 // JOURNAL VOUCHER: a hand-made accounting entry that touches no cash or bank ledger (those go through a Cash/Bank voucher).
 //
 //   save (draft: lines must already balance, the database insists) ─▶ post (Dr = Cr, open fiscal year, after the lock date) ─▶ edit with a reason / reverse
@@ -182,6 +190,7 @@ export function saveJournalVoucher(input: JournalVoucherInput, actor: Actor, opt
     let existing: typeof S.journalVoucher.$inferSelect | null = null;
     if (input.id) {
       existing = await lockVoucher(tx, input.id, input.companyId);
+      await assertNotActiveClose(tx, existing.companyId, existing.fiscalYear);
       if (existing.branchId !== input.branchId) throw new HttpError(409, "A voucher cannot move to another branch.", "branchId");
       await assertOwnVoucher(tx, existing);
       if (existing.reversalOfId) throw new HttpError(409, "A reversal voucher cannot be changed.");
@@ -253,6 +262,7 @@ export function postJournalVoucher(id: number, companyId: number | null, actor: 
 export function deleteJournalVoucher(id: number, companyId: number | null, actor: Actor, opts: Opts & LockOpts & { reason?: string } = {}) {
   return inActorTx({ ...actor, reason: opts.reason }, opts.tx, async (tx) => {
     const v = await lockVoucher(tx, id, companyId);
+    await assertNotActiveClose(tx, v.companyId, v.fiscalYear);
     await assertOwnVoucher(tx, v);
     if (v.isPosted) {
       if (v.reversalOfId) throw new HttpError(409, "A reversal voucher cannot be deleted.");
@@ -271,6 +281,7 @@ export function deleteJournalVoucher(id: number, companyId: number | null, actor
 export function reverseJournalVoucher(id: number, companyId: number | null, actor: Actor, opts: Opts & LockOpts & { date?: string | Date; reason?: string } = {}) {
   return inActorTx({ ...actor, reason: opts.reason }, opts.tx, async (tx) => {
     const orig = await lockVoucher(tx, id, companyId);
+    await assertNotActiveClose(tx, orig.companyId, orig.fiscalYear);
     await assertOwnVoucher(tx, orig);
     if (!orig.isPosted) throw new HttpError(409, "Only a posted voucher can be reversed. Edit or delete a draft instead.");
     if (orig.reversalOfId) throw new HttpError(409, "A reversal cannot itself be reversed.");

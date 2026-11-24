@@ -32,3 +32,14 @@
 - [ ] **Validation, import, and close** — Import the committed NFRS workbook as a golden reference, compare generated outputs, flag broken formulas/placeholders/unmapped accounts, validate balance-sheet/cash-flow/equity reconciliations, and support report finalization and period close.
 
 - [x] **Core NFRS SME reports** — Under NFRS Reporting → SMEs, add functional Trial Balance, Profit & Loss, and Balance Sheet screens using the existing posted-ledger report engine, workbook-style grouped statement presentation, date filters, CSV export, and ledger-style account/group search. Defer setup screens and advanced NFRS schedules until the core reports are accepted.
+
+
+## Year-End Profit and Loss Close
+
+- [ ] **Preview and explicit close** — Ordinary report calculation and refresh remain read-only. From the Profit and Loss report, show a reviewable fiscal-year close preview for all active company branches, using the full fiscal-year opening balances and posted activity through the fiscal-year end date. Show the mapped Profit and Loss clearing ledger, branch results, and blocking errors before posting. Require explicit confirmation; post balanced branch Journal Vouchers dated on the fiscal-year end date that clear revenue/expense balances and transfer net profit to the mapped Profit and Loss ledger as a credit, or net loss as a debit. Do not substitute the separate retained-earnings mapping or silently fall back to another account.
+
+- [ ] **Accounting safeguards and duplicate prevention** — Validate that the Profit and Loss Setup mapping is present, active, company-owned, an equity ledger, and allowed for journal posting. Create the close record, all closing vouchers, and fiscal-year closed state atomically. Prevent a duplicate close and block new normal postings, edits, and reversals in an actively closed fiscal year, even if the fiscal-year flag is changed outside the close workflow. Preserve close history and actor/timestamps.
+
+- [ ] **Historical reporting and reasoned reopen** — Exclude active close-generated vouchers from Profit and Loss report calculations so the original year’s result remains visible after closing; retain all posted close vouchers in the ledger, trial balance, and balance sheet. Provide an explicit reopen action requiring a reason; reverse every linked close voucher through the existing journal reversal workflow and reopen the fiscal year atomically. After reopening, include the balanced close/reversal activity normally and allow a corrected re-close without duplicate active closes.
+
+- [ ] **Safe delivery checks** — Add focused automated coverage for preview/close math, branch handling, invalid mappings, duplicate/closed-year rejection, atomic posting, reopen/reversal, and historical P&L visibility where supported. Typecheck and build successfully. Add migration source but do not apply it to a production/shared database; run DB integration checks only against a disposable local test database.

@@ -235,7 +235,7 @@ export default function App() {
         ) : screen === "fs-trial-balance" || screen === "fs-profit-loss" || screen === "fs-balance-sheet" || screen === "nfrs-sme-trial-balance" || screen === "nfrs-sme-profit-loss" || screen === "nfrs-sme-balance-sheet" ? (
           <FinancialStatementScreen
             key={`${screen}:${companyId}:${branchId}:${fyId}`} kind={screen === "fs-trial-balance" || screen === "nfrs-sme-trial-balance" ? "trial-balance" : screen === "fs-profit-loss" || screen === "nfrs-sme-profit-loss" ? "profit-loss" : "balance-sheet"}
-            companyId={companyId} branchId={branchId} fyCode={currentFy?.code ?? "-"}
+            companyId={companyId} branchId={branchId} userId={ctx.user.id} fyCode={currentFy?.code ?? "-"}
             fyStart={currentFy?.startDate ?? ""} fyEnd={currentFy?.endDate ?? ""}
             previousFy={previousFy ? { code: previousFy.code, startDate: previousFy.startDate, endDate: previousFy.endDate } : undefined}
             setStatus={setStatus} dirtyRef={dirtyRef} reportFamily={screen.startsWith("nfrs-sme-") ? "NFRS for SMEs" : undefined}

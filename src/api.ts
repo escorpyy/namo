@@ -450,3 +450,16 @@ export const financialReportsApi = {
   get: (kind: FinancialReportKind, p: { companyId: number; branchId: number; fiscalYear: string; from: string; to: string }) =>
     req<FinancialReportResult>(`/api/financial-reports/${kind}?${qstr(p)}`),
 };
+export type YearEndClosePreview = {
+  fiscalYear: string; from: string; to: string; fiscalYearClosed: boolean;
+  existingClose: { id: number; status: string } | null;
+  ledger: { id: number; code: string; name: string };
+  netResult: string;
+  branches: { branchId: number; branchCode: string; branchName: string; netResult: string; lineCount: number }[];
+};
+export const yearEndCloseApi = {
+  preview: (companyId: number, fiscalYear: string) => req<YearEndClosePreview>(`/api/year-end-close/preview?${qstr({ companyId, fiscalYear })}`),
+  close: (companyId: number, fiscalYear: string, userId: number) => req<YearEndClosePreview & { closeId: number; closed: true }>("/api/year-end-close/close", { method: "POST", body: JSON.stringify({ companyId, fiscalYear, userId }) }),
+  reopen: (companyId: number, fiscalYear: string, userId: number, reason: string) => req<{ fiscalYear: string; reopened: true; reversedVouchers: number }>(`/api/year-end-close/reopen/${encodeURIComponent(fiscalYear)}`, { method: "POST", body: JSON.stringify({ companyId, userId, reason }) }),
+  status: (companyId: number, fiscalYear: string) => req<{ fiscalYear: string; isClosed: boolean; close: { id: number; status: string; netResult: string } | null; vouchers: { branchId: number; journalVoucherId: number; netResult: string }[] }>(`/api/year-end-close/status/${encodeURIComponent(fiscalYear)}?${qstr({ companyId })}`),
+};
