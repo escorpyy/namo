@@ -178,6 +178,11 @@ export default function App() {
     setScreen(target);
   };
   const openRequest = openReq?.screen === screen ? openReq : null;
+  const selectedCompany = ctx.companies.find((c) => c.id === companyId);
+  const fiscalYears = [...(selectedCompany?.fiscalYears ?? [])].sort((a, b) => a.startDate.localeCompare(b.startDate));
+  const selectedFyIndex = fiscalYears.findIndex((y) => y.id === fyId);
+  const currentFy = fiscalYears.find((y) => y.id === fyId);
+  const previousFy = selectedFyIndex > 0 ? fiscalYears[selectedFyIndex - 1] : undefined;
 
   return (
     <QuickCreateHost companyId={companyId} calendar={calendar}>
@@ -230,8 +235,9 @@ export default function App() {
         ) : screen === "fs-trial-balance" || screen === "fs-profit-loss" || screen === "fs-balance-sheet" || screen === "nfrs-sme-trial-balance" || screen === "nfrs-sme-profit-loss" || screen === "nfrs-sme-balance-sheet" ? (
           <FinancialStatementScreen
             key={`${screen}:${companyId}:${branchId}:${fyId}`} kind={screen === "fs-trial-balance" || screen === "nfrs-sme-trial-balance" ? "trial-balance" : screen === "fs-profit-loss" || screen === "nfrs-sme-profit-loss" ? "profit-loss" : "balance-sheet"}
-            companyId={companyId} branchId={branchId} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
-            fyStart={co.fiscalYears.find((y) => y.id === fyId)?.startDate ?? ""} fyEnd={co.fiscalYears.find((y) => y.id === fyId)?.endDate ?? ""}
+            companyId={companyId} branchId={branchId} fyCode={currentFy?.code ?? "-"}
+            fyStart={currentFy?.startDate ?? ""} fyEnd={currentFy?.endDate ?? ""}
+            previousFy={previousFy ? { code: previousFy.code, startDate: previousFy.startDate, endDate: previousFy.endDate } : undefined}
             setStatus={setStatus} dirtyRef={dirtyRef} reportFamily={screen.startsWith("nfrs-sme-") ? "NFRS for SMEs" : undefined}
           />
         ) : screen === "nfrs-sme-reporting" ? (

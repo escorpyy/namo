@@ -3,43 +3,103 @@ import { Download, RefreshCw, Search } from "lucide-react";
 import { financialReportsApi, type FinancialReportKind, type FinancialReportResult, type FinancialReportRow } from "../../api";
 import type { StatusInfo } from "../../types";
 
-const titles: Record<FinancialReportKind, string> = { "trial-balance": "Trial Balance", "profit-loss": "Profit & Loss", "balance-sheet": "Balance Sheet" };
+const titles: Record<FinancialReportKind, string> = {
+  "trial-balance": "Trial Balance",
+  "profit-loss": "Statement of Profit or Loss and Comprehensive Income",
+  "balance-sheet": "Statement of Financial Position",
+};
+const amount = (v: string | number) => Number(v || 0);
 const money = (v: string | number) => Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const signed = (v: string) => Number(v) >= 0 ? money(v) : `(${money(String(-Number(v)))})`;
+const signed = (v: string | number) => Number(v) >= 0 ? money(v) : `(${money(-Number(v))})`;
 
-export default function FinancialStatementScreen(p: { kind: FinancialReportKind; companyId: number; branchId: number; fyCode: string; fyStart: string; fyEnd: string; setStatus: (s: StatusInfo) => void; dirtyRef: MutableRefObject<boolean>; reportFamily?: string }) {
+const noteFor = (name: string) => {
+  const n = name.toLowerCase();
+  if (n.includes("revenue") || n.includes("sale") || n.includes("service")) return "5";
+  if (n.includes("other income")) return "6";
+  if (n.includes("finance") || n.includes("interest")) return "7";
+  if (n.includes("tax")) return "9";
+  if (n.includes("cash") || n.includes("bank")) return "11";
+  if (n.includes("receivable") || n.includes("debtor")) return "12";
+  if (n.includes("inventor")) return "13";
+  if (n.includes("property") || n.includes("equipment") || n.includes("depreciation")) return "16";
+  if (n.includes("payable") || n.includes("creditor")) return "21";
+  return "";
+};
+const splitBalance = (v: string | number) => ({ debit: Math.max(amount(v), 0), credit: Math.max(-amount(v), 0) });
+const isTax = (r: FinancialReportRow) => /\btax\b|income tax|deferred tax/i.test(r.name);
+const isOci = (r: FinancialReportRow) => /other comprehensive|\boci\b/i.test(r.name);
+const isCurrentAsset = (r: FinancialReportRow) => /cash|bank|receivable|debtor|inventory|stock|prepaid|short.?term|current asset/i.test(`${r.name} ${r.accountSubGroupName ?? ""}`);
+const isCurrentLiability = (r: FinancialReportRow) => /payable|creditor|accrued|tax|short.?term|current liability|overdraft/i.test(`${r.name} ${r.accountSubGroupName ?? ""}`);
+
+function GroupHeader({ children, columns }: { children: React.ReactNode; columns: number }) {
+  return <tr className="bg-slate-100 font-semibold text-slate-700"><td colSpan={columns} className="border-t px-3 py-2 uppercase tracking-wide">{children}</td></tr>;
+}
+
+function TrialBalance({ result, rows }: { result: FinancialReportResult; rows: FinancialReportRow[] }) {
+  const opening = splitBalance(result.totals.opening);
+  const closing = splitBalance(result.totals.closing);
+  return <table className="w-full min-w-[1360px] text-xs">
+    <thead><tr className="bg-slate-700 text-left text-white">
+      <th className="px-2 py-2">SN</th><th className="px-3 py-2">Particulars</th><th className="px-2 py-2">Type</th><th className="px-2 py-2">DB/CR</th><th className="px-3 py-2">Mapping 1</th><th className="px-3 py-2">Mapping 2</th>
+      <th className="px-3 py-2 text-right">Opening Dr.</th><th className="px-3 py-2 text-right">Opening Cr.</th><th className="px-3 py-2 text-right">During Dr.</th><th className="px-3 py-2 text-right">During Cr.</th><th className="px-3 py-2 text-right">Adjustment Dr.</th><th className="px-3 py-2 text-right">Adjustment Cr.</th><th className="px-3 py-2 text-right">Closing Dr.</th><th className="px-3 py-2 text-right">Closing Cr.</th>
+    </tr></thead>
+    <tbody>{rows.map((r, i) => { const o = splitBalance(r.opening); const c = splitBalance(r.closing); return <tr key={r.generalLedgerId} className="border-t hover:bg-blue-50">
+      <td className="px-2 py-1.5 text-slate-500">{i + 1}</td><td className="px-3 py-1.5 font-medium text-slate-800">{r.code} — {r.name}</td><td className="px-2 py-1.5">{r.accountType}</td><td className="px-2 py-1.5">{Number(r.closing) >= 0 ? "DB" : "CR"}</td><td className="px-3 py-1.5 text-slate-500">{r.accountGroupCode} — {r.accountGroupName}</td><td className="px-3 py-1.5 text-slate-500">{r.accountSubGroupName ?? "—"}</td>
+      <td className="px-3 py-1.5 text-right tabular-nums">{money(o.debit)}</td><td className="px-3 py-1.5 text-right tabular-nums">{money(o.credit)}</td><td className="px-3 py-1.5 text-right tabular-nums">{money(r.debit)}</td><td className="px-3 py-1.5 text-right tabular-nums">{money(r.credit)}</td><td className="px-3 py-1.5 text-right text-slate-400">—</td><td className="px-3 py-1.5 text-right text-slate-400">—</td><td className="px-3 py-1.5 text-right tabular-nums">{money(c.debit)}</td><td className="px-3 py-1.5 text-right tabular-nums">{money(c.credit)}</td>
+    </tr>; })}</tbody>
+    <tfoot><tr className="border-t-2 bg-slate-100 font-semibold"><td colSpan={6} className="px-3 py-2">Total</td><td className="px-3 py-2 text-right">{money(opening.debit)}</td><td className="px-3 py-2 text-right">{money(opening.credit)}</td><td className="px-3 py-2 text-right">{money(result.totals.debit)}</td><td className="px-3 py-2 text-right">{money(result.totals.credit)}</td><td className="px-3 py-2 text-right text-slate-400">—</td><td className="px-3 py-2 text-right text-slate-400">—</td><td className="px-3 py-2 text-right">{money(closing.debit)}</td><td className="px-3 py-2 text-right">{money(closing.credit)}</td></tr></tfoot>
+  </table>;
+}
+
+function StatementRows({ rows, comparative, kind }: { rows: FinancialReportRow[]; comparative: Map<number, FinancialReportRow>; kind: "profit-loss" | "balance-sheet" }) {
+  const value = (r: FinancialReportRow) => kind === "profit-loss"
+    ? (r.accountType === "REVENUE" ? amount(r.credit) - amount(r.debit) : amount(r.debit) - amount(r.credit))
+    : Math.abs(amount(r.closing));
+  const prior = (r: FinancialReportRow) => { const x = comparative.get(r.generalLedgerId); return x ? (kind === "profit-loss" ? (x.accountType === "REVENUE" ? amount(x.credit) - amount(x.debit) : amount(x.debit) - amount(x.credit)) : Math.abs(amount(x.closing))) : 0; };
+  const total = (list: FinancialReportRow[]) => list.reduce((s, r) => s + value(r), 0);
+  const totalPrior = (list: FinancialReportRow[]) => list.reduce((s, r) => s + prior(r), 0);
+  const line = (r: FinancialReportRow) => <tr key={r.generalLedgerId} className="border-t hover:bg-blue-50"><td className="px-4 py-1.5 text-slate-800">{r.name}</td><td className="px-2 py-1.5 text-center text-slate-500">{noteFor(r.name)}</td><td className="px-3 py-1.5 text-right tabular-nums">{signed(value(r))}</td><td className="px-3 py-1.5 text-right tabular-nums">{signed(prior(r))}</td></tr>;
+  const subtotal = (label: string, list: FinancialReportRow[]) => <tr className="border-t bg-slate-50 font-semibold"><td className="px-4 py-2">{label}</td><td></td><td className="px-3 py-2 text-right">{signed(total(list))}</td><td className="px-3 py-2 text-right">{signed(totalPrior(list))}</td></tr>;
+
+  if (kind === "profit-loss") {
+    const income = rows.filter((r) => r.accountType === "REVENUE" && !isOci(r));
+    const expenses = rows.filter((r) => r.accountType === "EXPENSE" && !isTax(r) && !isOci(r));
+    const tax = rows.filter(isTax);
+    const oci = rows.filter(isOci);
+    const pbt = total(income) - total(expenses);
+    const priorPbt = totalPrior(income) - totalPrior(expenses);
+    const taxTotal = total(tax);
+    const priorTax = totalPrior(tax);
+    return <><GroupHeader columns={4}>Statement of Profit or Loss and Other Comprehensive Income</GroupHeader><tr className="bg-slate-50 text-[11px] text-slate-500"><td className="px-4 py-1">Particulars</td><td className="px-2 py-1 text-center">Notes</td><td className="px-3 py-1 text-right">Current year</td><td className="px-3 py-1 text-right">Comparative / restated</td></tr><tr className="border-t font-semibold"><td className="px-4 py-2">Revenue</td><td className="px-2 py-2 text-center">5</td><td className="px-3 py-2 text-right">{signed(total(income))}</td><td className="px-3 py-2 text-right">{signed(totalPrior(income))}</td></tr>{income.map(line)}{subtotal("Total operating expenses", expenses)}{expenses.map(line)}<tr className="border-t font-semibold"><td className="px-4 py-2">Profit / (loss) before tax</td><td></td><td className="px-3 py-2 text-right">{signed(pbt)}</td><td className="px-3 py-2 text-right">{signed(priorPbt)}</td></tr><tr className="border-t"><td className="px-4 py-2">Income tax expense</td><td className="px-2 py-2 text-center">9</td><td className="px-3 py-2 text-right">{signed(taxTotal)}</td><td className="px-3 py-2 text-right">{signed(priorTax)}</td></tr><tr className="border-t-2 bg-blue-100 font-bold"><td className="px-4 py-2">Profit / (loss) for the year</td><td></td><td className="px-3 py-2 text-right">{signed(pbt - taxTotal)}</td><td className="px-3 py-2 text-right">{signed(priorPbt - priorTax)}</td></tr><tr className="border-t font-semibold"><td className="px-4 py-2">Other comprehensive income</td><td></td><td className="px-3 py-2 text-right">{signed(total(oci))}</td><td className="px-3 py-2 text-right">{signed(totalPrior(oci))}</td></tr>{oci.map(line)}<tr className="border-t font-semibold"><td className="px-4 py-2">Total other comprehensive income</td><td></td><td className="px-3 py-2 text-right">{signed(total(oci))}</td><td className="px-3 py-2 text-right">{signed(totalPrior(oci))}</td></tr><tr className="border-t-2 bg-blue-100 font-bold"><td className="px-4 py-2">Total comprehensive income</td><td></td><td className="px-3 py-2 text-right">{signed(pbt - taxTotal + total(oci))}</td><td className="px-3 py-2 text-right">{signed(priorPbt - priorTax + totalPrior(oci))}</td></tr></>;
+  }
+
+  const assets = rows.filter((r) => r.accountType === "ASSET");
+  const currentAssets = assets.filter(isCurrentAsset);
+  const nonCurrentAssets = assets.filter((r) => !isCurrentAsset(r));
+  const liabilities = rows.filter((r) => r.accountType === "LIABILITY");
+  const currentLiabilities = liabilities.filter(isCurrentLiability);
+  const nonCurrentLiabilities = liabilities.filter((r) => !isCurrentLiability(r));
+  const equity = rows.filter((r) => r.accountType === "EQUITY");
+  const assetTotal = total(assets), priorAssetTotal = totalPrior(assets);
+  const leTotal = total(liabilities) + total(equity), priorLeTotal = totalPrior(liabilities) + totalPrior(equity);
+  return <><GroupHeader columns={4}>ASSETS</GroupHeader><tr className="border-t font-semibold"><td className="px-4 py-2">Non-current assets</td><td></td><td className="px-3 py-2 text-right">{signed(total(nonCurrentAssets))}</td><td className="px-3 py-2 text-right">{signed(totalPrior(nonCurrentAssets))}</td></tr>{nonCurrentAssets.map(line)}<tr className="border-t font-semibold"><td className="px-4 py-2">Current assets</td><td></td><td className="px-3 py-2 text-right">{signed(total(currentAssets))}</td><td className="px-3 py-2 text-right">{signed(totalPrior(currentAssets))}</td></tr>{currentAssets.map(line)}<tr className="border-t-2 bg-slate-100 font-bold"><td className="px-4 py-2">Total assets</td><td></td><td className="px-3 py-2 text-right">{signed(assetTotal)}</td><td className="px-3 py-2 text-right">{signed(priorAssetTotal)}</td></tr><GroupHeader columns={4}>LIABILITIES AND EQUITY</GroupHeader><tr className="border-t font-semibold"><td className="px-4 py-2">Non-current liabilities</td><td></td><td className="px-3 py-2 text-right">{signed(total(nonCurrentLiabilities))}</td><td className="px-3 py-2 text-right">{signed(totalPrior(nonCurrentLiabilities))}</td></tr>{nonCurrentLiabilities.map(line)}<tr className="border-t font-semibold"><td className="px-4 py-2">Current liabilities</td><td></td><td className="px-3 py-2 text-right">{signed(total(currentLiabilities))}</td><td className="px-3 py-2 text-right">{signed(totalPrior(currentLiabilities))}</td></tr>{currentLiabilities.map(line)}{subtotal("Total liabilities", liabilities)}{subtotal("Equity", equity)}<tr className="border-t-2 bg-blue-100 font-bold"><td className="px-4 py-2">Total liabilities and equity</td><td></td><td className="px-3 py-2 text-right">{signed(leTotal)}</td><td className="px-3 py-2 text-right">{signed(priorLeTotal)}</td></tr><tr className="border-t text-xs text-slate-500"><td className="px-4 py-2">Balance check (assets less liabilities and equity)</td><td></td><td className="px-3 py-2 text-right">{signed(assetTotal - leTotal)}</td><td className="px-3 py-2 text-right">{signed(priorAssetTotal - priorLeTotal)}</td></tr></>;
+}
+
+export default function FinancialStatementScreen(p: { kind: FinancialReportKind; companyId: number; branchId: number; fyCode: string; fyStart: string; fyEnd: string; previousFy?: { code: string; startDate: string; endDate: string }; setStatus: (s: StatusInfo) => void; dirtyRef: MutableRefObject<boolean>; reportFamily?: string }) {
   const [from, setFrom] = useState(p.fyStart), [to, setTo] = useState(p.fyEnd);
-  const [result, setResult] = useState<FinancialReportResult | null>(null), [loading, setLoading] = useState(false), [error, setError] = useState("");
+  const [result, setResult] = useState<FinancialReportResult | null>(null), [previous, setPrevious] = useState<FinancialReportResult | null>(null), [loading, setLoading] = useState(false), [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const load = () => {
     if (!from || !to || from > to || from < p.fyStart || to > p.fyEnd) { setError(`Choose dates within fiscal year ${p.fyCode} (${p.fyStart} to ${p.fyEnd}).`); return; }
     setLoading(true); setError("");
-    financialReportsApi.get(p.kind, { companyId: p.companyId, branchId: p.branchId, fiscalYear: p.fyCode, from, to }).then(setResult).catch((e: Error) => setError(e.message)).finally(() => setLoading(false));
+    const current = financialReportsApi.get(p.kind, { companyId: p.companyId, branchId: p.branchId, fiscalYear: p.fyCode, from, to });
+    const prior = p.previousFy && p.kind !== "trial-balance" ? financialReportsApi.get(p.kind, { companyId: p.companyId, branchId: p.branchId, fiscalYear: p.previousFy.code, from: p.previousFy.startDate, to: p.previousFy.endDate }) : Promise.resolve(null);
+    Promise.all([current, prior]).then(([now, old]) => { setResult(now); setPrevious(old); }).catch((e: Error) => setError(e.message)).finally(() => setLoading(false));
   };
   useEffect(() => { p.dirtyRef.current = false; load(); }, [p.companyId, p.branchId, p.fyCode, p.kind]);
-  useEffect(() => { p.setStatus({ mode: "view", count: result?.rows.length ?? 0, shown: result?.rows.length ?? 0, message: error || (loading ? "Running financial report…" : result ? "Report ready" : "Choose a period"), kind: error ? "err" : "info", hints: ["Posted transactions only", "Click Refresh after changing dates"] }); }, [result, loading, error, p.setStatus]);
-  const groups = useMemo(() => {
-    const out: { key: string; label: string; rows: FinancialReportRow[] }[] = [];
-    const term = search.trim().toLowerCase();
-    for (const row of result?.rows ?? []) {
-      if (term && !`${row.code} ${row.name} ${row.accountGroupName} ${row.accountSubGroupName ?? ""}`.toLowerCase().includes(term)) continue;
-      const key = `${row.accountGroupId}:${row.accountSubGroupId ?? "none"}`;
-      let group = out.find((x) => x.key === key);
-      if (!group) { group = { key, label: `${row.accountGroupCode} — ${row.accountGroupName}${row.accountSubGroupName ? ` / ${row.accountSubGroupCode} — ${row.accountSubGroupName}` : ""}`, rows: [] }; out.push(group); }
-      group.rows.push(row);
-    }
-    return out;
-  }, [result, search]);
-  const exportCsv = () => {
-    if (!result) return;
-    const lines = [["Account Group", "Sub Group", "Ledger", "Opening", "Debit", "Credit", "Closing"], ...result.rows.map((r) => [r.accountGroupName, r.accountSubGroupName ?? "", `${r.code} — ${r.name}`, r.opening, r.debit, r.credit, r.closing])];
-    const csv = lines.map((line) => line.map((x) => `"${String(x).replaceAll('"', '""')}"`).join(",")).join("\n");
-    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = `${p.kind}-${from}-${to}.csv`; a.click(); URL.revokeObjectURL(a.href);
-  };
-  const total = result?.totals;
-  return <main className="flex-1 min-w-0 flex flex-col bg-slate-50">
-    <div className="border-b bg-white px-5 py-3 flex flex-wrap items-center gap-3"><div><div className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">{p.reportFamily ?? "Financial Statements"}</div><h1 className="text-lg font-semibold text-slate-800">{titles[p.kind]}</h1><p className="text-xs text-slate-500">{p.fyCode} · Posted entries · {from} to {to}</p></div><div className="ml-auto flex flex-wrap items-center gap-2"><label className="relative text-xs text-slate-600"><Search size={14} className="absolute left-2 top-2 text-slate-400" /><input className="input h-8 w-48 pl-7" placeholder="Search ledger or group" value={search} onChange={(e) => setSearch(e.target.value)} /></label><label className="text-xs text-slate-600">From <input className="input h-8 ml-1" type="date" value={from} min={p.fyStart} max={p.fyEnd} onChange={(e) => setFrom(e.target.value)} /></label><label className="text-xs text-slate-600">To <input className="input h-8 ml-1" type="date" value={to} min={p.fyStart} max={p.fyEnd} onChange={(e) => setTo(e.target.value)} /></label><button className="btn btn-primary h-8" onClick={load}><RefreshCw size={14} /> Refresh</button>{result && <button className="btn h-8" onClick={exportCsv}><Download size={14} /> CSV</button>}</div></div>
-    {error && <div className="mx-5 mt-3 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>}
-    <div className="p-5 overflow-auto"><div className="min-w-[850px] rounded border bg-white shadow-sm"><table className="w-full text-sm"><thead><tr className="bg-slate-100 text-left"><th className="px-3 py-2">Particulars</th><th className="px-3 py-2 text-right">Opening</th><th className="px-3 py-2 text-right">Debit</th><th className="px-3 py-2 text-right">Credit</th><th className="px-3 py-2 text-right">Closing</th></tr></thead><tbody>{groups.flatMap((g) => [<tr key={`${g.key}-h`} className="bg-slate-50 font-semibold text-slate-700"><td className="px-3 py-2" colSpan={5}>{g.label}</td></tr>, ...g.rows.map((r) => <tr key={r.generalLedgerId} className="border-t"><td className="px-6 py-1.5">{r.code} — {r.name}</td><td className="px-3 py-1.5 text-right tabular-nums">{signed(r.opening)}</td><td className="px-3 py-1.5 text-right tabular-nums">{money(r.debit)}</td><td className="px-3 py-1.5 text-right tabular-nums">{money(r.credit)}</td><td className="px-3 py-1.5 text-right tabular-nums">{signed(r.closing)}</td></tr>)])}</tbody><tfoot><tr className="border-t-2 font-semibold"><td className="px-3 py-2">Total</td><td className="px-3 py-2 text-right">{money(total?.opening ?? 0)}</td><td className="px-3 py-2 text-right">{money(total?.debit ?? 0)}</td><td className="px-3 py-2 text-right">{money(total?.credit ?? 0)}</td><td className="px-3 py-2 text-right">{signed(String(total?.closing ?? 0))}</td></tr>{p.kind === "balance-sheet" && <tr><td className="px-3 py-2" colSpan={4}>Current period result included in equity</td><td className="px-3 py-2 text-right">{signed(total?.currentResult ?? "0")}</td></tr>}</tfoot></table>{loading && <div className="p-3 text-center text-xs text-slate-500">Loading…</div>}{!loading && result && !result.rows.length && <div className="p-8 text-center text-slate-500">No posted ledger activity or opening balances for this period.</div>}</div></div>
-  </main>;
+  useEffect(() => { p.setStatus({ mode: "view", count: result?.rows.length ?? 0, shown: result?.rows.length ?? 0, message: error || (loading ? "Running report…" : result ? "Report ready" : "Choose a period"), kind: error ? "err" : "info", hints: ["Posted transactions only", "Search accounts like a ledger report", "CSV export available"] }); }, [result, loading, error, p.setStatus]);
+  const rows = useMemo(() => { const term = search.trim().toLowerCase(); return (result?.rows ?? []).filter((r) => !term || `${r.code} ${r.name} ${r.accountGroupName} ${r.accountSubGroupName ?? ""}`.toLowerCase().includes(term)); }, [result, search]);
+  const comparative = useMemo(() => new Map((previous?.rows ?? []).map((r) => [r.generalLedgerId, r])), [previous]);
+  const exportCsv = () => { if (!result) return; const lines = [["Particulars", "Type", "Opening", "Debit", "Credit", "Closing"], ...rows.map((r) => [r.name, r.accountType, r.opening, r.debit, r.credit, r.closing])]; const csv = lines.map((line) => line.map((x) => `"${String(x).replaceAll('"', '""')}"`).join(",")).join("\n"); const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = `${p.kind}-${from}-${to}.csv`; a.click(); URL.revokeObjectURL(a.href); };
+  return <main className="flex-1 min-w-0 flex flex-col bg-slate-50"><div className="border-b bg-white px-5 py-3 flex flex-wrap items-center gap-3"><div><div className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">{p.reportFamily ?? "Financial Statements"}</div><h1 className="text-lg font-semibold text-slate-800">{titles[p.kind]}</h1><p className="text-xs text-slate-500">{p.fyCode} · {p.kind === "trial-balance" ? "Opening / movement / adjustment / closing" : "Current year · comparative / restated"}</p></div><div className="ml-auto flex flex-wrap items-center gap-2"><label className="relative text-xs text-slate-600"><Search size={14} className="absolute left-2 top-2 text-slate-400" /><input className="input h-8 w-48 pl-7" placeholder="Search ledger or group" value={search} onChange={(e) => setSearch(e.target.value)} /></label><label className="text-xs text-slate-600">From <input className="input h-8 ml-1" type="date" value={from} min={p.fyStart} max={p.fyEnd} onChange={(e) => setFrom(e.target.value)} /></label><label className="text-xs text-slate-600">To <input className="input h-8 ml-1" type="date" value={to} min={p.fyStart} max={p.fyEnd} onChange={(e) => setTo(e.target.value)} /></label><button className="btn btn-primary h-8" onClick={load}><RefreshCw size={14} /> Refresh</button>{result && <button className="btn h-8" onClick={exportCsv}><Download size={14} /> CSV</button>}</div></div>{error && <div className="mx-5 mt-3 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>}<div className="p-5 overflow-auto"><div className="min-w-[920px] rounded border bg-white shadow-sm"><div className="border-b px-4 py-3"><div className="font-semibold text-slate-800">{titles[p.kind]}</div><div className="text-xs text-slate-500">Figures in NPR · {p.fyCode}{p.previousFy && p.kind !== "trial-balance" ? ` compared with ${p.previousFy.code}` : ""}</div></div><table className="w-full">{result && (p.kind === "trial-balance" ? <TrialBalance result={result} rows={rows} /> : <tbody><StatementRows rows={rows} comparative={comparative} kind={p.kind} /></tbody>)}</table>{loading && <div className="p-3 text-center text-xs text-slate-500">Loading…</div>}{!loading && result && !rows.length && <div className="p-8 text-center text-slate-500">No matching posted ledger activity or opening balances.</div>}</div></div></main>;
 }
