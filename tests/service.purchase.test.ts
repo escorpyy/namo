@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { DB_READY, uniq } from "./helpers";
-import { stockBalance } from "../server/services/stockLedger";
+import { stockBalance, syncOpeningMovements } from "../server/services/stockLedger";
+import { stockValuation } from "../server/services/stockValuation";
 
 // The purchase service layer end to end: order -> challan -> bill -> journal, with the rules the database cannot
 // express (pricing, landed cost, quantity limits, balanced posting, reversal). Every test runs inside one transaction
@@ -34,7 +35,7 @@ describe.skipIf(!DB_READY)("purchase service layer", () => {
     await ins(tx, "FiscalYear", { companyId: co, code: "2082/83", startDate: "2025-07-17", endDate: "2026-07-16", isCurrent: true, updatedAt: NOW });
     const grp = await ins(tx, "AccountGroup", { companyId: co, code: c("G"), description: "Grp", type: "EXPENSE", updatedAt: NOW });
     const sg = await ins(tx, "AccountSubGroup", { code: c("S"), description: "Sub", accountGroupId: grp, updatedAt: NOW });
-    const gl = (code: string, normal = "DEBIT") => ins(tx, "GeneralLedger", { companyId: co, code: c(code), name: code, accountSubGroupId: sg, normalBalance: normal, updatedAt: NOW });
+    const gl = (code: string, normal = "DEBIT") => ins(tx, "GeneralLedger", { companyId: co, code: c(code), name: code, accountGroupId: grp, accountSubGroupId: sg, normalBalance: normal, updatedAt: NOW });
     const vendor = await gl("VEND", "CREDIT"), customs = await gl("CUST", "CREDIT");
     const purchase = await gl("PURCH"), vat = await gl("VAT"), freight = await gl("FREIGHT"), discount = await gl("DISC", "CREDIT"), duty = await gl("DUTY");
     const pcs = await ins(tx, "ProductUnit", { companyId: co, code: c("PCS"), name: "Pcs", updatedAt: NOW });
@@ -409,6 +410,49 @@ describe.skipIf(!DB_READY)("purchase service layer", () => {
         await rejects(tx, svc.postPurchaseBill(s.id, ACTOR, { tx }), 409, /customs declaration number/);
         await svc.savePurchaseBill(billIn(W, { id: s.id, invoiceType: "IMPORT", importDetail: { customsDeclarationNo: "CD-55", customsDeclarationDate: "2025-10-12" } }), ACTOR, { tx });
         expect(await svc.postPurchaseBill(s.id, ACTOR, { tx })).toMatchObject({ isPosted: true });
+      });
+    });
+
+    it("stock valuation: closing value = balance x rate by each product's own method (weighted average, FIFO, standard)", async () => {
+      await run(async (tx, W) => {
+        const val = async () => (await stockValuation(tx, { companyId: W.co, productId: W.rice.id })).rows[0];
+        // 10 @ 100 arrives on a challan and is billed; 4 @ 130 comes on a direct bill
+        const ch = await svc.savePurchaseChallan(challanIn(W, { lines: [{ productId: W.rice.id, qty: 10 }] }), ACTOR, { tx });
+        await svc.confirmPurchaseChallan(ch.id, ACTOR, { tx });
+        const [cl1] = await clines(tx, ch.id);
+        const linked = await svc.savePurchaseBill(billIn(W, { purchaseChallanId: ch.id, lines: [{ productId: W.rice.id, qty: 10, rate: 100, challanLineId: cl1.id }] }), ACTOR, { tx });
+        await svc.postPurchaseBill(linked.id, ACTOR, { tx });
+        const direct = await svc.savePurchaseBill(billIn(W, { lines: [{ productId: W.rice.id, qty: 4, rate: 130 }] }), ACTOR, { tx });
+        await svc.postPurchaseBill(direct.id, ACTOR, { tx });
+        await tx.execute(sql`update "StockDetail" set "valuationMethod" = 'WEIGHTED_AVERAGE', "purchaseRate" = 90 where "productId" = ${W.rice.id}`);
+        expect(await val()).toMatchObject({ qty: "14.000000", value: "1520.00", method: "WEIGHTED_AVERAGE" }); // (1000 + 520) / 14 = 108.571..
+
+        // 5 go out on a sale (raw ledger row: the sale itself is tested elsewhere)
+        const [any] = (await tx.execute(sql`select "branchId", "companyId" from "StockMovement" where "productId" = ${W.rice.id} limit 1`)) as any[];
+        await tx.execute(sql`insert into "StockMovement" ("companyId","branchId","productId","movementDate","qty","sourceType","sourceId","sourceLineId") values (${any.companyId}, ${any.branchId}, ${W.rice.id}, '2025-11-01', -5, 'SALES_INVOICE', 1, 1)`);
+        expect(await val()).toMatchObject({ qty: "9.000000", value: "977.14" }); // 9 x 108.571..
+        await tx.execute(sql`update "StockDetail" set "valuationMethod" = 'FIFO' where "productId" = ${W.rice.id}`);
+        expect(await val()).toMatchObject({ qty: "9.000000", value: "1020.00", method: "FIFO" }); // the oldest 5 @100 went; 5 @100 + 4 @130 are left
+        await tx.execute(sql`update "StockDetail" set "valuationMethod" = 'STANDARD_COST' where "productId" = ${W.rice.id}`);
+        expect(await val()).toMatchObject({ value: "810.00", method: "STANDARD_COST" }); // 9 x the standard 90
+
+        // as of an earlier date the later sale is not counted
+        expect((await stockValuation(tx, { companyId: W.co, productId: W.rice.id, asOf: "2025-10-31" })).rows[0]).toMatchObject({ qty: "14.000000" });
+      });
+    });
+
+    it("opening stock enters the ledger on the first day of its year and is valued at its own rate", async () => {
+      await run(async (tx, W) => {
+        const fy = (await tx.execute(sql`select id from "FiscalYear" where "companyId" = ${W.co}`))[0].id as number;
+        const br = (await tx.execute(sql`select id from "Branch" where "companyId" = ${W.co}`))[0].id as number;
+        const sd = (await tx.execute(sql`select id from "StockDetail" where "productId" = ${W.rice.id}`))[0].id as number;
+        await tx.execute(sql`update "StockDetail" set "valuationMethod" = 'WEIGHTED_AVERAGE' where id = ${sd}`);
+        await ins(tx, "StockOpeningBalance", { branchId: br, fiscalYearId: fy, stockDetailId: sd, quantity: 8, rate: 50, value: 400, updatedAt: NOW });
+        await syncOpeningMovements(tx, { companyId: W.co, branchId: br, fiscalYearId: fy });
+        await syncOpeningMovements(tx, { companyId: W.co, branchId: br, fiscalYearId: fy }); // running it again changes nothing
+        expect((await stockBalance(tx, { companyId: W.co, productId: W.rice.id })).reduce((a, r) => a + Number(r.qty), 0)).toBe(8);
+        expect((await stockValuation(tx, { companyId: W.co, productId: W.rice.id })).rows[0]).toMatchObject({ qty: "8.000000", value: "400.00" });
+        expect((await stockValuation(tx, { companyId: W.co, productId: W.rice.id, asOf: "2025-07-01" })).rows).toHaveLength(0); // before the year began
       });
     });
 

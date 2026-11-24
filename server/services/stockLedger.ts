@@ -78,3 +78,17 @@ export async function assertStockCovers(tx: Tx, h: { companyId: number; branchId
     }
   }
 }
+
+/** Rewrites the ledger rows of a branch's opening stock for one fiscal year from the StockOpeningBalance rows (dated the year's first day).
+ *  Opening stock is only editable while the year's opening is unlocked, so rewriting here does not hide history. */
+export async function syncOpeningMovements(tx: Tx, h: { companyId: number; branchId: number; fiscalYearId: number }) {
+  const m = S.stockMovement, o = S.stockOpeningBalance;
+  const [fy] = await tx.select({ startDate: S.fiscalYear.startDate }).from(S.fiscalYear).where(eq(S.fiscalYear.id, h.fiscalYearId));
+  await tx.delete(m).where(and(eq(m.sourceType, "OPENING_STOCK"), eq(m.sourceId, h.fiscalYearId), eq(m.branchId, h.branchId)));
+  const rows = await tx.select({ id: o.id, productId: S.stockDetail.productId, locationId: o.locationId, batchNo: o.batchNo, expiryDate: o.expiryDate, qty: o.quantity })
+    .from(o).innerJoin(S.stockDetail, eq(S.stockDetail.id, o.stockDetailId)).where(and(eq(o.branchId, h.branchId), eq(o.fiscalYearId, h.fiscalYearId)));
+  if (rows.length) await tx.insert(m).values(rows.map((r) => ({
+    companyId: h.companyId, branchId: h.branchId, productId: r.productId, locationId: r.locationId, batchNo: r.batchNo, expiryDate: r.expiryDate,
+    movementDate: fy.startDate, qty: fmt(toMicro(r.qty)), sourceType: "OPENING_STOCK" as const, sourceId: h.fiscalYearId, sourceLineId: r.id,
+  })));
+}

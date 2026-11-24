@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { db } from "../db";
 import { stockBalance } from "../services/stockLedger";
+import { stockValuation } from "../services/stockValuation";
 import { HttpError, wrap } from "./_util";
 
 // GET /api/stock/balance?companyId[&branchId][&productId][&locationId][&asOf=YYYY-MM-DD]
@@ -22,4 +23,12 @@ stockRouter.get("/balance", wrap(async (req, res) => {
     productId: whole(req.query.productId, "productId", false), locationId: whole(req.query.locationId, "locationId", false),
     asOf: asOfText ? new Date(`${asOfText}T00:00:00Z`) : undefined,
   }));
+}));
+
+// GET /api/stock/valuation?companyId[&branchId][&asOf=YYYY-MM-DD][&productId]
+// Closing stock value: balance qty x costing rate per product, by each product's valuation method (FIFO / weighted average / standard cost).
+stockRouter.get("/valuation", wrap(async (req, res) => {
+  const asOf = typeof req.query.asOf === "string" ? req.query.asOf : "";
+  if (asOf && !/^\d{4}-\d{2}-\d{2}$/.test(asOf)) throw new HttpError(400, "asOf must be a date like 2026-11-23.", "asOf");
+  res.json(await stockValuation(db, { companyId: whole(req.query.companyId, "companyId")!, branchId: whole(req.query.branchId, "branchId", false), productId: whole(req.query.productId, "productId", false), asOf: asOf || undefined }));
 }));

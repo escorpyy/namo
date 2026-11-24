@@ -5,6 +5,7 @@ import * as S from "../db/schema";
 import { HttpError, wrap } from "./_util";
 import { mulRound2, parseDec } from "../../shared/decimal";
 import { assertGlEntryAllowed, assertGlRolesAllowed } from "../services/glEntryControl";
+import { syncOpeningMovements } from "../services/stockLedger";
 
 const SOB = S.stockOpeningBalance, SD = S.stockDetail, OB = S.openingBalance;
 const int = (v: unknown, name: string) => {
@@ -135,6 +136,7 @@ stockOpeningRouter.put("/", wrap(async (req, res) => {
       else await tx.insert(SOB).values({ branchId, fiscalYearId: fyId, ...vals });
       saved++;
     }
+    await syncOpeningMovements(tx as any, { companyId, branchId, fiscalYearId: fyId }); // the opening stock is also the first entry of the stock ledger
   });
   res.json({ saved, deleted: deletes.length });
 }));
