@@ -63,3 +63,42 @@ Normalize Ctrl/Command to one portable Ctrl label. Require a modifier for ordina
 - `tests/keyboardShortcuts.test.ts`: verify normalization, duplicate/reserved conflict blocking, and stored-binding validation.
 
 Keep existing hard-coded shortcuts working; the configurable bindings provide additional chords and do not rewrite transaction semantics. The settings are browser-local and per-user, not synchronized across devices.
+
+
+# NFRS Reporting — SME Implementation Plan
+
+## Goal
+
+Add a new `NFRS Reporting` navigation section with an `SMEs` subsection, then build a data-driven NFRS for SMEs reporting layer over the existing company, fiscal-year, General Ledger, opening-balance, journal-voucher, and cash/bank-voucher engine.
+
+## Approach
+
+- Keep posted ledgers and vouchers as the accounting source of truth; do not copy Excel cell formulas into runtime code.
+- Add NFRS statement-line definitions and company/fiscal-year account mappings for balance sheet, profit or loss/OCI, cash flow, changes in equity, and notes.
+- Add controlled NFRS adjustment records for revaluation, deferred tax, leases, deferred income, employee benefits, and first-time adoption, with post/reverse/audit behavior.
+- Add supporting schedules for PPE, investment property, intangible assets, deferred tax, leases, debtors, payables, related parties, and equity reconciliation.
+- Use the committed NFRS workbook as a migration/golden-reference source: import inputs, trial-balance mappings, comparative values, and adjustments, then compare generated reports against it.
+- Add report validation for trial-balance balance, balance-sheet equality, cash-flow reconciliation, equity movement, unmapped accounts, broken mappings, and unposted adjustments.
+
+## Project structure
+
+- `src/components/Sidebar.tsx`: `NFRS Reporting` section and nested `SMEs` subsection.
+- `src/screens/reports/NfrsSmeReportingScreen.tsx`: SME workspace and module entry point.
+- `server/db/schema/`: NFRS mappings, statement definitions, adjustments, schedules, and reconciliation persistence.
+- `server/routes/nfrs/`: setup, mapping, adjustment, statement, note, reconciliation, and validation APIs.
+- `server/services/nfrs/`: calculation engine, schedules, workbook importer, and validation rules.
+- `src/screens/nfrs/`: setup, mapping, adjustment, statement, note, reconciliation, and close screens.
+- `tests/nfrs/`: calculation, import, mapping, validation, and company-isolation tests.
+
+## Delivery stages
+
+1. Navigation and SME workspace foundation.
+2. Mapping model and generated balance sheet, profit/loss/OCI, and trial-balance reports.
+3. Workbook import and golden-reference comparison.
+4. NFRS adjustment posting and reversal.
+5. Cash flow, changes in equity, notes, reconciliations, and supporting schedules.
+6. Validation, period close, exports, and audit package.
+
+## Design
+
+Reuse Namo's dense ERP visual language: slate navigation, blue active states, keyboard-friendly tables, compact report filters, clear posted/draft states, and validation banners. Avoid decorative dashboard graphics; financial clarity and traceability take priority.

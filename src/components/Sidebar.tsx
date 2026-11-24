@@ -26,6 +26,10 @@ import {
     "fs-trial-balance",
     "fs-profit-loss",
     "fs-balance-sheet",
+    "nfrs-sme-reporting",
+    "nfrs-sme-trial-balance",
+    "nfrs-sme-profit-loss",
+    "nfrs-sme-balance-sheet",
     "code-numbering",
     "number-series",
     "gl-setup",
@@ -33,7 +37,8 @@ import {
   ];
 
 type Item = { id: string; label: string };
-type Section = { id: string; label: string; icon: React.ElementType; items: Item[] };
+type Subsection = { id: string; label: string; items: Item[] };
+type Section = { id: string; label: string; icon: React.ElementType; items: Item[]; subsections?: Subsection[] };
 
 // An item is "ready" if its id exists in shared/masters.ts or CUSTOM_SCREENS; everything else shows "not built yet".
 // Each feature appears exactly once. Where the same thing existed in two groups, the copy that fits best was kept.
@@ -129,6 +134,21 @@ const sections: Section[] = [
     ],
   },
   {
+    id: "nfrs-reporting", label: "NFRS Reporting", icon: FileText,
+    items: [],
+    subsections: [
+      {
+        id: "smes", label: "SMEs",
+        items: [
+          { id: "nfrs-sme-reporting", label: "SME Reporting Workspace" },
+          { id: "nfrs-sme-trial-balance", label: "Trial Balance" },
+          { id: "nfrs-sme-profit-loss", label: "Profit & Loss" },
+          { id: "nfrs-sme-balance-sheet", label: "Balance Sheet" },
+        ],
+      },
+    ],
+  },
+  {
     // Working Capital, Ratios, Budget and Profitability live in FM Analysis; not repeated here.
     id: "analysis", label: "Analysis", icon: LineChart,
     items: [
@@ -209,11 +229,16 @@ const sections: Section[] = [
   },
 ];
 
-export const READY_SCREEN_OPTIONS = sections.flatMap((section) => section.items
-  .filter((item) => !!MASTERS[item.id] || CUSTOM_SCREENS.includes(item.id))
-  .map((item) => ({ id: item.id, label: item.label, section: section.label })));
+export const READY_SCREEN_OPTIONS = sections.flatMap((section) => [
+  ...section.items
+    .filter((item) => !!MASTERS[item.id] || CUSTOM_SCREENS.includes(item.id))
+    .map((item) => ({ id: item.id, label: item.label, section: section.label })),
+  ...(section.subsections ?? []).flatMap((subsection) => subsection.items
+    .filter((item) => !!MASTERS[item.id] || CUSTOM_SCREENS.includes(item.id))
+    .map((item) => ({ id: item.id, label: item.label, section: `${section.label} / ${subsection.label}` }))),
+]);
 
-const sectionOf = (itemId: string) => sections.find((s) => s.items.some((i) => i.id === itemId))?.id;
+const sectionOf = (itemId: string) => sections.find((s) => s.items.some((i) => i.id === itemId) || (s.subsections ?? []).some((subsection) => subsection.items.some((i) => i.id === itemId)))?.id;
 
 interface Props {
   collapsed: boolean;
@@ -258,9 +283,17 @@ export function Sidebar({ collapsed, active, onToggle, onNavigate, onNotify }: P
     );
   };
 
+  const subsectionBlock = (subsection: Subsection) => {
+    const hasActive = subsection.items.some((i) => i.id === active);
+    return <div key={subsection.id}>
+      <div className={`pl-8 pr-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${hasActive ? "text-blue-200" : "text-slate-400"}`}>{subsection.label}</div>
+      {subsection.items.map((item) => itemBtn(item))}
+    </div>;
+  };
+
   const groupBtn = (s: Section) => {
     const Icon = s.icon;
-    const hasActive = s.items.some((i) => i.id === active);
+    const hasActive = s.items.some((i) => i.id === active) || (s.subsections ?? []).some((subsection) => subsection.items.some((i) => i.id === active));
     // Collapsed rail shows one icon per group; clicking it expands the sidebar with that group open.
     const onClick = () => {
       if (collapsed) { setOpen((o) => ({ ...o, [s.id]: true })); onToggle(); }
@@ -288,7 +321,10 @@ export function Sidebar({ collapsed, active, onToggle, onNavigate, onNotify }: P
         {sections.map((s) => (
           <div key={s.id} className="border-t border-white/10 first:border-t-0 mt-1 first:mt-0 pt-1 first:pt-0">
             {groupBtn(s)}
-            {!collapsed && open[s.id] && s.items.map(itemBtn)}
+            {!collapsed && open[s.id] && <>
+              {s.items.map(itemBtn)}
+              {(s.subsections ?? []).map(subsectionBlock)}
+            </>}
           </div>
         ))}
       </nav>

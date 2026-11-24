@@ -15,3 +15,20 @@
 - [x] **Integrated screen and navigation** — Add the GL Setup screen to Setup navigation. Display the nine roles with a GL picker and their entry controls; allow editing, saving, reload, and visible success/error feedback. Warn before navigating away from unsaved changes and follow Namo’s existing UI conventions.
 
 - [ ] **Migration and checks** — Register the new table and ledger foreign key with database company-integrity enforcement, add audit logging, and test company isolation and control rules. Typecheck and build successfully. Do not apply migrations or seed against any production/shared database. Migration and audit/integrity wiring are complete; typecheck, build, and six focused unit tests pass. Database integration tests were skipped because no local test database is configured, so company-isolation integration verification remains open. No migration was applied.
+
+
+## NFRS Reporting — SMEs
+
+- [x] **Navigation and workspace foundation** — Add a new `NFRS Reporting` section, an `SMEs` subsection inside it, and a routed SME Reporting Workspace that shows the complete NFRS module surface for the selected company, branch, and fiscal year.
+
+- [ ] **SME setup and account mapping** — Add statement templates, note numbering, tax/reporting preferences, and General Ledger-to-NFRS statement-line/note mappings with unmapped-account validation.
+
+- [ ] **Core NFRS statements** — Generate the statement of financial position, profit or loss and other comprehensive income, trial balance, cash-flow statement, and statement of changes in equity from posted ledgers, opening balances, mappings, and posted NFRS adjustments.
+
+- [ ] **NFRS adjustments and schedules** — Add controlled draft/post/reverse/audit workflows for PPE revaluation, investment property, deferred tax, deferred income, finance leases, employee benefits, and first-time adoption, with supporting schedules.
+
+- [ ] **Notes and reconciliations** — Generate numbered SME notes for revenue, cash, receivables, inventory, PPE, investments, loans, payables, provisions, leases, related parties, and retained earnings, plus comparative and transition reconciliations.
+
+- [ ] **Validation, import, and close** — Import the committed NFRS workbook as a golden reference, compare generated outputs, flag broken formulas/placeholders/unmapped accounts, validate balance-sheet/cash-flow/equity reconciliations, and support report finalization and period close.
+
+- [x] **Core NFRS SME reports** — Under NFRS Reporting → SMEs, add functional Trial Balance, Profit & Loss, and Balance Sheet screens using the existing posted-ledger report engine, workbook-style grouped statement presentation, date filters, CSV export, and ledger-style account/group search. Defer setup screens and advanced NFRS schedules until the core reports are accepted.

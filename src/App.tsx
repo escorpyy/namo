@@ -18,6 +18,7 @@ import AgeingScreen from "./screens/reports/AgeingScreen";
 import StockValuationScreen from "./screens/reports/StockValuationScreen";
 import LedgerReportScreen from "./screens/reports/LedgerReportScreen";
 import FinancialStatementScreen from "./screens/reports/FinancialStatementScreen";
+import NfrsSmeReportingScreen from "./screens/reports/NfrsSmeReportingScreen";
 import SalesInvoiceWorkspace from "./screens/sales/SalesInvoiceWorkspace";
 import SalesChallanWorkspace from "./screens/sales/SalesChallanWorkspace";
 import PurchaseBillWorkspace from "./screens/purchase/PurchaseBillWorkspace";
@@ -226,12 +227,17 @@ export default function App() {
             fyStart={co.fiscalYears.find((y) => y.id === fyId)?.startDate ?? ""} fyEnd={co.fiscalYears.find((y) => y.id === fyId)?.endDate ?? ""}
             calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} onOpenSource={openSource}
           />
-        ) : screen === "fs-trial-balance" || screen === "fs-profit-loss" || screen === "fs-balance-sheet" ? (
+        ) : screen === "fs-trial-balance" || screen === "fs-profit-loss" || screen === "fs-balance-sheet" || screen === "nfrs-sme-trial-balance" || screen === "nfrs-sme-profit-loss" || screen === "nfrs-sme-balance-sheet" ? (
           <FinancialStatementScreen
-            key={`${screen}:${companyId}:${branchId}:${fyId}`} kind={screen === "fs-trial-balance" ? "trial-balance" : screen === "fs-profit-loss" ? "profit-loss" : "balance-sheet"}
+            key={`${screen}:${companyId}:${branchId}:${fyId}`} kind={screen === "fs-trial-balance" || screen === "nfrs-sme-trial-balance" ? "trial-balance" : screen === "fs-profit-loss" || screen === "nfrs-sme-profit-loss" ? "profit-loss" : "balance-sheet"}
             companyId={companyId} branchId={branchId} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
             fyStart={co.fiscalYears.find((y) => y.id === fyId)?.startDate ?? ""} fyEnd={co.fiscalYears.find((y) => y.id === fyId)?.endDate ?? ""}
-            setStatus={setStatus} dirtyRef={dirtyRef}
+            setStatus={setStatus} dirtyRef={dirtyRef} reportFamily={screen.startsWith("nfrs-sme-") ? "NFRS for SMEs" : undefined}
+          />
+        ) : screen === "nfrs-sme-reporting" ? (
+          <NfrsSmeReportingScreen
+            key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId}
+            fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"} setStatus={setStatus} dirtyRef={dirtyRef}
           />
         ) : screen === "sales-challans" ? (
           <SalesChallanWorkspace
