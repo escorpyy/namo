@@ -36,8 +36,10 @@ describe.skipIf(!DB_READY)("sales invoice service layer", () => {
     const revenueSub = await group("REVENUE", "REV");
     const liabilitySub = await group("LIABILITY", "LIAB");
     const expenseSub = await group("EXPENSE", "EXP");
-    const gl = (sub: number, key: string, normal: string, glType = "OTHER") =>
-      ins(tx, "GeneralLedger", { companyId, code: code(key), name: key, accountSubGroupId: sub, normalBalance: normal, glType, updatedAt: NOW });
+    const gl = async (sub: number, key: string, normal: string, glType = "OTHER") => {
+      const accountGroupId = (await tx.execute(sql`select "accountGroupId" as id from "AccountSubGroup" where id = ${sub}`))[0].id as number;
+      return ins(tx, "GeneralLedger", { companyId, code: code(key), name: key, accountGroupId, accountSubGroupId: sub, normalBalance: normal, glType, updatedAt: NOW });
+    };
     const customerGLId = await gl(assetSub, "CUST", "DEBIT", "CUSTOMER");
     const salesGLId = await gl(revenueSub, "SALES", "CREDIT");
     const taxGLId = await gl(liabilitySub, "TAX", "CREDIT");
@@ -290,7 +292,7 @@ describe.skipIf(!DB_READY)("sales invoice service layer", () => {
       expect(await on()).toBe(3);
 
       // a different customer's challan cannot be billed
-      const other = await ins(tx, "GeneralLedger", { companyId: w.companyId, code: `C2${tag}`.slice(0, 10), name: "Other customer", accountSubGroupId: (await rows(tx, sql`select "accountSubGroupId" as id from "GeneralLedger" where id = ${w.customerGLId}`))[0].id, normalBalance: "DEBIT", glType: "CUSTOMER", updatedAt: NOW });
+      const other = await ins(tx, "GeneralLedger", { companyId: w.companyId, code: `C2${tag}`.slice(0, 10), name: "Other customer", accountGroupId: (await rows(tx, sql`select "accountGroupId" as id from "GeneralLedger" where id = ${w.customerGLId}`))[0].id, accountSubGroupId: (await rows(tx, sql`select "accountSubGroupId" as id from "GeneralLedger" where id = ${w.customerGLId}`))[0].id, normalBalance: "DEBIT", glType: "CUSTOMER", updatedAt: NOW });
       await expect(svc.saveSalesInvoice(billInput(1, { customerGLId: other }), ACTOR, { tx })).rejects.toMatchObject({ status: 409 });
 
       // reversing an invoice does not bring the delivered goods back: they are still with the customer
@@ -355,7 +357,7 @@ describe.skipIf(!DB_READY)("sales invoice service layer", () => {
       expect(lookups.customers.find((c: any) => c.id === w.customerGLId)).toMatchObject({ creditLimit: "50000.000000", creditDays: 30 });
 
       const mine = await svc.saveSalesInvoice(draftInput(w), ACTOR, { tx });
-      const otherGL = await ins(tx, "GeneralLedger", { companyId: w.companyId, code: `CU2${uniq()}`.slice(0, 10), name: "Other customer", accountSubGroupId: (await rows(tx, sql`select "accountSubGroupId" as id from "GeneralLedger" where id = ${w.customerGLId}`))[0].id, normalBalance: "DEBIT", glType: "CUSTOMER", updatedAt: NOW });
+      const otherGL = await ins(tx, "GeneralLedger", { companyId: w.companyId, code: `CU2${uniq()}`.slice(0, 10), name: "Other customer", accountGroupId: (await rows(tx, sql`select "accountGroupId" as id from "GeneralLedger" where id = ${w.customerGLId}`))[0].id, accountSubGroupId: (await rows(tx, sql`select "accountSubGroupId" as id from "GeneralLedger" where id = ${w.customerGLId}`))[0].id, normalBalance: "DEBIT", glType: "CUSTOMER", updatedAt: NOW });
       await svc.saveSalesInvoice(draftInput(w, { customerGLId: otherGL }), ACTOR, { tx });
       const res: any = await svc.listSalesInvoices({ companyId: w.companyId, customerGLId: w.customerGLId, tx } as any);
       expect(res.rows.map((r: any) => Number(r.id))).toEqual([mine.id]);

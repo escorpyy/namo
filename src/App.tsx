@@ -15,6 +15,7 @@ import StockOpeningScreen from "./screens/StockOpeningScreen";
 import CashBankVoucherWorkspace from "./screens/cashBank/CashBankVoucherWorkspace";
 import JournalVoucherWorkspace from "./screens/accounting/JournalVoucherWorkspace";
 import AgeingScreen from "./screens/reports/AgeingScreen";
+import StockValuationScreen from "./screens/reports/StockValuationScreen";
 import LedgerReportScreen from "./screens/reports/LedgerReportScreen";
 import SalesInvoiceWorkspace from "./screens/sales/SalesInvoiceWorkspace";
 import SalesChallanWorkspace from "./screens/sales/SalesChallanWorkspace";
@@ -206,6 +207,11 @@ export default function App() {
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} userId={ctx.user.id} companyName={co.name}
             branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
             calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} openRequest={openRequest}
+          />
+        ) : screen === "inv-stock-valuation" ? (
+          <StockValuationScreen
+            key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"}
+            fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"} calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef}
           />
         ) : screen === "rpt-ageing" || screen === "rpt-outstanding" ? (
           <AgeingScreen

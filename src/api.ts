@@ -266,6 +266,7 @@ export interface ProductPurchaseRow { billId: number; invoiceNumber: string; inv
 export interface StockBalanceRow { productId: number; code: string; description: string; locationId: number | null; batchNo: string | null; expiryDate: string | null; qty: string }
 export const stockApi = {
   balance: (p: { companyId: number; branchId?: number; productId?: number }) => req<StockBalanceRow[]>(`/api/stock/balance?${qstr(p)}`),
+  valuation: (p: { companyId: number; branchId?: number; asOf?: string }) => req<{ asOf: string | null; rows: StockValuationRow[]; totalValue: string }>(`/api/stock/valuation?${qstr(p)}`),
 };
 
 export const purchaseApi = {
@@ -425,3 +426,9 @@ export const salesChallanApi = {
   confirm: (id: number, companyId: number, userId?: number) => req<{ result: Record<string, any>; document: Record<string, any> }>(`/api/sales/challans/${id}/confirm?companyId=${companyId}`, { method: "POST", body: JSON.stringify({ userId }) }),
   invoiceSeed: (companyId: number, challanId: number) => req<SalesChallanInvoiceSeed>(`/api/sales/invoices/from-challan/${challanId}?companyId=${companyId}`),
 };
+
+export interface StockValuationRow {
+  productId: number; code: string; description: string; unit: string; method: "FIFO" | "WEIGHTED_AVERAGE" | "STANDARD_COST";
+  qty: string; rate: string; value: string; missingCost: boolean; negative: boolean;
+  buckets: { locationId: number | null; locationName: string | null; batchNo: string | null; qty: string; value: string }[];
+}
