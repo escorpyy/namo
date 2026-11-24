@@ -71,6 +71,7 @@ export type PurchaseBillInput = {
   dueDays?: number;
   dueDate?: string | Date | null; // blank = invoiceDate + dueDays
   remarks?: string | null;
+  tdsApplicable?: boolean; // tax is to be deducted at source when this bill is paid (a marker only)
   lines: BillLineInput[];
   terms?: TermInput[];
   importDetail?: ImportDetailInput | null;
@@ -316,7 +317,7 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
       vendorInvoiceNo, vendorInvoiceDate: optDate(input.vendorInvoiceDate, "vendorInvoiceDate"),
       purchaseChallanId: input.purchaseChallanId ?? null, purchaseOrderId: input.purchaseOrderId ?? null, mainBillId: input.mainBillId ?? null,
       importCostForBillId, importCostAllocationBasis: input.importCostAllocationBasis ?? "VALUE", importCostTreatment: input.importCostTreatment ?? "CIF",
-      dueDays, dueDate, remarks: input.remarks ?? null, updatedAt: new Date(),
+      dueDays, dueDate, remarks: input.remarks ?? null, tdsApplicable: !!input.tdsApplicable, updatedAt: new Date(),
     };
 
     let id: number;
@@ -393,13 +394,68 @@ async function purchaseLedgerOf(tx: Tx, l: { productId: number }, p: { code: str
   return gl;
 }
 
+// What a bill's header says that is odd but not wrong. The bill still posts; the person is told (the screen shows these after posting).
+export function billWarnings(b: { invoiceDate: Date; vendorInvoiceNo: string | null; vendorInvoiceDate: Date | null }, fy: { code: string; startDate: Date; endDate: Date }): string[] {
+  const out: string[] = [];
+  const day = (d: Date) => d.toISOString().slice(0, 10);
+  if (b.vendorInvoiceNo && !b.vendorInvoiceDate) out.push(`Vendor invoice ${b.vendorInvoiceNo} has no date; the VAT purchase book needs it.`);
+  if (b.vendorInvoiceDate) {
+    if (b.vendorInvoiceDate.getTime() > b.invoiceDate.getTime()) out.push(`The vendor invoice is dated ${day(b.vendorInvoiceDate)}, after the bill date ${day(b.invoiceDate)}.`);
+    if (b.vendorInvoiceDate.getTime() < fy.startDate.getTime() || b.vendorInvoiceDate.getTime() > fy.endDate.getTime()) out.push(`The vendor invoice date ${day(b.vendorInvoiceDate)} is outside fiscal year ${fy.code} (${day(fy.startDate)} to ${day(fy.endDate)}).`);
+  }
+  return out;
+}
+
+// LANDED COST GUARD. The same charge must not be capitalised twice on one goods bill: once as a distributing term on the bill (or on an additional bill)
+// and again as a charge in a cost assessment. Returns the term ids a goods bill already carries through its own terms / additional bills that still stand.
+export async function billTermCapitalisations(tx: Tx, goodsBillId: number): Promise<Map<number, string>> {
+  const rows = (await tx.execute(sql`
+    select distinct t."termId" as "termId", b."invoiceNumber" as number
+      from "PurchaseDocumentTerm" t
+      join "PurchaseBill" b on b.id = t."documentId" and t."documentType" = 'PURCHASE_BILL'
+     where (b.id = ${goodsBillId} or b."mainBillId" = ${goodsBillId})
+       and b."isPosted" and t."distributeToLines" and t."documentLineId" is null and t."finalAmount" <> 0
+       and not exists (select 1 from "PurchaseBill" r where r."reversalOfId" = b.id and r."isPosted")`)) as any[];
+  return new Map(rows.map((r) => [Number(r.termId), String(r.number)]));
+}
+
+export type RevaluationImpact = { lineId: number; lineNumber: number; productId: number; qty: string; addedCost: string; unsoldQty: string; soldQty: string; costOnSoldStock: string };
+
+// Re-values the lines (recomputeLanded) and says how much each one changed and how much of that change falls on goods that have already left.
+// Stock is counted in quantity only (not costed lot by lot), so the sold part is an ESTIMATE: what the line took in minus what is still on hand
+// for the product in the branch, never more than the line. The ledger is not touched: the figure is for the person to see and act on.
+export async function revalueWithImpact(tx: Tx, lineIds: number[]): Promise<RevaluationImpact[]> {
+  if (!lineIds.length) return [];
+  const read = () => tx.select().from(S.purchaseBillLine).where(inArray(S.purchaseBillLine.id, lineIds)).orderBy(asc(S.purchaseBillLine.id));
+  const before = new Map((await read()).map((l) => [l.id, toMicro(l.landedAmount)]));
+  await recomputeLanded(tx, lineIds);
+  const after = await read();
+  const out: RevaluationImpact[] = [];
+  for (const l of after) {
+    const delta = toMicro(l.landedAmount) - (before.get(l.id) ?? ZERO);
+    if (delta === ZERO) continue;
+    const [bill] = await tx.select({ branchId: S.purchaseBill.branchId, companyId: S.purchaseBill.companyId }).from(S.purchaseBill).where(eq(S.purchaseBill.id, l.purchaseBillId));
+    const [p] = await tx.select({ type: S.product.type }).from(S.product).where(eq(S.product.id, l.productId));
+    if (p?.type !== "STOCK") continue;
+    const [m] = await tx.select({ qty: sql<string>`coalesce(sum(${S.stockMovement.qty}), 0)` }).from(S.stockMovement)
+      .where(and(eq(S.stockMovement.companyId, bill.companyId), eq(S.stockMovement.branchId, bill.branchId), eq(S.stockMovement.productId, l.productId)));
+    const qty = toMicro(l.qty);
+    let onHand = toMicro(m.qty);
+    if (onHand < ZERO) onHand = ZERO;
+    const unsold = onHand < qty ? onHand : qty, sold = qty - unsold;
+    out.push({ lineId: l.id, lineNumber: l.lineNumber, productId: l.productId, qty: fmt(qty), addedCost: fmt(delta, 2), unsoldQty: fmt(unsold), soldQty: fmt(sold), costOnSoldStock: qty === ZERO ? "0.00" : fmt((delta * sold) / qty, 2) });
+  }
+  return out;
+}
+
 // POST: checks everything that could not be checked while drafting, writes the journal voucher, and locks the bill.
 export function postPurchaseBill(id: number, actor: Actor, opts: Opts & QtyOpts & LockOpts = {}) {
   return inActorTx(actor, opts.tx, async (tx) => {
     const bill = await lockBill(tx, id);
     if (bill.isPosted) throw new HttpError(409, "Bill is already posted.");
     await guardPeriod(tx, bill.companyId, [bill.invoiceDate], opts.lockOverride);
-    await resolveFiscalYear(tx, bill.companyId, bill.invoiceDate, bill.fiscalYear);
+    const postFy = await resolveFiscalYear(tx, bill.companyId, bill.invoiceDate, bill.fiscalYear);
+    if (bill.returnOfBillId) throw new HttpError(409, "A purchase return is posted when it is made; it has no draft.");
     const isAdditional = !!bill.mainBillId;
 
     if (isAdditional) {
@@ -481,12 +537,14 @@ export function postPurchaseBill(id: number, actor: Actor, opts: Opts & QtyOpts 
 
     // Now that this bill stands, re-value the lines it allocates to (its own, or the main bill's).
     const targets = isAdditional ? await tx.select({ id: S.purchaseBillLine.id }).from(S.purchaseBillLine).where(eq(S.purchaseBillLine.purchaseBillId, bill.mainBillId!)) : dbLines;
-    await recomputeLanded(tx, targets.map((l) => l.id));
+    const revaluation = isAdditional ? await revalueWithImpact(tx, targets.map((l) => l.id)) : (await recomputeLanded(tx, targets.map((l) => l.id)), [] as RevaluationImpact[]);
     if (bill.importCostForBillId) {
       const sourceTargets = await tx.select({ id: S.purchaseBillLine.id }).from(S.purchaseBillLine).where(eq(S.purchaseBillLine.purchaseBillId, bill.importCostForBillId));
-      await recomputeLanded(tx, sourceTargets.map((line) => line.id));
+      revaluation.push(...(await revalueWithImpact(tx, sourceTargets.map((line) => line.id))));
     }
-    return { id, isPosted: true as const, journalVoucherId: jvId, voucherNumber: voucherNumberFor(bill), totalAmount: fmt(totals.total, 2), debit: fmt(dr, 2), credit: fmt(cr, 2) };
+    const warnings = billWarnings(bill, postFy);
+    for (const r of revaluation) if (toMicro(r.soldQty) > ZERO) warnings.push(`Line ${r.lineNumber} of the goods bill: ${r.addedCost} of added cost, about ${r.costOnSoldStock} of it on ${r.soldQty} already sold. Stock value is raised by the full amount; consider moving the sold share to cost of goods sold.`);
+    return { id, isPosted: true as const, journalVoucherId: jvId, voucherNumber: voucherNumberFor(bill), totalAmount: fmt(totals.total, 2), debit: fmt(dr, 2), credit: fmt(cr, 2), warnings, revaluation };
   });
 }
 
@@ -533,6 +591,12 @@ export function reversePurchaseBill(id: number, actor: Actor, opts: Opts & LockO
         .where(and(eq(S.purchaseImportAssessment.importBillId, assessmentTargetId), sql`${S.purchaseImportAssessment.reversedAt} IS NULL`)).limit(1);
       if (assessment) throw new HttpError(409, "Delete the draft or reverse the active import-cost assessment before reversing this linked bill.");
     }
+    if (!orig.returnOfBillId) {
+      const returns = (await tx.execute(sql`
+        select b.id from "PurchaseBill" b
+         where b."returnOfBillId" = ${id} and b."isPosted" and not exists (select 1 from "PurchaseBill" r where r."reversalOfId" = b.id and r."isPosted")`)) as any[];
+      if (returns.length) throw new HttpError(409, "Reverse this bill's purchase returns first.");
+    }
     if (!orig.mainBillId) {
       const live = (await tx.execute(sql`
         select a.id from "PurchaseBill" a
@@ -569,7 +633,7 @@ export function reversePurchaseBill(id: number, actor: Actor, opts: Opts & LockO
     const [rb] = await tx.insert(S.purchaseBill).values({
       companyId: orig.companyId, branchId: orig.branchId, invoiceNumber: number, invoiceDate: date, fiscalYear: fy.code, invoiceType: orig.invoiceType, purchaseType: orig.purchaseType,
       vendorGLId: orig.vendorGLId, subLedgerId: orig.subLedgerId, agentId: orig.agentId, mainBillId: orig.mainBillId, reversalOfId: orig.id, journalVoucherId: rjv,
-      dueDays: 0, basicAmount: orig.basicAmount, termAmount: orig.termAmount, totalAmount: orig.totalAmount,
+      dueDays: 0, basicAmount: orig.basicAmount, termAmount: orig.termAmount, totalAmount: orig.totalAmount, tdsApplicable: orig.tdsApplicable,
       remarks: `Reversal of ${orig.invoiceNumber}${opts.reason ? `: ${opts.reason}` : ""}`.slice(0, 1024),
       isPosted: true, postedAt: new Date(), postedBy: actor.userId, createdBy: actor.userId,
     }).returning({ id: S.purchaseBill.id });
@@ -579,7 +643,7 @@ export function reversePurchaseBill(id: number, actor: Actor, opts: Opts & LockO
     const lineMap = new Map<number, number>();
     await withInitialPostedChildInsert(tx, "PurchaseBillLine", rb.id, async () => {
       for (const l of olines) {
-        const { id: oldId, purchaseBillId: _b, challanLineId: _c, purchaseOrderLineId: _o, createdAt: _t, ...rest } = l;
+        const { id: oldId, purchaseBillId: _b, challanLineId: _c, purchaseOrderLineId: _o, returnOfLineId: _r, createdAt: _t, ...rest } = l;
         const [nl] = await tx.insert(S.purchaseBillLine).values({ ...rest, purchaseBillId: rb.id }).returning({ id: S.purchaseBillLine.id });
         lineMap.set(oldId, nl.id);
       }

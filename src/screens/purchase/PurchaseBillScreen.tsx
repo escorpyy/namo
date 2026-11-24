@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { Copy, Pencil, Plus, RotateCcw, Save, Send, Trash2, X } from "lucide-react";
+import { Copy, Pencil, PencilRuler, Plus, RotateCcw, Save, Send, Trash2, Undo2, X } from "lucide-react";
 import { purchaseApi, type PDoc, type PListRow, type PLookups } from "../../api";
 import { type ComboOption } from "../../components/Combobox";
 import { Dialog, useDialog } from "../../components/Dialog";
@@ -24,12 +24,13 @@ import type { PurchaseScreenProps } from "./PurchaseOrderScreen";
 import { useDocScreen, type DocConfig, type DocSnapshot, type Errors } from "./useDocScreen";
 
 export const STATE_TONE: Record<string, "slate" | "green" | "amber" | "blue"> = { DRAFT: "slate", POSTED: "green", REVERSED: "amber", REVERSAL: "blue" };
-export const OPTIONS = [{ value: "DRAFT", label: "Draft" }, { value: "POSTED", label: "Posted" }, { value: "REVERSED", label: "Reversed" }, { value: "REVERSAL", label: "Reversal bills" }];
+export const OPTIONS = [{ value: "DRAFT", label: "Draft" }, { value: "POSTED", label: "Posted" }, { value: "REVERSED", label: "Reversed" }, { value: "REVERSAL", label: "Reversal bills" }, { value: "RETURN", label: "Purchase returns" }];
 const TAB_ONLY = new Set(["Alt+4", "F4 / /", "Ctrl+↑ / Ctrl+↓", "Alt+1 / Alt+2 / Alt+3", "F3 / Ctrl+N", "Esc"]);
 const HELP: [string, string][] = [
   ...COMMON_HELP.filter(([key]) => !TAB_ONLY.has(key)),
   ["F3 / Ctrl+N", "New bill in a new tab"],
   ["F6", "Add a line"],
+  ["Alt+Shift+V / Alt+Shift+L", "Jump to the vendor / to the first line"],
   ["Esc", "Cancel editing; in the terms dialog, close it"],
   ["Alt+, / Alt+.", "Previous / next tab"],
   ["Alt+W", "Close this tab"],
@@ -38,11 +39,11 @@ const HELP: [string, string][] = [
   ["Alt+Shift+T", "Open header terms"],
   ["Post", "Writes the journal voucher; a posted bill cannot be edited, only reversed"],
 ];
-const BILL_HINTS = [...HINTS.filter((h) => !h.startsWith("F4")), "F6: Add line", "Alt+Shift+T: Terms"];
+const BILL_HINTS = [...HINTS.filter((h) => !h.startsWith("F4")), "F6: Add line", "Alt+Shift+T: Terms", "Alt+Shift+V: Vendor", "Alt+Shift+L: Lines"];
 
 export interface BForm {
   numberSeriesId: string; docNumber: string; invoiceDate: string; invoiceType: "LOCAL" | "IMPORT"; purchaseType: string; vendorGLId: string; subLedgerId: string; agentId: string; vendorInvoiceNo: string; vendorInvoiceDate: string;
-  dueDays: string; dueDate: string; remarks: string; purchaseChallanId: string; purchaseOrderId: string; importCostForBillId: string; importCostAllocationBasis: "VALUE" | "QUANTITY"; importCostTreatment: "CIF" | "LANDED_ONLY"; challanNo: string; orderNo: string;
+  dueDays: string; dueDate: string; remarks: string; tdsApplicable: boolean; purchaseChallanId: string; purchaseOrderId: string; importCostForBillId: string; importCostAllocationBasis: "VALUE" | "QUANTITY"; importCostTreatment: "CIF" | "LANDED_ONLY"; challanNo: string; orderNo: string;
   lines: LineRow[]; terms: TermRow[]; imp: Record<string, string>;
 }
 const iso10 = (v: unknown) => (v ? String(v).slice(0, 10) : "");
@@ -66,7 +67,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     kind: "bills", title: "Purchase Bill", singular: "Bill", statusOptions: OPTIONS,
     emptyForm: (lk) => ({
       numberSeriesId: "", docNumber: "", invoiceDate: defaultDate(lk.fiscalYears.find((y) => y.code === p.fyCode)), invoiceType: "LOCAL", purchaseType: "GOODS_PURCHASE_OTHERS", vendorGLId: "", subLedgerId: "", agentId: "",
-      vendorInvoiceNo: "", vendorInvoiceDate: "", dueDays: "", dueDate: "", remarks: "", purchaseChallanId: "", purchaseOrderId: "", importCostForBillId: "", importCostAllocationBasis: "VALUE", importCostTreatment: "CIF", challanNo: "", orderNo: "",
+      vendorInvoiceNo: "", vendorInvoiceDate: "", dueDays: "", dueDate: "", remarks: "", tdsApplicable: false, purchaseChallanId: "", purchaseOrderId: "", importCostForBillId: "", importCostAllocationBasis: "VALUE", importCostTreatment: "CIF", challanNo: "", orderNo: "",
       lines: [blankLine()], terms: alwaysShowTerms(lk.terms), imp: {},
     }),
     toForm: (d: PDoc, lk) => {
@@ -75,7 +76,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
       for (const k of IMPORT_FIELDS) imp[k.key] = str(d.importDetail?.[k.key]);
       return {
         numberSeriesId: str(d.numberSeriesId), docNumber: str(d.invoiceNumber), invoiceDate: str(d.invoiceDate), invoiceType: d.invoiceType, purchaseType: str(d.purchaseType), vendorGLId: str(d.vendorGLId), subLedgerId: str(d.subLedgerId), agentId: str(d.agentId),
-        vendorInvoiceNo: str(d.vendorInvoiceNo), vendorInvoiceDate: str(d.vendorInvoiceDate), dueDays: str(d.dueDays), dueDate: str(d.dueDate), remarks: str(d.remarks),
+        vendorInvoiceNo: str(d.vendorInvoiceNo), vendorInvoiceDate: str(d.vendorInvoiceDate), dueDays: str(d.dueDays), dueDate: str(d.dueDate), remarks: str(d.remarks), tdsApplicable: !!d.tdsApplicable,
         purchaseChallanId: str(d.purchaseChallanId), purchaseOrderId: str(d.purchaseOrderId), importCostForBillId: str(d.importCostForBillId), importCostAllocationBasis: d.importCostAllocationBasis === "QUANTITY" ? "QUANTITY" : "VALUE", importCostTreatment: d.importCostTreatment === "LANDED_ONLY" ? "LANDED_ONLY" : "CIF", challanNo: str(d.challanNumber), orderNo: str(d.orderNumber),
         lines: d.lines.length ? d.lines.map((l) => { const row = lineFromDoc(l, prods.get(str(l.productId))); return isForeign(imp.currencyCode) && l.foreignRate != null ? { ...row, rate: trimDec(l.foreignRate) } : row; }) : [blankLine()], terms: (d.terms ?? []).map(termFromDoc), imp,
       };
@@ -88,7 +89,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
         ...(doc ? {} : { invoiceNumber: f.docNumber.trim() || null, numberSeriesId: f.numberSeriesId ? Number(f.numberSeriesId) : null }),
         invoiceDate: f.invoiceDate, invoiceType: f.invoiceType, purchaseType: f.purchaseType, vendorGLId: Number(f.vendorGLId), subLedgerId: f.subLedgerId ? Number(f.subLedgerId) : null,
         agentId: f.agentId ? Number(f.agentId) : null, vendorInvoiceNo: nn(f.vendorInvoiceNo), vendorInvoiceDate: f.vendorInvoiceDate || null,
-        dueDays: f.dueDays ? Number(f.dueDays) : null, dueDate: f.dueDate || null, remarks: nn(f.remarks),
+        dueDays: f.dueDays ? Number(f.dueDays) : null, dueDate: f.dueDate || null, remarks: nn(f.remarks), tdsApplicable: f.tdsApplicable,
         purchaseChallanId: f.purchaseChallanId ? Number(f.purchaseChallanId) : null, purchaseOrderId: f.purchaseOrderId ? Number(f.purchaseOrderId) : null,
         importCostForBillId: f.importCostForBillId ? Number(f.importCostForBillId) : null, importCostAllocationBasis: f.importCostAllocationBasis, importCostTreatment: f.importCostTreatment,
         lines: f.lines.filter((l) => !isBlankLine(l)).map((l) => {
@@ -305,6 +306,13 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.altKey || !e.shiftKey || e.ctrlKey || e.metaKey) return;
+      if (e.code === "KeyV" || e.code === "KeyL") {
+        e.preventDefault();
+        setHdrOff(false);
+        const sel = e.code === "KeyV" ? '[data-field="vendorGLId"], [data-bill-header-field] [role="combobox"]' : '[data-field="L.0.p"]';
+        window.setTimeout(() => document.querySelector<HTMLElement>(`${sel}:not(:disabled)`)?.focus(), 50);
+        return;
+      }
       if (e.code === "KeyT") {
         e.preventDefault();
         termsRef.current.open({ scope: "header" });
@@ -331,14 +339,69 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   }, [s.errors]);
 
   const state = doc?.state as string | undefined;
-  const reversible = !!doc && state === "POSTED";
+  const reversible = !!doc && (state === "POSTED" || state === "RETURN");
+  // goods can go back from a live main goods bill that is not an import bill (the server says why when it refuses)
+  const returnable = !!doc && state === "POSTED" && !doc.mainBillId && !doc.importCostForBillId && doc.invoiceType !== "IMPORT" && String(doc.purchaseType).startsWith("GOODS_PURCHASE_") && doc.lines.some((l: any) => Number(l.returnableQty) > 0);
+  const correctable = !!doc && state === "POSTED" && !doc.mainBillId && !doc.importCostForBillId;
+  const askReturn = () => {
+    if (!doc) return;
+    const fy = lk?.fiscalYears.find((y) => y.code === p.fyCode);
+    const d0 = defaultDate(fy);
+    const rt: { returnDate: string; reason: string; debitNoteNo: string; lines: { billLineId: number; qty: string }[] } = { returnDate: d0 < doc.invoiceDate ? doc.invoiceDate : d0, reason: "", debitNoteNo: "", lines: [] };
+    const qtys = new Map<number, string>();
+    const sync = () => { rt.lines = [...qtys].filter(([, q]) => q.trim() !== "").map(([billLineId, qty]) => ({ billLineId, qty })); };
+    s.run({
+      action: "return", title: "Return goods to the vendor", button: "Post return", payload: rt,
+      body: (
+        <div className="space-y-2">
+          <p>Enter the quantity sent back per line. A debit note is posted at once in the same share of the bill's charges, and the goods leave stock.</p>
+          <table className="xl-table w-full text-[12px]">
+            <thead><tr><th className="text-left">#</th><th className="text-left">Product</th><th className="text-right">Bought</th><th className="text-right">Can return</th><th className="text-right">Return qty</th></tr></thead>
+            <tbody>
+              {doc.lines.map((l: any) => Number(l.returnableQty) > 0 && (
+                <tr key={l.id}>
+                  <td className="text-left tabular-nums">{l.lineNumber}</td>
+                  <td className="truncate text-left">{lk?.products.find((x) => x.id === l.productId)?.description ?? l.productId}</td>
+                  <td className="text-right tabular-nums">{trimDec(l.qty)}</td>
+                  <td className="text-right tabular-nums">{trimDec(l.returnableQty)}</td>
+                  <td className="text-right"><input data-af={l === doc.lines.find((x: any) => Number(x.returnableQty) > 0) ? true : undefined} inputMode="decimal" aria-label={`Return quantity, line ${l.lineNumber}`} className="fld w-24 text-right" onChange={(e) => { qtys.set(l.id, e.target.value.trim()); sync(); }} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <label className="block text-[12px]">Return date (AD, YYYY-MM-DD)<input defaultValue={rt.returnDate} onChange={(e) => { rt.returnDate = e.target.value.trim(); }} className="fld mt-0.5" /></label>
+          <label className="block text-[12px]">Vendor's debit / credit note no. (optional)<input maxLength={30} onChange={(e) => { rt.debitNoteNo = e.target.value; }} className="fld mt-0.5" /></label>
+          <label className="block text-[12px]">Reason<input maxLength={200} onChange={(e) => { rt.reason = e.target.value; }} className="fld mt-0.5" /></label>
+        </div>
+      ),
+      done: (d, r) => `Return ${r.invoiceNumber} posted for ${money(r.totalAmount)} (voucher ${r.voucherNumber})`,
+    });
+  };
+  const askCorrect = () => {
+    if (!doc) return;
+    const fy = lk?.fiscalYears.find((y) => y.code === p.fyCode);
+    const d0 = defaultDate(fy), rv = { date: d0 < doc.invoiceDate ? doc.invoiceDate : d0, reason: "" };
+    s.run({
+      action: "reverse-and-copy", title: "Reverse and correct?", button: "Reverse and open copy", danger: true, payload: rv,
+      body: (
+        <div className="space-y-2">
+          <p>Reverse <b className="font-mono">{doc.invoiceNumber}</b> and open a draft copy of it (same vendor, lines, charges and details) so you can fix what was wrong and post it again.</p>
+          <label className="block text-[12px]">Reversal date (AD, YYYY-MM-DD)<input data-af defaultValue={rv.date} onChange={(e) => { rv.date = e.target.value.trim(); }} className="fld mt-0.5" /></label>
+          <label className="block text-[12px]">Reason<input defaultValue="" maxLength={200} onChange={(e) => { rv.reason = e.target.value; }} className="fld mt-0.5" /></label>
+        </div>
+      ),
+      done: (d) => `Reversed; draft ${d.invoiceNumber} is ready to correct`,
+    });
+  };
   // A new draft from this bill (any state): same vendor, lines and charges, dated today, without the vendor invoice no., links or declaration no.
-  const canCopy = !!doc && !!lk && state !== "REVERSAL" && !doc.mainBillId;
+  const canCopy = !!doc && !!lk && state !== "REVERSAL" && state !== "RETURN" && !doc.mainBillId;
   const copyBill = () => { if (doc && lk) p.onNew(copyBillForm(cfg.toForm(doc, lk), cfg.emptyForm(lk).invoiceDate)); };
   const actions = doc && (
     <>
       {canCopy && <button data-nav className="btn" onClick={copyBill}><Copy size={14} /> Copy</button>}
-      {state === "DRAFT" && <button data-nav className="btn btn-primary" onClick={() => s.run({ action: "post", title: "Post bill?", body: <>Post <b className="font-mono">{doc.invoiceNumber}</b> for <b>{money(doc.totalAmount)}</b>? A balanced journal voucher is written and the bill can no longer be edited or deleted — only reversed.</>, button: "Post", done: (d) => `Posted ${d.invoiceNumber}${d.journalVoucher ? ` (voucher ${d.journalVoucher.voucherNumber})` : ""}` })}><Send size={14} /> Post</button>}
+      {state === "DRAFT" && <button data-nav className="btn btn-primary" onClick={() => s.run({ action: "post", title: "Post bill?", body: <>Post <b className="font-mono">{doc.invoiceNumber}</b> for <b>{money(doc.totalAmount)}</b>? A balanced journal voucher is written and the bill can no longer be edited or deleted — only reversed.</>, button: "Post", done: (d, r) => `Posted ${d.invoiceNumber}${d.journalVoucher ? ` (voucher ${d.journalVoucher.voucherNumber})` : ""}${r.warnings?.length ? ` — check: ${r.warnings.join(" ")}` : ""}` })}><Send size={14} /> Post</button>}
+      {returnable && <button data-nav className="btn" onClick={askReturn}><Undo2 size={14} /> Return goods</button>}
+      {correctable && <button data-nav className="btn" onClick={askCorrect}><PencilRuler size={14} /> Reverse &amp; correct</button>}
       {reversible && (
         <button data-nav className="btn" onClick={() => {
           const fy = lk?.fiscalYears.find((y) => y.code === p.fyCode);
@@ -363,6 +426,8 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     <div className="mx-5 mt-3 space-y-1">
       {state === "POSTED" && <p className="text-[12px] rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-900">Posted{doc.journalVoucher ? <> as voucher <b className="font-mono">{doc.journalVoucher.voucherNumber}</b> dated {doc.journalVoucher.voucherDate}</> : ""}. A posted bill cannot be edited; reverse it to correct it.</p>}
       {state === "REVERSED" && <p className="text-[12px] rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">Reversed by <b className="font-mono">{doc.reversedBy?.invoiceNumber}</b>.</p>}
+      {state === "RETURN" && <p className="text-[12px] rounded-lg border border-cobalt-200 bg-cobalt-50 px-2 py-2 text-cobalt-800">Purchase return (debit note) against <b className="font-mono">{doc.returnOf?.invoiceNumber}</b>. Reverse it if it was made by mistake.</p>}
+      {state === "POSTED" && (doc.returns ?? []).length > 0 && <p className="text-[12px] rounded-lg border border-cobalt-200 bg-cobalt-50 px-3 py-2 text-cobalt-800">Goods returned on this bill: {(doc.returns as any[]).map((r) => `${r.invoiceNumber} (${money(r.totalAmount)})`).join(", ")}.</p>}
       {state === "REVERSAL" && <p className="text-[12px] rounded-lg border border-cobalt-200 bg-cobalt-50 px-3 py-2 text-cobalt-800">This is the reversal of <b className="font-mono">{doc.reversalOf?.invoiceNumber}</b>.</p>}
     </div>
   );
@@ -504,7 +569,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
                   <VendorBillsTable lookups={lk} vendorGLId={f.vendorGLId} vendorBills={vendorBills} doc={doc} companyId={p.companyId} userId={p.userId} calendar={p.calendar} />
                 </div>
               </div> : <div className="min-h-0 flex-1 [&>div]:!px-2 [&>div]:!py-1.5">
-                <ProductInfoPanel lookups={lk} productId={focusProduct} info={productInfo} calendar={p.calendar} />
+                <ProductInfoPanel lookups={lk} productId={focusProduct} info={productInfo} calendar={p.calendar} currentRate={f.invoiceType === "IMPORT" && f.imp.currencyCode && f.imp.currencyCode.toUpperCase() !== "NPR" ? "" : f.lines[focusLine]?.rate ?? ""} />
               </div>}
             </div>
           </RailPanel>

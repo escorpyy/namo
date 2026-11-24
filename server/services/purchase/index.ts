@@ -2,6 +2,8 @@
 export * from "./purchaseOrder";
 export * from "./purchaseChallan";
 export * from "./purchaseBill";
+export * from "./purchaseReturn";
+export * from "./billCorrection";
 export * from "./importAssessment";
 export type { LineInput } from "./lines";
 export type { TermInput } from "./docTerms";

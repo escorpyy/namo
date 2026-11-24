@@ -819,4 +819,151 @@ describe.skipIf(!DB_READY)("purchase service layer", () => {
       expect(today().getTime()).toBe(dateInZone(new Date()).getTime());
     });
   });
+  // =====================================================================================================
+  describe("TDS flag, post-time warnings, landed cost guard, purchase return, reverse and correct", () => {
+    const post = async (tx: any, W: W, over: any = {}) => {
+      const s = await svc.savePurchaseBill(billIn(W, { terms: standardTerms(W), ...over }), ACTOR, { tx });
+      return { s, p: await svc.postPurchaseBill(s.id, ACTOR, { tx }) };
+    };
+    const stock = async (tx: any, W: W, productId: number) => Number((await stockBalance(tx, { companyId: W.co, productId })).reduce((a: number, r: any) => a + Number(r.qty), 0));
+
+    it("the TDS flag is saved on the bill, carried to a reversal and to a corrected copy", async () => {
+      await run(async (tx, W) => {
+        const s = await svc.savePurchaseBill(billIn(W, { tdsApplicable: true, terms: standardTerms(W) }), ACTOR, { tx });
+        expect((await bill(tx, s.id)).tdsApplicable).toBe(true);
+        const off = await svc.savePurchaseBill(billIn(W, { terms: standardTerms(W) }), ACTOR, { tx });
+        expect((await bill(tx, off.id)).tdsApplicable).toBe(false);
+        await svc.postPurchaseBill(s.id, ACTOR, { tx });
+        const r = await svc.reverseAndCopyPurchaseBill(s.id, W.co, ACTOR, { tx, date: "2025-10-20", reason: "wrong vendor rate" });
+        expect((await bill(tx, r.reversal.reversalBillId)).tdsApplicable).toBe(true);
+        expect((await bill(tx, r.draft.id)).tdsApplicable).toBe(true);
+      });
+    });
+
+    it("posting tells about a vendor invoice with no date, dated after the bill, or outside the fiscal year (and still posts)", async () => {
+      await run(async (tx, W) => {
+        const a = await post(tx, W, { vendorInvoiceNo: "W-1" });
+        expect(a.p.isPosted).toBe(true);
+        expect(a.p.warnings).toEqual([expect.stringMatching(/Vendor invoice W-1 has no date/)]);
+        const b = await post(tx, W, { vendorInvoiceNo: "W-2", vendorInvoiceDate: "2025-10-20" });
+        expect(b.p.warnings).toEqual([expect.stringMatching(/dated 2025-10-20, after the bill date 2025-10-14/)]);
+        const c = await post(tx, W, { vendorInvoiceNo: "W-3", vendorInvoiceDate: "2025-06-01" });
+        expect(c.p.warnings).toEqual([expect.stringMatching(/2025-06-01 is outside fiscal year 2082\/83/)]);
+        const ok = await post(tx, W, { vendorInvoiceNo: "W-4", vendorInvoiceDate: "2025-10-10" });
+        expect(ok.p.warnings).toEqual([]);
+      });
+    });
+
+    it("duty that arrives after goods were sold says how much of it falls on the sold goods", async () => {
+      await run(async (tx, W) => {
+        const m = await post(tx, W);
+        await ins(tx, "StockMovement", { companyId: W.co, branchId: W.br, productId: W.rice.id, movementDate: "2025-10-16", qty: -8, sourceType: "SALES_INVOICE", sourceId: 1, sourceLineId: 1 });
+        const a = await svc.savePurchaseBill({ companyId: W.co, branchId: W.br, invoiceDate: "2025-10-20", vendorGLId: W.customs, mainBillId: m.s.id, lines: [], terms: [{ termId: W.tDuty, inputAmount: 300 }] }, ACTOR, { tx });
+        const p = await svc.postPurchaseBill(a.id, ACTOR, { tx });
+        const rice = p.revaluation.find((r: any) => r.lineNumber === 1)!, oil = p.revaluation.find((r: any) => r.lineNumber === 2)!;
+        expect(rice).toMatchObject({ addedCost: "200.00", costOnSoldStock: "160.00" });
+        expect(Number(rice.soldQty)).toBe(8);
+        expect(Number(rice.unsoldQty)).toBe(2);
+        expect(oil).toMatchObject({ addedCost: "100.00", costOnSoldStock: "0.00" });
+        expect(p.warnings.join(" ")).toMatch(/Line 1 of the goods bill: 200\.00 of added cost, about 160\.00 of it on/);
+      });
+    });
+
+    it("a charge already added to stock value through an additional bill is flagged (not blocked) when a cost assessment adds it again", async () => {
+      await run(async (tx, W) => {
+        const m = await post(tx, W);
+        const a = await svc.savePurchaseBill({ companyId: W.co, branchId: W.br, invoiceDate: "2025-10-20", vendorGLId: W.customs, mainBillId: m.s.id, lines: [], terms: [{ termId: W.tDuty, inputAmount: 300 }] }, ACTOR, { tx });
+        await svc.postPurchaseBill(a.id, ACTOR, { tx });
+        const draft = await svc.createImportAssessment({ companyId: W.co, branchId: W.br, importBillId: m.s.id, assessmentDate: "2025-10-21", terms: [{ termId: W.tDuty, calcType: "AMOUNT", inputAmount: "300", allocationBasis: "QUANTITY", capitalizable: true, againstLedgerId: W.customs } as any] }, ACTOR, { tx });
+        const applied = await svc.applyImportAssessment(draft.id, W.co, ACTOR, { tx });
+        expect(applied.warnings.join(" ")).toMatch(/is also added to the stock value on bill .*not counted twice/);
+      });
+    });
+
+    describe("purchase return", () => {
+      it("returns part of a bill: balanced debit note in the share returned, stock out, quantity tracked", async () => {
+        await run(async (tx, W) => {
+          const { s } = await post(tx, W);
+          const [l1] = await blines(tx, s.id);
+          expect(await stock(tx, W, W.rice.id)).toBe(10);
+          const r = await svc.createPurchaseReturn({ companyId: W.co, billId: s.id, returnDate: "2025-10-20", reason: "damaged", lines: [{ billLineId: l1.id, qty: 4 }] }, ACTOR, { tx });
+          expect(r).toMatchObject({ basicAmount: "400.00", termAmount: "29.40", totalAmount: "429.40" });
+          const v = await voucher(tx, r.journalVoucherId);
+          expect(v.rows).toEqual([
+            { gl: W.purchase, debit: "0.00", credit: "400.00" },
+            { gl: W.discount, debit: "40.00", credit: "0.00" }, // the discount of the goods returned is given back
+            { gl: W.freight, debit: "0.00", credit: "20.00" },
+            { gl: W.vat, debit: "0.00", credit: "49.40" },
+            { gl: W.vendor, debit: "429.40", credit: "0.00" },
+          ]);
+          expect(v.dr).toBe(v.cr);
+          const rb = await bill(tx, r.returnBillId);
+          expect(rb).toMatchObject({ isPosted: true, returnOfBillId: s.id });
+          expect(n2(rb.totalAmount)).toBe("429.40");
+          expect(await stock(tx, W, W.rice.id)).toBe(6);
+          const [rl] = await blines(tx, r.returnBillId);
+          expect(rl.returnOfLineId).toBe(l1.id);
+          // the original stays live, and what is left to return is known
+          expect((await bill(tx, s.id)).isPosted).toBe(true);
+          const left = await svc.returnedQtyByLine(tx, [l1.id]);
+          expect(Number(left.get(l1.id)) / 1e6).toBe(4);
+        });
+      });
+
+      it("refuses more than is left, stock that is not there, a draft, a reversal and an import bill", async () => {
+        await run(async (tx, W) => {
+          const { s } = await post(tx, W);
+          const [l1, l2] = await blines(tx, s.id);
+          await svc.createPurchaseReturn({ companyId: W.co, billId: s.id, returnDate: "2025-10-20", lines: [{ billLineId: l1.id, qty: 4 }] }, ACTOR, { tx });
+          await rejects(tx, svc.createPurchaseReturn({ companyId: W.co, billId: s.id, returnDate: "2025-10-20", lines: [{ billLineId: l1.id, qty: 7 }] }, ACTOR, { tx }), 409, /more than what is left to return/);
+          await rejects(tx, svc.createPurchaseReturn({ companyId: W.co, billId: s.id, returnDate: "2025-10-20", lines: [{ billLineId: l1.id, qty: 0 }] }, ACTOR, { tx }), 400, /more than zero/);
+          await rejects(tx, svc.createPurchaseReturn({ companyId: W.co, billId: s.id, returnDate: "2025-10-01", lines: [{ billLineId: l1.id, qty: 1 }] }, ACTOR, { tx }), 400, /before the bill/);
+          await rejects(tx, svc.createPurchaseReturn({ companyId: W.co, billId: s.id, returnDate: "2025-10-20", lines: [] }, ACTOR, { tx }), 400, /at least one line/);
+          // oil already sold: only 1 on hand
+          await ins(tx, "StockMovement", { companyId: W.co, branchId: W.br, productId: W.oil.id, movementDate: "2025-10-16", qty: -4, sourceType: "SALES_INVOICE", sourceId: 1, sourceLineId: 1 });
+          await rejects(tx, svc.createPurchaseReturn({ companyId: W.co, billId: s.id, returnDate: "2025-10-20", lines: [{ billLineId: l2.id, qty: 2 }] }, ACTOR, { tx }), 409, /not enough stock/);
+          const draft = await svc.savePurchaseBill(billIn(W), ACTOR, { tx });
+          await rejects(tx, svc.createPurchaseReturn({ companyId: W.co, billId: draft.id, lines: [{ billLineId: l1.id, qty: 1 }] }, ACTOR, { tx }), 409, /Only a posted bill/);
+          const rev = await svc.reversePurchaseBill(s.id, ACTOR, { tx, date: "2025-10-25" }).catch((e: any) => e);
+          expect(rev.status).toBe(409); // its return still stands
+          expect(rev.message).toMatch(/Reverse this bill's purchase returns first/);
+        });
+      });
+
+      it("a wrong return is reversed like any bill: stock comes back and the quantity can be returned again", async () => {
+        await run(async (tx, W) => {
+          const { s } = await post(tx, W);
+          const [l1] = await blines(tx, s.id);
+          const r = await svc.createPurchaseReturn({ companyId: W.co, billId: s.id, returnDate: "2025-10-20", lines: [{ billLineId: l1.id, qty: 10 }] }, ACTOR, { tx });
+          expect(await stock(tx, W, W.rice.id)).toBe(0);
+          await rejects(tx, svc.createPurchaseReturn({ companyId: W.co, billId: s.id, returnDate: "2025-10-20", lines: [{ billLineId: l1.id, qty: 1 }] }, ACTOR, { tx }), 409, /more than what is left to return/);
+          await svc.reversePurchaseBill(r.returnBillId, ACTOR, { tx, date: "2025-10-21", reason: "returned by mistake" });
+          expect(await stock(tx, W, W.rice.id)).toBe(10);
+          expect((await svc.returnedQtyByLine(tx, [l1.id])).get(l1.id)).toBeUndefined();
+          await svc.createPurchaseReturn({ companyId: W.co, billId: s.id, returnDate: "2025-10-22", lines: [{ billLineId: l1.id, qty: 10 }] }, ACTOR, { tx });
+          expect(await stock(tx, W, W.rice.id)).toBe(0);
+        });
+      });
+    });
+
+    it("reverse and correct: the bill is reversed and a draft copy with the same lines, terms and header is ready to fix", async () => {
+      await run(async (tx, W) => {
+        const { s } = await post(tx, W, { vendorInvoiceNo: "CORR-1", vendorInvoiceDate: "2025-10-10", remarks: "first try" });
+        const r = await svc.reverseAndCopyPurchaseBill(s.id, W.co, ACTOR, { tx, date: "2025-10-20", reason: "rate was wrong" });
+        expect((await q(tx, sql`select 1 from "PurchaseBill" where "reversalOfId" = ${s.id} and "isPosted"`)).length).toBe(1);
+        const d = await bill(tx, r.draft.id);
+        expect(d).toMatchObject({ isPosted: false, vendorInvoiceNo: "CORR-1", remarks: "first try" });
+        expect(new Date(d.invoiceDate).toISOString().slice(0, 10)).toBe("2025-10-20");
+        expect(n2(d.totalAmount)).toBe("2147.00");
+        expect((await blines(tx, d.id)).map((l) => [l.productId, Number(l.qty), Number(l.rate)])).toEqual([[W.rice.id, 10, 100], [W.oil.id, 5, 200]]);
+        expect((await q(tx, sql`select t."termId" from "PurchaseDocumentTerm" t where t."documentId" = ${d.id} and t."documentType" = 'PURCHASE_BILL' order by t.sequence`)).map((t) => t.termId)).toEqual([W.tDisc, W.tFreight, W.tVat]);
+        // a draft cannot be corrected this way, and a failed reversal leaves no stray draft
+        await rejects(tx, svc.reverseAndCopyPurchaseBill(d.id, W.co, ACTOR, { tx }), 409, /Only a posted bill can be reversed/);
+        const before = (await q(tx, sql`select count(*)::int as n from "PurchaseBill" where "companyId" = ${W.co}`))[0].n;
+        const again = await svc.reverseAndCopyPurchaseBill(s.id, W.co, ACTOR, { tx }).catch((e: any) => e);
+        expect(again.status).toBe(409);
+        expect((await q(tx, sql`select count(*)::int as n from "PurchaseBill" where "companyId" = ${W.co}`))[0].n).toBe(before);
+      });
+    });
+  });
 });

@@ -300,7 +300,7 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
             try {
               const r = await A.action(target.id, ctx.companyId, spec.action, { ...spec.payload, userId: ctx.userId });
               open(r.document);
-              flash(spec.done(r.document, r.result), "ok");
+              flash(spec.done(r.document, r.result), Array.isArray(r.result?.warnings) && r.result.warnings.length ? "warn" : "ok");
               refreshList();
             } catch (e) { flash((e as Error).message, "err"); }
           },

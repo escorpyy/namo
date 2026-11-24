@@ -20,8 +20,16 @@ export function useProductInfo(companyId: number, branchId: number, productId: s
   return state;
 }
 
-export function ProductInfoPanel({ lookups, productId, info, calendar }: {
-  lookups: PLookups; productId: string; info: ReturnType<typeof useProductInfo>; calendar: "BS" | "AD";
+// How far the rate typed on the line is from the last purchase rate; null when there is nothing to compare or it is close (within 10%).
+export function rateDeviation(current: string, last: string | undefined): { pct: number; last: string } | null {
+  const c = Number(current), l = Number(last);
+  if (!last || !Number.isFinite(c) || !Number.isFinite(l) || c <= 0 || l <= 0) return null;
+  const pct = ((c - l) / l) * 100;
+  return Math.abs(pct) >= 10 ? { pct, last: String(last) } : null;
+}
+
+export function ProductInfoPanel({ lookups, productId, info, calendar, currentRate = "" }: {
+  lookups: PLookups; productId: string; info: ReturnType<typeof useProductInfo>; calendar: "BS" | "AD"; currentRate?: string;
 }) {
   const product = lookups.products.find((x) => String(x.id) === productId);
   const vendors = useMemo(() => new Map(lookups.vendors.map((v) => [v.id, v.name])), [lookups.vendors]);
@@ -37,6 +45,10 @@ export function ProductInfoPanel({ lookups, productId, info, calendar }: {
         <div className="font-mono text-[12px] text-slate-500">{product.code}</div>
       </div>
       {error && <p role="alert" className="text-rose-700">{error}</p>}
+      {(() => {
+        const d = rateDeviation(currentRate, info.history?.[0]?.rate);
+        return d && <p role="status" className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-amber-900">Rate {trimDec(currentRate)} is <b>{Math.abs(d.pct).toFixed(0)}% {d.pct > 0 ? "higher" : "lower"}</b> than the last purchase rate {trimDec(d.last)}.</p>;
+      })()}
       {product.type !== "STOCK" ? <p className="text-slate-500">Not a stock item: no stock is kept.</p> : (
         <section aria-label="Stock on hand">
           <div className="flex items-baseline justify-between border-b border-slate-200 pb-1"><span className="text-slate-600">On hand</span><b className="tabular-nums text-ink">{stock === null ? "…" : trimDec(String(onHand))}</b></div>

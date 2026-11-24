@@ -7,7 +7,7 @@ import { fmt, roundTo, toMicro, type EngineTerm, type Micro, ZERO } from "../../
 import { guardPeriod, type LockOverride } from "../periodLock";
 import { type Actor, type Opts, type Tx, assertBranch, inActorTx, inTx, parseDate, resolveFiscalYear, today } from "./common";
 import { importCostBasis } from "./importCostBasis";
-import { type JvRow, mergeRows, recomputeLanded, writeVoucher } from "./purchaseBill";
+import { type JvRow, billTermCapitalisations, mergeRows, recomputeLanded, revalueWithImpact, writeVoucher } from "./purchaseBill";
 
 type Basis = "VALUE" | "QUANTITY";
 // capitalizable defaults to the term master's "affects stock value"; againstLedgerId to the master's default against ledger.
@@ -41,7 +41,7 @@ async function importBill(tx: Tx, companyId: number, branchId: number, billId: n
   const [bill] = await query;
   if (!bill) throw new HttpError(404, "Goods bill not found in this company.", "importBillId");
   if (bill.branchId !== branchId) throw new HttpError(400, "Assessment and goods bill must be in the same branch.", "importBillId");
-  if (!bill.purchaseType.startsWith("GOODS_PURCHASE_") || bill.mainBillId || bill.reversalOfId) {
+  if (!bill.purchaseType.startsWith("GOODS_PURCHASE_") || bill.mainBillId || bill.reversalOfId || bill.returnOfBillId) {
     throw new HttpError(400, "An assessment must be linked to a main goods bill (local or import).", "importBillId");
   }
   const [reversal] = await tx.select({ id: S.purchaseBill.id }).from(S.purchaseBill).where(and(eq(S.purchaseBill.reversalOfId, bill.id), eq(S.purchaseBill.isPosted, true))).limit(1);
@@ -257,7 +257,7 @@ export async function listImportAssessments(filter: { companyId: number; branchI
 export async function eligibleImportBills(filter: { companyId: number; branchId: number; fiscalYear: string }) {
   const rows = await db.select({ id: S.purchaseBill.id, invoiceNumber: S.purchaseBill.invoiceNumber, invoiceDate: S.purchaseBill.invoiceDate, basicAmount: S.purchaseBill.basicAmount, invoiceType: S.purchaseBill.invoiceType })
     .from(S.purchaseBill).where(and(eq(S.purchaseBill.companyId, filter.companyId), eq(S.purchaseBill.branchId, filter.branchId), eq(S.purchaseBill.fiscalYear, filter.fiscalYear),
-      eq(S.purchaseBill.isPosted, true), sql`${S.purchaseBill.purchaseType} IN ('GOODS_PURCHASE_OTHERS','GOODS_PURCHASE_CAPITAL')`, sql`${S.purchaseBill.mainBillId} IS NULL`, sql`${S.purchaseBill.reversalOfId} IS NULL`,
+      eq(S.purchaseBill.isPosted, true), sql`${S.purchaseBill.purchaseType} IN ('GOODS_PURCHASE_OTHERS','GOODS_PURCHASE_CAPITAL')`, sql`${S.purchaseBill.mainBillId} IS NULL`, sql`${S.purchaseBill.reversalOfId} IS NULL`, sql`${S.purchaseBill.returnOfBillId} IS NULL`,
       sql`NOT EXISTS (SELECT 1 FROM "PurchaseBill" r WHERE r."reversalOfId" = "PurchaseBill"."id" AND r."isPosted")`))
     .orderBy(desc(S.purchaseBill.invoiceDate), desc(S.purchaseBill.id));
   const result = [];
@@ -388,6 +388,11 @@ export async function applyImportAssessment(id: number, companyId: number, actor
     const typed = await tx.select({ assessmentTermId: S.purchaseImportAssessmentAllocation.assessmentTermId, purchaseBillLineId: S.purchaseImportAssessmentAllocation.purchaseBillLineId, allocatedAmount: S.purchaseImportAssessmentAllocation.allocatedAmount })
       .from(S.purchaseImportAssessmentAllocation).where(eq(S.purchaseImportAssessmentAllocation.assessmentId, id));
     const calc = await calculate(tx, bill.id, terms, manualFromRows(typed));
+    // The same charge must not be capitalised twice: refuse a stock-value charge that the goods bill already carries through its own distributing terms.
+    // Not blocked (an assessment may legitimately sit beside an additional bill), but said out loud: the same charge on both is easy to count twice.
+    const carried = await billTermCapitalisations(tx, bill.id);
+    const sameCharge = terms.filter((t) => t.capitalizable && carried.has(t.termId) && calc.result.termResults.get(t.id)!.finalAmount !== ZERO)
+      .map((t) => `Charge ${t.code} (${t.name}) is also added to the stock value on bill ${carried.get(t.termId)}. Check that it is not counted twice.`);
     for (const t of terms) {
       const difference = calc.result.manualDifference.get(t.id);
       if (difference !== undefined && difference !== ZERO) {
@@ -434,8 +439,9 @@ export async function applyImportAssessment(id: number, companyId: number, actor
       cifValue: calc.preview.cifValue, invoicedCapitalizedCosts: calc.preview.invoicedCapitalizedCosts, assessedNet: calc.preview.assessedNet, capitalizedAssessments: calc.preview.capitalizedAssessments,
       totalLandedValue: calc.preview.totalLandedValue, updatedAt: new Date() }).where(eq(S.purchaseImportAssessment.id, id));
     const targetLines = await tx.select({ id: S.purchaseBillLine.id }).from(S.purchaseBillLine).where(eq(S.purchaseBillLine.purchaseBillId, bill.id));
-    await recomputeLanded(tx, targetLines.map((l) => l.id));
-    return { id, assessmentNumber: doc.assessmentNumber, journalVoucherId: voucherId, voucherNumber: voucherId ? voucherNumberFor(doc) : null };
+    const revaluation = await revalueWithImpact(tx, targetLines.map((l) => l.id));
+    const warnings = [...sameCharge, ...revaluation.filter((r) => Number(r.soldQty) > 0).map((r) => `Line ${r.lineNumber}: ${r.addedCost} of added cost, about ${r.costOnSoldStock} of it on ${r.soldQty} already sold. Stock value is raised by the full amount; consider moving the sold share to cost of goods sold.`)];
+    return { id, assessmentNumber: doc.assessmentNumber, journalVoucherId: voucherId, voucherNumber: voucherId ? voucherNumberFor(doc) : null, warnings, revaluation };
   });
 }
 

@@ -46,7 +46,7 @@ export async function propagateTermLedger(tx: Tx, companyId: number, kind: TermK
   const termTbl = kind === "PURCHASE" ? "PurchaseDocumentTerm" : "SalesDocumentTerm";
   const type = kind === "PURCHASE" ? "PURCHASE_BILL" : "SALES_INVOICE";
   const rows = (await tx.execute(sql`
-    select t.id as "termRowId", t.nature, t."finalAmount" as amount, b.id as "billId", b."invoiceNumber" as "number", b."isPosted", b."reversalOfId" is not null as reversal, b."journalVoucherId" as jv
+    select t.id as "termRowId", t.nature, t."finalAmount" as amount, b.id as "billId", b."invoiceNumber" as "number", b."isPosted", (b."reversalOfId" is not null or ${kind === "PURCHASE" ? sql`b."returnOfBillId" is not null` : sql`false`}) as reversal, b."journalVoucherId" as jv
       from ${sql.identifier(termTbl)} t
       join ${sql.identifier(bill)} b on b.id = t."documentId" and t."documentType" = ${type}
      where b."companyId" = ${companyId} and t."termId" = ${termId} and t."generalLedgerId" = ${oldLedger}

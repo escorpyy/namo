@@ -148,7 +148,7 @@ const BILL_HEAD = {
   ...HEAD, invoiceNumber: "str", invoiceDate: "date", invoiceType: ["LOCAL", "IMPORT"],
   purchaseType: ["GOODS_PURCHASE_OTHERS", "GOODS_PURCHASE_CAPITAL", "SERVICE_PURCHASE_OTHERS", "SERVICE_PURCHASE_CAPITAL"],
   vendorInvoiceNo: "str", vendorInvoiceDate: "date", purchaseChallanId: "int", purchaseOrderId: "int", mainBillId: "int", importCostForBillId: "int",
-  importCostAllocationBasis: ["VALUE", "QUANTITY"], importCostTreatment: ["CIF", "LANDED_ONLY"], dueDays: "int", dueDate: "date",
+  importCostAllocationBasis: ["VALUE", "QUANTITY"], importCostTreatment: ["CIF", "LANDED_ONLY"], dueDays: "int", dueDate: "date", tdsApplicable: "bool",
 } as const satisfies Record<string, Kind>;
 // Additional bills are retired. Customs, excise and similar charges are recorded with a cost assessment, and an agent's or freight company's
 // invoice is a service bill linked to the goods bill (importCostForBillId). The service layer can still post and reverse any that already exist.
@@ -194,6 +194,21 @@ purchaseRouter.post("/bills/:id/post", wrap(async (req, res) => {
   const id = idOf(req), companyId = companyOf(req); await owned("bill", id, companyId);
   const result = await P.postPurchaseBill(id, await actorOf(req), { lockOverride: lockOverrideOf(req) });
   res.json({ result, document: await P.getPurchaseBill(id, companyId) });
+}));
+// Goods sent back to the vendor from a posted bill (a debit note). It posts at once.
+purchaseRouter.post("/bills/:id/return", wrap(async (req, res) => {
+  const id = idOf(req), companyId = companyOf(req); await owned("bill", id, companyId);
+  const o = pick(req.body ?? {}, { returnDate: "date", reason: "str", debitNoteNo: "str" }, "Return");
+  const lines = rows(req.body?.lines, { billLineId: "int", qty: "num" }, "lines", MAX_LINES, "Line") as { billLineId: number; qty: number | string }[];
+  const result = await P.createPurchaseReturn({ companyId, billId: id, returnDate: o.returnDate || undefined, reason: o.reason?.trim() || undefined, debitNoteNo: o.debitNoteNo?.trim() || null, lines }, await actorOf(req), { lockOverride: lockOverrideOf(req) });
+  res.status(201).json({ result, document: await P.getPurchaseBill(id, companyId) });
+}));
+// Correct a posted bill: reverse it and get a draft copy to fix and post.
+purchaseRouter.post("/bills/:id/reverse-and-copy", wrap(async (req, res) => {
+  const id = idOf(req), companyId = companyOf(req); await owned("bill", id, companyId);
+  const o = pick(req.body ?? {}, { date: "date", reason: "str" }, "Reversal");
+  const result = await P.reverseAndCopyPurchaseBill(id, companyId, await actorOf(req), { date: o.date || undefined, reason: o.reason?.trim() || undefined, lockOverride: lockOverrideOf(req) });
+  res.status(201).json({ result, document: await P.getPurchaseBill(result.draft.id, companyId) });
 }));
 purchaseRouter.post("/bills/:id/reverse", wrap(async (req, res) => {
   const id = idOf(req), companyId = companyOf(req); await owned("bill", id, companyId);

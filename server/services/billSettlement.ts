@@ -38,11 +38,13 @@ export async function openDocuments(db_: Reader, o: { companyId: number; kind: S
             (${asOf}::date - coalesce(d."dueDate", d."invoiceDate")) as late
           from "SalesInvoice" d where d."companyId" = ${o.companyId} ${o.generalLedgerId ? sql`and d."customerGLId" = ${o.generalLedgerId}` : sql``} and d."isPosted" and d."reversalOfId" is null
             and not exists (select 1 from "SalesInvoice" r where r."reversalOfId" = d.id and r."isPosted") order by d."invoiceDate", d.id`
-    : sql`select d.id, d."vendorGLId" as gl, d."invoiceNumber" as number, to_char(d."invoiceDate",'YYYY-MM-DD') as date, null::text as "dueDate", d."totalAmount"::text as total,
+    : sql`select d.id, d."vendorGLId" as gl, d."invoiceNumber" as number, to_char(d."invoiceDate",'YYYY-MM-DD') as date, null::text as "dueDate",
+            (d."totalAmount" - coalesce((select sum(rt."totalAmount") from "PurchaseBill" rt where rt."returnOfBillId" = d.id and rt."isPosted"
+                and not exists (select 1 from "PurchaseBill" rr where rr."reversalOfId" = rt.id and rr."isPosted")), 0))::text as total,
             (coalesce((select sum(bs.amount) from "BillSettlement" bs where bs."purchaseBillId" = d.id and ${live("bs")}), 0)
               + coalesce((select sum(aa.amount) from "AdvanceApplication" aa where aa."purchaseBillId" = d.id and ${live("aa")}), 0))::text as settled,
             (${asOf}::date - d."invoiceDate") as late
-          from "PurchaseBill" d where d."companyId" = ${o.companyId} ${o.generalLedgerId ? sql`and d."vendorGLId" = ${o.generalLedgerId}` : sql``} and d."isPosted" and d."reversalOfId" is null
+          from "PurchaseBill" d where d."companyId" = ${o.companyId} ${o.generalLedgerId ? sql`and d."vendorGLId" = ${o.generalLedgerId}` : sql``} and d."isPosted" and d."reversalOfId" is null and d."returnOfBillId" is null
             and not exists (select 1 from "PurchaseBill" r where r."reversalOfId" = d.id and r."isPosted") order by d."invoiceDate", d.id`)) as any[];
   return rows.map((r) => {
     const out = paise(r.total) - paise(r.settled);

@@ -144,6 +144,13 @@ export const purchaseBill = pgTable(
     reversalOfId: integer().references((): AnyPgColumn => purchaseBill.id, {
       onDelete: "set null",
     }),
+    // PURCHASE RETURN (debit note): set = this bill sends goods back from that posted bill. It posts at once, its lines point at the original
+    // lines (returnOfLineId), and it is not a reversal: the original bill stays live for what was not returned.
+    returnOfBillId: integer().references((): AnyPgColumn => purchaseBill.id, {
+      onDelete: "restrict",
+    }),
+    // Tax is to be deducted at source when this bill is paid. Only a marker: the rate and the deduction belong to the TDS app / the payment.
+    tdsApplicable: boolean().notNull().default(false),
 
     // The journal voucher this bill posted. Set together with isPosted; a
     // reversal bill posts its own voucher. Needed to trace and reverse a bill.
@@ -178,6 +185,11 @@ export const purchaseBill = pgTable(
     index("PurchaseBill_agentId_idx").on(t.agentId),
     index("PurchaseBill_mainBillId_idx").on(t.mainBillId),
     index("PurchaseBill_importCostForBillId_idx").on(t.importCostForBillId),
+    index("PurchaseBill_returnOfBillId_idx").on(t.returnOfBillId),
+    check(
+      "PurchaseBill_return_check",
+      sql`${t.returnOfBillId} IS NULL OR (${t.returnOfBillId} <> ${t.id} AND ${t.mainBillId} IS NULL AND ${t.reversalOfId} IS NULL AND ${t.importCostForBillId} IS NULL)`,
+    ),
     index("PurchaseBill_purchaseChallanId_idx").on(t.purchaseChallanId),
     index("PurchaseBill_purchaseOrderId_idx").on(t.purchaseOrderId),
     index("PurchaseBill_purchaseType_idx").on(t.purchaseType),
@@ -251,6 +263,8 @@ export const purchaseBillLine = pgTable(
     // IMPORT bill in a foreign currency: rate and amount as typed, in that currency (rate/basicAmount above are NPR = foreign x exchange rate)
     foreignRate: money(),
     foreignAmount: money(),
+    // PURCHASE RETURN line: the line of the original bill this one sends back (qty and rate follow it).
+    returnOfLineId: integer().references((): AnyPgColumn => purchaseBillLine.id, { onDelete: "restrict" }),
 
     // Landed cost result (item 8). Header terms flagged distributeToLines are
     // split over the lines in PurchaseDocumentTermAllocation; the sums are
@@ -280,6 +294,7 @@ export const purchaseBillLine = pgTable(
     ),
     index("PurchaseBillLine_productId_idx").on(t.productId),
     index("PurchaseBillLine_challanLineId_idx").on(t.challanLineId),
+    index("PurchaseBillLine_returnOfLineId_idx").on(t.returnOfLineId),
     index("PurchaseBillLine_purchaseOrderLineId_idx").on(t.purchaseOrderLineId),
     index("PurchaseBillLine_altUnitId_idx").on(t.altUnitId),
     index("PurchaseBillLine_unitId_idx").on(t.unitId),

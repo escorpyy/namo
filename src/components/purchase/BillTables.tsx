@@ -173,7 +173,8 @@ export function BillHeaderTable(p: BillHeaderProps) {
           <FLabel>Cost treatment</FLabel>
           <FCell><SelectInput name="importCostTreatment" label="Cost treatment" disabled={noCost} value={f.importCostTreatment} onChange={(v) => patch({ importCostTreatment: v as BForm["importCostTreatment"] })}><option value="CIF">CIF input (pre-customs)</option><option value="LANDED_ONLY">Landed only (post-CIF)</option></SelectInput></FCell>
   </Fragment>);
-  const fields = [h1,h2,h3,h4,h5,h6,h7,h8,h9,h10,h11,h12];
+  const h13 = field("h13", "TDS", <label className="flex h-8 items-center gap-2 text-[12px] text-slate-700"><input type="checkbox" data-field="tdsApplicable" disabled={ro} checked={f.tdsApplicable} onChange={(e) => patch({ tdsApplicable: e.target.checked })} /> Deduct at payment</label>, { title: "Tax is to be deducted at source when this bill is paid (the rate and deduction are handled at payment)" });
+  const fields = [h1,h2,h3,h4,h5,h6,h7,h8,h9,h10,h11,h12,h13];
   const serviceFields = service && (
     <>
       <div data-bill-header-field className="min-w-0" style={{ gridColumn: "span 4 / span 4" }}>

@@ -1,3 +1,4 @@
+import { returnedQtyByLine, standingReturnsOf } from "./purchaseReturn";
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../../db";
@@ -19,7 +20,7 @@ const amt = (v: string | null | undefined) => fmt(toMicro(v), 2);
 const like = (s: string) => `%${s.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
 export const ORDER_STATUSES = ["DRAFT", "APPROVED", "CLOSED", "CANCELLED"] as const;
-export const BILL_STATES = ["DRAFT", "POSTED", "REVERSED", "REVERSAL"] as const;
+export const BILL_STATES = ["DRAFT", "POSTED", "REVERSED", "REVERSAL", "RETURN"] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 export type BillState = (typeof BILL_STATES)[number];
 
@@ -182,7 +183,7 @@ export function getPurchaseChallan(id: number, companyId: number) {
 // ---------------------------------------------------------------------------------------------------------------------------
 // BILLS
 // ---------------------------------------------------------------------------------------------------------------------------
-const billState = (isPosted: boolean, reversalOfId: number | null, reversed: boolean): BillState => (reversalOfId ? "REVERSAL" : !isPosted ? "DRAFT" : reversed ? "REVERSED" : "POSTED");
+const billState = (isPosted: boolean, reversalOfId: number | null, reversed: boolean, returnOfBillId: number | null = null): BillState => (reversalOfId ? "REVERSAL" : returnOfBillId ? (reversed ? "REVERSED" : "RETURN") : !isPosted ? "DRAFT" : reversed ? "REVERSED" : "POSTED");
 const reversedSql = (id: unknown) => sql<boolean>`exists (select 1 from "PurchaseBill" r where r."reversalOfId" = ${id} and r."isPosted")`;
 
 export async function listPurchaseBills(f: DocListFilter) {
@@ -196,8 +197,9 @@ export async function listPurchaseBills(f: DocListFilter) {
     const isReversed = reversedSql(B.id);
     where.push(
       f.status === "REVERSAL" ? sql`${B.reversalOfId} is not null`
+      : f.status === "RETURN" ? sql`${B.returnOfBillId} is not null and not ${isReversed}`
       : f.status === "DRAFT" ? sql`${B.reversalOfId} is null and not ${B.isPosted}`
-      : f.status === "POSTED" ? sql`${B.reversalOfId} is null and ${B.isPosted} and not ${isReversed}`
+      : f.status === "POSTED" ? sql`${B.reversalOfId} is null and ${B.returnOfBillId} is null and ${B.isPosted} and not ${isReversed}`
       : sql`${B.reversalOfId} is null and ${B.isPosted} and ${isReversed}`,
     );
   }
@@ -212,13 +214,13 @@ export async function listPurchaseBills(f: DocListFilter) {
         id: B.id, branchId: B.branchId, invoiceNumber: B.invoiceNumber, invoiceDate: B.invoiceDate, fiscalYear: B.fiscalYear, invoiceType: B.invoiceType, purchaseType: B.purchaseType,
         vendorGLId: B.vendorGLId, vendorCode: G.code, vendorName: G.name, vendorInvoiceNo: B.vendorInvoiceNo, dueDate: B.dueDate,
         mainBillId: B.mainBillId, importCostForBillId: B.importCostForBillId, importCostAllocationBasis: B.importCostAllocationBasis,
-        reversalOfId: B.reversalOfId, isPosted: B.isPosted, reversed: reversedSql(B.id),
+        reversalOfId: B.reversalOfId, returnOfBillId: B.returnOfBillId, tdsApplicable: B.tdsApplicable, isPosted: B.isPosted, reversed: reversedSql(B.id),
         basicAmount: B.basicAmount, termAmount: B.termAmount, totalAmount: B.totalAmount,
       })
       .from(B).innerJoin(G, eq(G.id, B.vendorGLId)).where(and(...where)).orderBy(desc(B.invoiceDate), desc(B.id)).limit(capLimit(f.limit));
     return {
       total: n,
-      rows: rows.map(({ reversed, ...r }) => ({ ...r, invoiceDate: iso(r.invoiceDate), dueDate: iso(r.dueDate), basicAmount: amt(r.basicAmount), termAmount: amt(r.termAmount), totalAmount: amt(r.totalAmount), isAdditional: r.mainBillId !== null, state: billState(r.isPosted, r.reversalOfId, reversed) })),
+      rows: rows.map(({ reversed, ...r }) => ({ ...r, invoiceDate: iso(r.invoiceDate), dueDate: iso(r.dueDate), basicAmount: amt(r.basicAmount), termAmount: amt(r.termAmount), totalAmount: amt(r.totalAmount), isAdditional: r.mainBillId !== null, state: billState(r.isPosted, r.reversalOfId, reversed, r.returnOfBillId) })),
     };
   });
 }
@@ -247,6 +249,9 @@ export function getPurchaseBill(id: number, companyId: number) {
       b.purchaseOrderId ? tx.select({ orderNumber: S.purchaseOrder.orderNumber }).from(S.purchaseOrder).where(eq(S.purchaseOrder.id, b.purchaseOrderId)) : Promise.resolve([]),
     ]);
     const reversalOf = b.reversalOfId ? (await tx.select({ id: B.id, invoiceNumber: B.invoiceNumber }).from(B).where(eq(B.id, b.reversalOfId)))[0] ?? null : null;
+    const returnOf = b.returnOfBillId ? (await tx.select({ id: B.id, invoiceNumber: B.invoiceNumber }).from(B).where(eq(B.id, b.returnOfBillId)))[0] ?? null : null;
+    const returnedQty = await returnedQtyByLine(tx, lines.map((l) => l.id));
+    const returns = (await standingReturnsOf(tx, id)).map((r) => ({ id: r.id as number, invoiceNumber: r.invoiceNumber as string, invoiceDate: iso(r.invoiceDate), totalAmount: amt(r.totalAmount) }));
     const [prod, units, locs, terms, clLines, olLines] = await Promise.all([
       productNames(tx, lines.map((l) => l.productId)), unitCodes(tx, lines.flatMap((l) => [l.unitId, l.altUnitId])), locationCodes(tx, lines.map((l) => l.locationId)),
       termRows(tx, "PURCHASE_BILL", id, lines),
@@ -262,9 +267,10 @@ export function getPurchaseBill(id: number, companyId: number) {
       vendorGLId: b.vendorGLId, subLedgerId: b.subLedgerId, agentId: b.agentId, vendorInvoiceNo: b.vendorInvoiceNo, vendorInvoiceDate: iso(b.vendorInvoiceDate),
       purchaseChallanId: b.purchaseChallanId, challanNumber: challan[0]?.challanNumber ?? null, purchaseOrderId: b.purchaseOrderId, orderNumber: order[0]?.orderNumber ?? null,
       mainBillId: b.mainBillId, mainBill: main[0] ?? null, reversalOfId: b.reversalOfId, reversalOf, reversedBy: reversedBy[0] ?? null,
+      returnOfBillId: b.returnOfBillId, returnOf, returns, tdsApplicable: b.tdsApplicable,
       importCostForBillId: b.importCostForBillId, importCostTarget: importTarget[0] ?? null, importCostAllocationBasis: b.importCostAllocationBasis, importCostTreatment: b.importCostTreatment,
       dueDays: b.dueDays, dueDate: iso(b.dueDate), remarks: b.remarks,
-      isPosted: b.isPosted, postedAt: b.postedAt, state: billState(b.isPosted, b.reversalOfId, reversed),
+      isPosted: b.isPosted, postedAt: b.postedAt, state: billState(b.isPosted, b.reversalOfId, reversed, b.returnOfBillId),
       journalVoucher: voucher[0] ? { ...voucher[0], voucherDate: iso(voucher[0].voucherDate) } : null,
       basicAmount: amt(b.basicAmount), termAmount: amt(b.termAmount), totalAmount: amt(b.totalAmount),
       lines: lines.map((l) => ({
@@ -274,6 +280,7 @@ export function getPurchaseBill(id: number, companyId: number) {
         altQty: l.altQty, altUnitId: l.altUnitId, altUnitCode: l.altUnitId ? units.get(l.altUnitId) ?? null : null,
         qty: l.qty, unitId: l.unitId, unitCode: units.get(l.unitId) ?? null, rate: l.rate, basicAmount: amt(l.basicAmount),
         allocatedTermAmount: amt(l.allocatedTermAmount), landedAmount: amt(l.landedAmount), landedRate: l.landedRate,
+        returnedQty: fmt(returnedQty.get(l.id) ?? 0n), returnableQty: fmt(toMicro(l.qty) - (returnedQty.get(l.id) ?? 0n)),
         locationId: l.locationId, locationCode: l.locationId ? locs.get(l.locationId) ?? null : null,
         batchNo: l.batchNo, manufactureDate: iso(l.manufactureDate), expiryDate: iso(l.expiryDate),
       })),
@@ -397,7 +404,7 @@ export async function productPurchaseHistory(companyId: number, productId: numbe
   const rows = await db.select({ billId: B.id, invoiceNumber: B.invoiceNumber, invoiceDate: B.invoiceDate, vendorGLId: B.vendorGLId, qty: L.qty, rate: L.rate })
     .from(L).innerJoin(B, eq(B.id, L.purchaseBillId))
     .where(and(
-      eq(B.companyId, companyId), eq(L.productId, productId), eq(B.isPosted, true), sql`${B.reversalOfId} is null`,
+      eq(B.companyId, companyId), eq(L.productId, productId), eq(B.isPosted, true), sql`${B.reversalOfId} is null`, sql`${B.returnOfBillId} is null`,
       sql`not exists (select 1 from "PurchaseBill" r where r."reversalOfId" = ${B.id})`,
     ))
     .orderBy(desc(B.invoiceDate), desc(B.id)).limit(Math.min(Math.max(Math.trunc(limit) || 5, 1), 20));
