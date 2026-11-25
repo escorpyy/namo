@@ -9,6 +9,7 @@ import { actorOf, companyOf, whole } from "./_input";
 
 export const glSetupRouter = Router();
 const roleKeys = new Set<string>(GL_SETUP_ROLES.map((role) => role.key));
+const roleByKey = new Map(GL_SETUP_ROLES.map((role) => [role.key, role]));
 const boolKeys = [...GL_ENTRY_TYPES.map((entry) => entry.key), "isLocked"] as const;
 
 async function setupOf(companyId: number) {
@@ -28,7 +29,7 @@ async function setupOf(companyId: number) {
       label: definition.label,
       hint: definition.hint,
       generalLedgerId: row?.generalLedgerId ?? null,
-      ...Object.fromEntries(boolKeys.map((key) => [key, row?.[key] ?? definition.defaults[key]])),
+      ...Object.fromEntries(boolKeys.map((key) => [key, key === "isLocked" || definition.visibleControls.includes(key) ? (row?.[key] ?? definition.defaults[key]) : false])),
     };
   });
   return { roles, ledgers };
@@ -53,9 +54,10 @@ glSetupRouter.put("/", wrap(async (req, res) => {
       throw new HttpError(400, `${value.role}: General Ledger must be selected or left blank.`, "generalLedgerId");
     }
     const controls: Record<string, boolean> = {};
+    const definition = roleByKey.get(value.role as GlRoleKey)!;
     for (const key of boolKeys) {
       if (typeof value[key] !== "boolean") throw new HttpError(400, `${value.role}: ${key} must be true or false.`, key);
-      controls[key] = value[key] as boolean;
+      controls[key] = key === "isLocked" || definition.visibleControls.includes(key) ? value[key] as boolean : false;
     }
     return { role: value.role as GlRoleKey, generalLedgerId: value.generalLedgerId as number | null, ...controls };
   });

@@ -1,7 +1,7 @@
 import { useEffect, useState, type MutableRefObject } from "react";
 import { LockKeyhole, RotateCw, Save, ShieldCheck } from "lucide-react";
 import { ApiError, glSetupApi, productGLDefaultsApi, type GLSetupLedger, type GLSetupRole } from "../api";
-import { GL_ENTRY_TYPES } from "../../shared/glSetup";
+import { GL_ENTRY_TYPES, GL_SETUP_ROLES } from "../../shared/glSetup";
 import type { MsgKind, StatusInfo } from "../types";
 
 interface Props {
@@ -127,7 +127,7 @@ export default function GLSetupScreen({ companyId, userId, setStatus, dirtyRef }
       <div className="lg-scroll min-h-0 flex-1 overflow-auto p-3 sm:p-4">
         <div className="mb-3 flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[12px] text-blue-950">
           <ShieldCheck size={16} className="mt-0.5 shrink-0 text-blue-700" />
-          <p>These company defaults do not replace account mappings on individual products. A mapped ledger is allowed only for the entry types checked below; an unmapped ledger keeps the existing behavior.</p>
+          <p>These company defaults do not replace account mappings on individual products. Only applicable posting permissions are shown for each role; an unmapped ledger keeps the existing behavior.</p>
         </div>
 
         {pendingRoles.length > 0 && <section role="dialog" aria-modal="true" aria-labelledby="product-default-choice" className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
@@ -163,14 +163,17 @@ export default function GLSetupScreen({ companyId, userId, setStatus, dirtyRef }
                   </label>
 
                   <fieldset className="mt-3 border-t border-slate-100 pt-2">
-                    <legend className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Entry controls</legend>
+                    <legend className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Posting permissions</legend>
                     <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3">
-                      {GL_ENTRY_TYPES.map((entry) => (
+                      {(GL_SETUP_ROLES.find((definition) => definition.key === row.role)?.visibleControls ?? GL_ENTRY_TYPES.map((entry) => entry.key)).map((key) => {
+                        const entry = GL_ENTRY_TYPES.find((definition) => definition.key === key)!;
+                        return (
                         <label key={entry.key} className={labelClass}>
                           <input type="checkbox" className={checkboxClass} checked={row[entry.key]} onChange={(event) => update(row.role, { [entry.key]: event.target.checked })} />
                           {entry.label}
                         </label>
-                      ))}
+                        );
+                      })}
                       <label className={`${labelClass} font-medium text-rose-800`}>
                         <input type="checkbox" className="accent-rose-700" checked={row.isLocked} onChange={(event) => update(row.role, { isLocked: event.target.checked })} />
                         <LockKeyhole size={13} /> Locked

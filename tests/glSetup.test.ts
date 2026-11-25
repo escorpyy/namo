@@ -23,6 +23,8 @@ describe("GL Setup roles and entry controls", () => {
     for (const role of GL_SETUP_ROLES) {
       for (const control of GL_ENTRY_TYPES) expect(typeof role.defaults[control.key]).toBe("boolean");
       expect(role.defaults.isLocked).toBe(false);
+      expect(role.visibleControls.every((key) => GL_ENTRY_TYPES.some((entry) => entry.key === key))).toBe(true);
+      expect(GL_ENTRY_TYPES.filter((entry) => role.defaults[entry.key]).map((entry) => entry.key)).toEqual(role.visibleControls);
     }
   });
 
