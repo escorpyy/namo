@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { PLookups } from "../../api";
-import { blankLine, dateOrderErr, derivedQty, isBlankLine, lineAmount, trimDec, type LineKind, type LineRow, type Product } from "../../lib/purchaseForm";
+import { blankLine, dateOrderErr, derivedQty, isBlankLine, lineAmount, quantityPrecisionErr, trimDec, type LineKind, type LineRow, type Product } from "../../lib/purchaseForm";
 import { toPaise } from "../../lib/money";
 import { fillDownRows } from "../../lib/tableKinds";
 import { useGridRows } from "../table/useGridRows";
@@ -215,13 +215,17 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
             const p = products.get(l.productId);
             const useAlt = !!(l.altQty && l.altUnitId);
             const off = readOnly;
+            const quantityUnitId = l.altQty ? Number(l.altUnitId) : p?.baseUnitId ?? (l.unitId ? Number(l.unitId) : 0);
+            const quantityUnit = lookups.units.find((unit) => unit.id === quantityUnitId);
+            const quantityPrecisionError = quantityPrecisionErr(l.altQty || l.qty, quantityUnit, l.altQty ? "Alternate quantity" : "Quantity");
             const expectedDateOrderError = kind === "order" ? dateOrderErr(minimumExpectedDate ?? "", l.expectedDate, "Expected date cannot be before the order date.") : undefined;
-            const bad = (c: string) => !!errors[`L.${i}.${c}`] || (c === "xd" && !!expectedDateOrderError);
+            const bad = (c: string) => !!errors[`L.${i}.${c}`] || (c === (l.altQty ? "aq" : "q") && !!quantityPrecisionError) || (c === "xd" && !!expectedDateOrderError);
             const cls = (c: string, extra = "") => `fld ${kind === "bill" ? "h-7" : "h-8"} ${extra} ${bad(c) ? "fld-err" : ""} ${off ? "bg-slate-100 text-slate-600" : ""}`;
             const altOpts: ReferenceOption[] = p ? p.alternateUnits.map((a) => ({ value: String(a.unitId), label: unitCode.get(a.unitId) ?? String(a.unitId), code: unitCode.get(a.unitId) ?? String(a.unitId), detail: `Alternate unit · factor ${a.conversionFactor}`, isActive: true })) : [];
             const altUnavailable = !p || altOpts.length === 0;
             const unitOpts: ReferenceOption[] = lookups.units.map((u) => ({ value: String(u.id), label: `${u.code} — ${u.name}`, code: u.code, name: u.name, detail: `${u.decimalPlaces} decimal place${u.decimalPlaces === 1 ? "" : "s"}`, isActive: true }));
             const errMsgs = Object.entries(errors).filter(([k, v]) => k.startsWith(`L.${i}.`) && v).map(([, v]) => v!);
+            if (quantityPrecisionError && !errMsgs.includes(quantityPrecisionError)) errMsgs.push(quantityPrecisionError);
             const qtyShown = useAlt ? derivedQty(l, p) : l.qty;
             return (
               <div key={l.key} data-row={i} className={`border-b border-slate-100 transition-colors ${rowSel === i ? "bg-cobalt-50 ring-2 ring-inset ring-cobalt-700" : errMsgs.length ? "bg-rose-50" : "hover:bg-slate-50/80"}`}

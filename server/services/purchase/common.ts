@@ -56,6 +56,11 @@ export const optDate = (v: string | Date | null | undefined, field: string) => (
 export function assertDateOrder(start: Date | null | undefined, end: Date | null | undefined, message: string, field: string): void {
   if (start && end && end.getTime() < start.getTime()) throw new HttpError(400, message, field);
 }
+export function assertDecimalPlaces(value: unknown, places: number, message: string, field: string): void {
+  if (value === null || value === undefined || String(value).trim() === "") return;
+  const match = /^[+-]?\d+(?:\.(\d+))?$/.exec(String(value).trim());
+  if (match && (match[1]?.length ?? 0) > places) throw new HttpError(400, message, field);
+}
 export const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
 // Today's date in the business time zone (Nepal; APP_TIME_ZONE can change it), not the server's UTC date.
 export const today = () => dateInZone(new Date(), process.env.APP_TIME_ZONE || BUSINESS_TIME_ZONE);

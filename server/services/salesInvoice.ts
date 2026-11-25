@@ -3,7 +3,7 @@ import * as S from "../db/schema";
 import { HttpError } from "../routes/_util";
 import { guardPeriod, type LockOverride } from "./periodLock";
 import { numberForSave, usableSeries } from "./numberSeries";
-import { type Actor, type Opts, addDays, assertBranch, assertDateOrder, inActorTx, inTx, optDate, parseDate, resolveFiscalYear, today } from "./purchase/common";
+import { type Actor, type Opts, addDays, assertBranch, assertDateOrder, assertDecimalPlaces, inActorTx, inTx, optDate, parseDate, resolveFiscalYear, today } from "./purchase/common";
 import { resolveLines, type LineInput } from "./purchase/lines";
 import { fmt, mul, roundTo, toMicro, ZERO } from "./purchase/money";
 import { cleanExport, EXPORT_COLUMNS, NO_EXPORT, type ExportInput } from "./salesExport";
@@ -277,6 +277,7 @@ export async function saveSalesInvoice(input: SaveInput, actor: Actor, opts: Wri
     const ex = invoiceType === "EXPORT" ? cleanExport(input.exportDetail) : { cols: { ...NO_EXPORT }, currency: null, rate: null as bigint | null };
     const lineInputs = input.lines.map((l, i) => {
       if (ex.rate === null) return { ...l, foreignRate: null };
+      assertDecimalPlaces(l.foreignRate, 6, `Line ${i + 1}: foreign rate can have at most 6 decimal places.`, "lines");
       const fr = l.foreignRate === null || l.foreignRate === undefined || String(l.foreignRate).trim() === "" ? null : toMicro(l.foreignRate);
       if (fr === null || fr < ZERO) throw new HttpError(400, `Line ${i + 1}: enter the rate in ${ex.currency}.`, "lines");
       return { ...l, foreignRate: fr, rate: fmt(mul(fr, ex.rate)) };

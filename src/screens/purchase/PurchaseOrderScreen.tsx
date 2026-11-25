@@ -65,7 +65,7 @@ export default function PurchaseOrderEntry(p: PurchaseScreenProps & EntryTabProp
       e.expectedDate = dateErr("Expected date", f.expectedDate);
       if (!e.orderDate && !e.expectedDate) e.expectedDate = dateOrderErr(f.orderDate, f.expectedDate, "Expected date cannot be before the order date.");
       const prods = new Map(lk.products.map((x) => [String(x.id), x]));
-      const lineErrors = validateLines(f.lines, prods, { rate: "optional", tracking: false });
+      const lineErrors = validateLines(f.lines, prods, { rate: "optional", tracking: false, units: new Map(lk.units.map((unit) => [unit.id, unit])) });
       f.lines.forEach((line, i) => {
         const message = dateOrderErr(f.orderDate, line.expectedDate, `Line ${i + 1}: expected date cannot be before the order date.`);
         if (message && !lineErrors[`L.${i}.xd`]) lineErrors[`L.${i}.xd`] = message;

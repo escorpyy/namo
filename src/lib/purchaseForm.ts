@@ -129,7 +129,7 @@ export function termToPayload(t: TermRow, m: Term | undefined) {
 }
 
 // ---- quick checks (the server checks everything again) ----
-export function validateLines(lines: LineRow[], products: Map<string, Product>, opts: { rate: "required" | "optional"; tracking: boolean }): Record<string, string> {
+export function validateLines(lines: LineRow[], products: Map<string, Product>, opts: { rate: "required" | "optional"; tracking: boolean; units?: Map<number, { code: string; decimalPlaces: number }> }): Record<string, string> {
   const e: Record<string, string> = {};
   const live = lines.map((l, i) => ({ l, i })).filter(({ l }) => !isBlankLine(l));
   if (!live.length) { e.lines = "Add at least one line."; return e; }
@@ -142,6 +142,9 @@ export function validateLines(lines: LineRow[], products: Map<string, Product>, 
     const q = effectiveQty(l, p);
     if (!q || !(Number(q) > 0)) set(l.altQty ? "aq" : "q", "quantity must be greater than zero.");
     else if (!parseDec(q)) set("q", "quantity is not a valid number.");
+    const quantityUnitId = l.altQty ? Number(l.altUnitId) : p.baseUnitId ?? (l.unitId ? Number(l.unitId) : 0);
+    const quantityPrecisionError = quantityPrecisionErr(l.altQty || l.qty, opts.units?.get(quantityUnitId), l.altQty ? "Alternate quantity" : "Quantity");
+    if (quantityPrecisionError) set(l.altQty ? "aq" : "q", quantityPrecisionError);
     if (!p.baseUnitId && !l.unitId) set("u", "pick a unit.");
     if (l.rate && !parseDec(l.rate)) set("r", "rate is not a valid number.");
     if (opts.rate === "required" && l.rate === "") set("r", "enter the rate.");
@@ -181,6 +184,14 @@ export const dateErr = (label: string, v: string, required = false) =>
 
 export const dateOrderErr = (start: string, end: string, message: string) =>
   !start || !end || start.startsWith("?") || end.startsWith("?") || !isValidAd(start) || !isValidAd(end) ? undefined : end < start ? message : undefined;
+
+export function quantityPrecisionErr(value: string, unit: { code: string; decimalPlaces: number } | undefined, label: string): string | undefined {
+  if (!value || !unit) return undefined;
+  const fraction = /\.(\d*)$/.exec(value.trim())?.[1] ?? "";
+  return fraction.length > unit.decimalPlaces
+    ? `${label} allows at most ${unit.decimalPlaces} decimal place${unit.decimalPlaces === 1 ? "" : "s"} for ${unit.code}.`
+    : undefined;
+}
 
 // A date (YYYY-MM-DD) some whole days after another, or "" when the start is not a valid date. Used to keep a bill's due date in step with its invoice date and due days.
 export function addDaysIso(iso: string, days: number): string {

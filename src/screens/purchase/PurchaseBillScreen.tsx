@@ -115,7 +115,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
       const live = f.lines.filter((l) => !isBlankLine(l)).length;
       f.lines.forEach((l, i) => { if (!isBlankLine(l) && !l.locationId && lk.products.find((x) => String(x.id) === l.productId)?.type === "STOCK") e[`L.${i}.more`] = `Line ${i + 1}: choose the location (More).`; });
       // location, batch and dates are one "More" cell on a bill line
-      for (const [key, message] of Object.entries(validateLines(f.lines, new Map(lk.products.map((x) => [String(x.id), x])), { rate: "required", tracking: true }))) {
+      for (const [key, message] of Object.entries(validateLines(f.lines, new Map(lk.products.map((x) => [String(x.id), x])), { rate: "required", tracking: true, units: new Map(lk.units.map((unit) => [unit.id, unit])) }))) {
         const more = key.replace(/^(L\.\d+)\.(lc|b|mf|ex)$/, "$1.more");
         if (!e[more]) e[more] = message;
       }

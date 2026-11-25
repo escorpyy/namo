@@ -66,7 +66,7 @@ export default function SalesChallanEntry(p: SalesScreenProps & EntryTabProps<CF
       else if (customer.requiresSubLedger && !f.subLedgerId) e.subLedgerId = `${customer.code} needs a sub ledger.`;
       e.lrDate = dateErr("LR date", f.lrDate);
       const prods = new Map(lk.products.map((x) => [String(x.id), x]));
-      Object.assign(e, validateLines(f.lines, prods, { rate: "optional", tracking: true }));
+      Object.assign(e, validateLines(f.lines, prods, { rate: "optional", tracking: true, units: new Map(lk.units.map((unit) => [unit.id, unit])) }));
       if (!e.lines && f.lines.some((l) => l.productId && prods.get(l.productId)?.type !== "STOCK")) e.lines = "A challan carries stock items only.";
       return e;
     },

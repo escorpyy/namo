@@ -6,7 +6,7 @@ import { HttpError } from "../routes/_util";
 import { numberForSave } from "./numberSeries";
 import { recheckSettlements, settlementsOf, writeSettlements, type SettlementInput } from "./billSettlement";
 import { guardPeriod, type LockOverride } from "./periodLock";
-import { type Actor, type Opts, type Tx, assertBranch, inActorTx, parseDate, resolveFiscalYear, today } from "./purchase/common";
+import { type Actor, type Opts, type Tx, assertBranch, assertDecimalPlaces, inActorTx, parseDate, resolveFiscalYear, today } from "./purchase/common";
 import { ZERO, fmt, toMicro, type Micro } from "./purchase/money";
 import { assertGlEntryAllowed } from "./glEntryControl";
 import { assertMandatory } from "./entryControl";
@@ -98,6 +98,7 @@ const isBlank = (l: JvLineInput) =>
 function toMicroSafe(v: unknown): Micro { return v === null || v === undefined || v === "" ? ZERO : toMicro(v as string | number); }
 
 function amountOf(v: unknown, label: string, field: string): Micro {
+  assertDecimalPlaces(v, 2, `${label} can have at most 2 decimals.`, field);
   const m = toMicroSafe(v);
   if (m < ZERO) throw new HttpError(400, `${label} cannot be negative.`, field);
   if (m % CENT !== ZERO) throw new HttpError(400, `${label} can have at most 2 decimals.`, field);

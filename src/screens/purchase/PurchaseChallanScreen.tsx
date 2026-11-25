@@ -52,7 +52,7 @@ export default function PurchaseChallanEntry(p: PurchaseScreenProps & EntryTabPr
       else if (vendor.requiresSubLedger && !f.subLedgerId) e.subLedgerId = `${vendor.code} needs a sub ledger.`;
       e.vendorChallanDate = dateErr("Vendor challan date", f.vendorChallanDate);
       e.lrDate = dateErr("LR date", f.lrDate);
-      Object.assign(e, validateLines(f.lines, new Map(lk.products.map((x) => [String(x.id), x])), { rate: "optional", tracking: true }));
+      Object.assign(e, validateLines(f.lines, new Map(lk.products.map((x) => [String(x.id), x])), { rate: "optional", tracking: true, units: new Map(lk.units.map((unit) => [unit.id, unit])) }));
       return e;
     },
     editable: (d) => !d.isConfirmed, deletable: (d) => !d.isConfirmed, label: (d) => d.challanNumber,

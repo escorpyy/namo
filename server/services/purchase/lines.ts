@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import * as S from "../../db/schema";
 import { HttpError } from "../../routes/_util";
-import { type Tx } from "./common";
+import { assertDecimalPlaces, type Tx } from "./common";
 import { type Micro, ZERO, mul, roundTo, toMicro } from "./money";
 
 // What a user types on one grid row of an order, challan or bill. Everything else is worked out here.
@@ -84,6 +84,12 @@ export async function resolveLines(tx: Tx, companyId: number, rows: LineInput[],
     if (qty === null) throw new HttpError(400, where("quantity is required."), "lines");
     if (qty < ZERO || (!opts.allowZeroQty && qty === ZERO)) throw new HttpError(400, where("quantity must be greater than zero."), "lines");
     if (!unitId) throw new HttpError(400, where("unit is required."), "lines");
+    const typedQty = altQty === null ? r.qty : r.altQty;
+    const typedUnitId = altQty === null ? unitId : altUnitId;
+    const [unit] = typedUnitId ? await tx.select({ code: S.productUnit.code, decimalPlaces: S.productUnit.decimalPlaces }).from(S.productUnit).where(and(eq(S.productUnit.id, typedUnitId), eq(S.productUnit.companyId, companyId))) : [];
+    if (!unit) throw new HttpError(400, where("unit not found in this company."), "lines");
+    assertDecimalPlaces(typedQty, unit.decimalPlaces, where(`quantity can have at most ${unit.decimalPlaces} decimal place${unit.decimalPlaces === 1 ? "" : "s"} for ${unit.code}.`), "lines");
+    assertDecimalPlaces(r.rate ?? 0, 6, where("rate can have at most 6 decimal places."), "lines");
     const rate = toMicro(r.rate ?? 0);
     if (rate < ZERO) throw new HttpError(400, where("rate cannot be negative."), "lines");
 

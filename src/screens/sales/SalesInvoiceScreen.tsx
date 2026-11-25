@@ -134,7 +134,7 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
       }
       if (f.dueDays && !/^\d{1,4}$/.test(f.dueDays)) e.dueDays = "Due days must be a whole number.";
       const prods = new Map(lk.products.map((x) => [String(x.id), x]));
-      Object.assign(e, validateLines(f.lines, prods, { rate: "required", tracking: false }), validateTerms(f.terms, new Map(lk.terms.map((x) => [String(x.id), x])), f.lines.filter((l) => !isBlankLine(l)).length));
+      Object.assign(e, validateLines(f.lines, prods, { rate: "required", tracking: false, units: new Map(lk.units.map((unit) => [unit.id, unit])) }), validateTerms(f.terms, new Map(lk.terms.map((x) => [String(x.id), x])), f.lines.filter((l) => !isBlankLine(l)).length));
       return e;
     },
     editable: (d) => d.state === "DRAFT", deletable: (d) => d.state === "DRAFT", label: (d) => d.invoiceNumber,

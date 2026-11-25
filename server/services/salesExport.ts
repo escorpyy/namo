@@ -1,5 +1,5 @@
 import { HttpError } from "../routes/_util";
-import { optDate } from "./purchase/common";
+import { assertDecimalPlaces, optDate } from "./purchase/common";
 import { toMicro, fmt } from "./purchase/money";
 
 // The extra header fields of an EXPORT sales invoice (Tax Invoice - Export). All optional. Stored as columns of SalesInvoice so the
@@ -67,6 +67,7 @@ export function cleanExport(input: ExportInput | null | undefined): { cols: Reco
   if (!currency || currency === "NPR") return { cols, currency: currency || null, rate: null };
   if (!/^[A-Z]{3}$/.test(currency)) throw new HttpError(400, "Currency must be a 3-letter code such as USD.", "exportDetail");
   const rateText = String(d.exportExchangeRate ?? "").trim();
+  assertDecimalPlaces(rateText, 6, "Exchange rate can have at most 6 decimal places.", "exportDetail");
   const rate = rateText ? toMicro(rateText) : 0n;
   if (rate <= 0n) throw new HttpError(400, `Enter the exchange rate (NPR per 1 ${currency}, Nepal Rastra Bank rate of the invoice day).`, "exportDetail");
   cols.exportCurrency = currency; cols.exportExchangeRate = fmt(rate);
