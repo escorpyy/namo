@@ -21,7 +21,7 @@ type Draft = {
   allUsers: boolean; allBranches: boolean; userIds: number[]; branchIds: number[];
 };
 const blank = (documentType: string): Draft => ({
-  id: null, documentType, name: "", prefix: "", suffix: "", padding: "4", startNumber: "1", endNumber: "", increment: "1", mode: "AUTOMATIC", assignAt: "DRAFT",
+  id: null, documentType, name: "", prefix: "", suffix: "", padding: "4", startNumber: "1", endNumber: "", increment: "1", mode: "MANUAL", assignAt: "DRAFT",
   resetPerFy: true, perBranch: true, isDefault: false, isActive: true, allUsers: true, allBranches: true, userIds: [], branchIds: [],
 });
 const fromRow = (r: SeriesRow): Draft => ({

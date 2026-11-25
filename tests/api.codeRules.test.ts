@@ -32,9 +32,9 @@ describe.skipIf(!DB_READY)("Code numbering (API)", () => {
     expect(r.status).toBe(200);
     expect(r.body.map((x: any) => x.key)).toEqual(CODE_SPECS.map((s) => s.key));
     const party = r.body.find((x: any) => x.key === "party");
-    expect(party).toMatchObject({ mode: "SUGGESTED", template: "{NAME2}{TYPE}{SEQ:3}", isDefault: true, usesType: true, usesName: true });
-    expect(party.example).toMatch(/^[A-Z0-9]{2}[A-Z]001$/);
-    expect(r.body.find((x: any) => x.key === "areas")).toMatchObject({ mode: "MANUAL" });
+    expect(party).toMatchObject({ mode: "SUGGESTED", template: "PA{SEQ:3}", isDefault: true, usesType: true, usesName: true });
+    expect(party.example).toBe("PA001");
+    expect(r.body.find((x: any) => x.key === "areas")).toMatchObject({ mode: "SUGGESTED", template: "AR{SEQ:3}" });
   });
 
   it("refuses a bad template, an unknown master and a bad mode", async () => {
@@ -53,7 +53,7 @@ describe.skipIf(!DB_READY)("Code numbering (API)", () => {
 
     expect(await suggest("product-sub-groups", {}).then((r) => r.body)).toMatchObject({ code: null, reason: expect.stringMatching(/Choose the Product Group/) });
 
-    // product sub-groups default to {PARENT}{SEQ:2}; make it 3 digits like the products
+    // Product sub-groups use the same two-letter + three-digit policy as every other master.
     expect((await save("product-sub-groups", { mode: "SUGGESTED", template: "{PARENT}{SEQ:3}" })).status).toBe(200);
     const first = await suggest("product-sub-groups", { parentId: g.body.id });
     expect(first.body).toEqual({ mode: "SUGGESTED", code: `${group}001` });
@@ -66,17 +66,12 @@ describe.skipIf(!DB_READY)("Code numbering (API)", () => {
     expect((await suggest("product-sub-groups", { parentId: g.body.id })).body.code).toBe(`${group}008`);
   });
 
-  it("a name + type rule keeps a separate count for each prefix", async () => {
-    const a = await suggest("party", { name: `${tag}Traders`, type: "VENDOR" });
-    const b = await suggest("party", { name: `${tag}Traders`, type: "CUSTOMER" });
-    expect(a.body.code).toMatch(new RegExp(`^${tag.slice(0, 2)}V\\d{3,}$`));
-    expect(b.body.code).toMatch(new RegExp(`^${tag.slice(0, 2)}C\\d{3,}$`));
-    expect((await suggest("party", { name: "", type: "VENDOR" })).body).toMatchObject({ code: null, reason: expect.stringMatching(/name/) });
-    expect((await suggest("party", { name: "Ramesh" })).body).toMatchObject({ code: null, reason: expect.stringMatching(/type/) });
+  it("party defaults use the fixed PA prefix and three-digit sequence", async () => {
+    expect((await suggest("party", { name: `${tag}Traders`, type: "VENDOR" })).body).toMatchObject({ mode: "SUGGESTED", code: "PA001" });
   });
 
   it("MANUAL gives no suggestion, and a saved rule replaces the default", async () => {
-    expect((await suggest("areas", { name: "North" })).body).toEqual({ mode: "MANUAL", code: null });
+    expect((await suggest("areas", { name: "North" })).body).toEqual({ mode: "SUGGESTED", code: "AR001" });
     expect((await save("areas", { mode: "SUGGESTED", template: "a-{NAME2}{SEQ:2}" })).body).toMatchObject({ mode: "SUGGESTED", template: "A-{NAME2}{SEQ:2}", isDefault: false });
     expect((await suggest("areas", { name: `${tag}North` })).body.code).toBe(`A-${tag.slice(0, 2)}01`);
     expect((await save("areas", { mode: "MANUAL", template: "{NAME2}{SEQ:2}" })).body).toMatchObject({ mode: "MANUAL" });

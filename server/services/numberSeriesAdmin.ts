@@ -56,7 +56,7 @@ export const listSeries = async (companyId: number, o: Opts = {}) => rows((o.tx 
 export async function saveSeries(companyId: number, id: number | null, b: Record<string, unknown>, userId: number | null, o: Opts = {}): Promise<SeriesRow> {
   const dt = text(b.documentType, "documentType");
   if (!documentType(dt)) throw new HttpError(400, "Unknown kind of document.", "documentType");
-  const mode: "AUTOMATIC" | "SUGGESTED" | "MANUAL" = b.mode as any;
+  const mode: "AUTOMATIC" | "SUGGESTED" | "MANUAL" = (b.mode === undefined ? "MANUAL" : b.mode) as any;
   if (mode !== "AUTOMATIC" && mode !== "SUGGESTED" && mode !== "MANUAL") throw new HttpError(400, "Mode must be Automatic, Suggested or Manual.", "mode");
   const assignAt = b.assignAt === "POST" ? "POST" : "DRAFT";
   const v = {

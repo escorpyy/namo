@@ -27,7 +27,7 @@ export const numberSeries = pgTable(
     startNumber: integer().notNull().default(1),
     endNumber: integer(),
     increment: integer().notNull().default(1),
-    mode: varchar({ length: 10 }).notNull().default("AUTOMATIC"),
+    mode: varchar({ length: 10 }).notNull().default("MANUAL"),
     assignAt: varchar({ length: 5 }).notNull().default("DRAFT"),
     resetPerFy: boolean().notNull().default(true),
     perBranch: boolean().notNull().default(true),

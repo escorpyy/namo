@@ -407,6 +407,13 @@
       "when": 1795602774502,
       "tag": "0057_open_silhouette",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1795634710515,
+      "tag": "0058_luxuriant_omega_red",
+      "breakpoints": true
     }
   ]
 }

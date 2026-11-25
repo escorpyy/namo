@@ -37,27 +37,27 @@ export interface CodeSpec {
 
 const PARTY_LETTERS = { CUSTOMER: "C", VENDOR: "V", BOTH: "B", OTHER: "O" };
 const PRODUCT_LETTERS = { STOCK: "S", NON_STOCK: "N", SERVICE: "E", FIXED_ASSET: "F", BUNDLE: "B" };
-const manual = (key: string, label: string, module: string, nameField = "name", extra: Partial<CodeSpec> = {}): CodeSpec =>
-  ({ key, label, module, nameField, defaultMode: "MANUAL", defaultTemplate: "{NAME2}{SEQ:2}", ...extra });
+const fixed = (key: string, label: string, module: string, prefix: string, nameField = "name", extra: Partial<CodeSpec> = {}): CodeSpec =>
+  ({ key, label, module, nameField, defaultMode: "SUGGESTED", defaultTemplate: `${prefix}{SEQ:3}`, ...extra });
 
 export const CODE_SPECS: CodeSpec[] = [
-  manual("account-groups", "Account Group", "Accounts", "description", { defaultTemplate: "{SEQ:2}" }),
-  { key: "account-sub-groups", label: "Account Sub Group", module: "Accounts", parentField: "accountGroupId", parentLabel: "Account Group", parentKey: "account-groups", nameField: "description", defaultMode: "SUGGESTED", defaultTemplate: "{PARENT}{SEQ:2}" },
-  { key: "general-ledger", label: "General Ledger", module: "Accounts", parentField: "accountGroupId", parentLabel: "Account Group", parentKey: "account-groups", nameField: "name", defaultMode: "SUGGESTED", defaultTemplate: "{PARENT}{SEQ:3}" },
-  { key: "sub-ledger", label: "Sub Ledger", module: "Accounts", nameField: "name", defaultMode: "SUGGESTED", defaultTemplate: "{NAME2}{SEQ:3}" },
-  { key: "party", label: "Party (customer / vendor)", module: "Parties", typeField: "glType", typeLetters: PARTY_LETTERS, nameField: "name", defaultMode: "SUGGESTED", defaultTemplate: "{NAME2}{TYPE}{SEQ:3}" },
-  manual("areas", "Area", "Parties"),
-  manual("sub-areas", "Sub Area", "Parties", "name", { parentField: "areaId", parentLabel: "Area", parentKey: "areas", defaultTemplate: "{PARENT}{SEQ:2}" }),
-  manual("agents", "Agent", "Parties"),
-  manual("product-groups", "Product Group", "Products"),
-  { key: "product-sub-groups", label: "Product Sub Group", module: "Products", parentField: "productGroupId", parentLabel: "Product Group", parentKey: "product-groups", nameField: "name", defaultMode: "SUGGESTED", defaultTemplate: "{PARENT}{SEQ:2}" },
-  { key: "products", label: "Product", module: "Products", parentField: "productSubGroupId", parentLabel: "Sub Group", parentKey: "product-sub-groups", typeField: "type", typeLetters: PRODUCT_LETTERS, nameField: "description", defaultMode: "SUGGESTED", defaultTemplate: "{PARENT}{SEQ:3}" },
-  manual("product-units", "Unit", "Products"),
-  manual("stock-categories", "Stock Category", "Products"),
-  manual("locations", "Location", "Products"),
-  manual("narrations", "Narration", "Accounts", "narration"),
-  manual("purchase-terms", "Purchase Billing Term", "Billing"),
-  manual("sales-terms", "Sales Billing Term", "Billing"),
+  fixed("account-groups", "Account Group", "Accounts", "AG", "description"),
+  fixed("account-sub-groups", "Account Sub Group", "Accounts", "AS", "description", { parentField: "accountGroupId", parentLabel: "Account Group", parentKey: "account-groups" }),
+  fixed("general-ledger", "General Ledger", "Accounts", "GL", "name", { parentField: "accountGroupId", parentLabel: "Account Group", parentKey: "account-groups" }),
+  fixed("sub-ledger", "Sub Ledger", "Accounts", "SL"),
+  fixed("party", "Party (customer / vendor)", "Parties", "PA", "name", { typeField: "glType", typeLetters: PARTY_LETTERS }),
+  fixed("areas", "Area", "Parties", "AR"),
+  fixed("sub-areas", "Sub Area", "Parties", "SA", "name", { parentField: "areaId", parentLabel: "Area", parentKey: "areas" }),
+  fixed("agents", "Agent", "Parties", "AT"),
+  fixed("product-groups", "Product Group", "Products", "PG"),
+  fixed("product-sub-groups", "Product Sub Group", "Products", "PS", "name", { parentField: "productGroupId", parentLabel: "Product Group", parentKey: "product-groups" }),
+  fixed("products", "Product", "Products", "PR", "description", { parentField: "productSubGroupId", parentLabel: "Sub Group", parentKey: "product-sub-groups", typeField: "type", typeLetters: PRODUCT_LETTERS }),
+  fixed("product-units", "Unit", "Products", "UN"),
+  fixed("stock-categories", "Stock Category", "Products", "SC"),
+  fixed("locations", "Location", "Products", "LO"),
+  fixed("narrations", "Narration", "Accounts", "NR", "narration"),
+  fixed("purchase-terms", "Purchase Billing Term", "Billing", "PT"),
+  fixed("sales-terms", "Sales Billing Term", "Billing", "ST"),
 ];
 
 export const codeSpec = (key: string) => CODE_SPECS.find((s) => s.key === key);
