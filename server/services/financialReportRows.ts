@@ -24,6 +24,7 @@ export type FinancialLedgerRow = {
   accountSubGroupId: number | null;
   accountSubGroupCode: string | null;
   accountSubGroupName: string | null;
+  isCashOrBank: boolean;
   opening: string;
   debit: string;
   credit: string;
@@ -47,7 +48,7 @@ export async function financialReportRows(tx: Tx | typeof db, q: FinancialRowsQu
   return await tx.execute(sql`
     WITH chosen AS (
       SELECT g.id, g.code, g.name, ag.id AS "accountGroupId", ag.code AS "accountGroupCode", ag.description AS "accountGroupName", ag.type AS "accountType",
-             sg.id AS "accountSubGroupId", sg.code AS "accountSubGroupCode", sg.description AS "accountSubGroupName"
+             sg.id AS "accountSubGroupId", sg.code AS "accountSubGroupCode", sg.description AS "accountSubGroupName", g."isCashOrBank" AS "isCashOrBank"
       FROM "GeneralLedger" g
       JOIN "AccountGroup" ag ON ag.id = g."accountGroupId"
       LEFT JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId"
@@ -76,10 +77,10 @@ export async function financialReportRows(tx: Tx | typeof db, q: FinancialRowsQu
         COALESCE(SUM(tx.cr) FILTER (WHERE tx.d BETWEEN ${q.start}::date AND ${q.end}::date), 0) AS credit
       FROM chosen c LEFT JOIN opening o ON o.gl = c.id LEFT JOIN tx ON tx.gl = c.id
       GROUP BY c.id, c.code, c.name, c."accountGroupId", c."accountGroupCode", c."accountGroupName", c."accountType",
-        c."accountSubGroupId", c."accountSubGroupCode", c."accountSubGroupName", o.net
+        c."accountSubGroupId", c."accountSubGroupCode", c."accountSubGroupName", c."isCashOrBank", o.net
     )
     SELECT id AS "generalLedgerId", code, name, "accountGroupId", "accountGroupCode", "accountGroupName", "accountType",
-      "accountSubGroupId", "accountSubGroupCode", "accountSubGroupName", opening::text, debit::text, credit::text,
+      "accountSubGroupId", "accountSubGroupCode", "accountSubGroupName", "isCashOrBank", opening::text, debit::text, credit::text,
       (opening + debit - credit)::text AS closing
     FROM sums ORDER BY "accountGroupCode", "accountSubGroupCode" NULLS FIRST, code, name
   `) as unknown as FinancialLedgerRow[];

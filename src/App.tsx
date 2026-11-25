@@ -19,6 +19,7 @@ import StockValuationScreen from "./screens/reports/StockValuationScreen";
 import LedgerReportScreen from "./screens/reports/LedgerReportScreen";
 import FinancialStatementScreen from "./screens/reports/FinancialStatementScreen";
 import ChangesInEquityScreen from "./screens/reports/ChangesInEquityScreen";
+import CashFlowScreen from "./screens/reports/CashFlowScreen";
 import NfrsSmeReportingScreen from "./screens/reports/NfrsSmeReportingScreen";
 import SalesInvoiceWorkspace from "./screens/sales/SalesInvoiceWorkspace";
 import SalesChallanWorkspace from "./screens/sales/SalesChallanWorkspace";
@@ -243,6 +244,11 @@ export default function App() {
             fyStart={currentFy?.startDate ?? ""} fyEnd={currentFy?.endDate ?? ""}
             previousFy={previousFy ? { code: previousFy.code, startDate: previousFy.startDate, endDate: previousFy.endDate } : undefined}
             setStatus={setStatus} dirtyRef={dirtyRef} reportFamily={screen.startsWith("nfrs-sme-") ? "NFRS for SMEs" : undefined}
+          />
+        ) : screen === "nfrs-sme-cash-flow" ? (
+          <CashFlowScreen
+            key={`${screen}:${companyId}:${branchId}:${fyId}`} companyName={co.name} companyId={companyId} branchId={branchId} fyCode={currentFy?.code ?? "-"}
+            fyStart={currentFy?.startDate ?? ""} fyEnd={currentFy?.endDate ?? ""} calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef}
           />
         ) : screen === "nfrs-sme-changes-equity" ? (
           <ChangesInEquityScreen

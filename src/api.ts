@@ -451,7 +451,7 @@ export type FinancialReportKind = "trial-balance" | "profit-loss" | "balance-she
 export interface FinancialReportRow {
   generalLedgerId: number; code: string; name: string;
   accountGroupId: number; accountGroupCode: string; accountGroupName: string; accountType: "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE";
-  accountSubGroupId: number | null; accountSubGroupCode: string | null; accountSubGroupName: string | null;
+  accountSubGroupId: number | null; accountSubGroupCode: string | null; accountSubGroupName: string | null; isCashOrBank?: boolean;
   opening: string; debit: string; credit: string; closing: string; net: string; closingDebit: string; closingCredit: string;
 }
 export interface FinancialReportResult {
