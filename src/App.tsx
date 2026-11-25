@@ -18,6 +18,7 @@ import AgeingScreen from "./screens/reports/AgeingScreen";
 import StockValuationScreen from "./screens/reports/StockValuationScreen";
 import LedgerReportScreen from "./screens/reports/LedgerReportScreen";
 import FinancialStatementScreen from "./screens/reports/FinancialStatementScreen";
+import ChangesInEquityScreen from "./screens/reports/ChangesInEquityScreen";
 import NfrsSmeReportingScreen from "./screens/reports/NfrsSmeReportingScreen";
 import SalesInvoiceWorkspace from "./screens/sales/SalesInvoiceWorkspace";
 import SalesChallanWorkspace from "./screens/sales/SalesChallanWorkspace";
@@ -233,12 +234,17 @@ export default function App() {
             calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} onOpenSource={openSource}
           />
         ) : screen === "fs-trial-balance" || screen === "fs-profit-loss" || screen === "fs-balance-sheet" || screen === "nfrs-sme-trial-balance" || screen === "nfrs-sme-profit-loss" || screen === "nfrs-sme-balance-sheet" ? (
-          <FinancialStatementScreen companyName={co.name}
+          <FinancialStatementScreen companyName={co.name} calendar={calendar}
             key={`${screen}:${companyId}:${branchId}:${fyId}`} kind={screen === "fs-trial-balance" || screen === "nfrs-sme-trial-balance" ? "trial-balance" : screen === "fs-profit-loss" || screen === "nfrs-sme-profit-loss" ? "profit-loss" : "balance-sheet"}
             companyId={companyId} branchId={branchId} userId={ctx.user.id} fyCode={currentFy?.code ?? "-"}
             fyStart={currentFy?.startDate ?? ""} fyEnd={currentFy?.endDate ?? ""}
             previousFy={previousFy ? { code: previousFy.code, startDate: previousFy.startDate, endDate: previousFy.endDate } : undefined}
             setStatus={setStatus} dirtyRef={dirtyRef} reportFamily={screen.startsWith("nfrs-sme-") ? "NFRS for SMEs" : undefined}
+          />
+        ) : screen === "nfrs-sme-changes-equity" ? (
+          <ChangesInEquityScreen
+            key={`${screen}:${companyId}:${branchId}:${fyId}`} companyName={co.name} companyId={companyId} branchId={branchId} fyCode={currentFy?.code ?? "-"}
+            fyStart={currentFy?.startDate ?? ""} fyEnd={currentFy?.endDate ?? ""} calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef}
           />
         ) : screen === "nfrs-sme-reporting" ? (
           <NfrsSmeReportingScreen
