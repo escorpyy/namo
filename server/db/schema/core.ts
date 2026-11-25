@@ -1,6 +1,5 @@
 import { sql } from "drizzle-orm";
 import {
-  type AnyPgColumn,
   bigserial,
   boolean,
   date,
@@ -21,7 +20,6 @@ import {
   calendarPreferenceEnum,
   companyRoleEnum,
 } from "./enums";
-import { generalLedger } from "./accounting";
 
 // ============================================================
 // COMPANY — top level of the header switcher:

@@ -4,7 +4,7 @@ import { db } from "./db";
 import * as S from "./db/schema";
 import { masterRouter, type ServerCfg } from "./routes/masterFactory";
 import { HttpError } from "./routes/_util";
-import { assertAgent, assertLedgerGroup, assertSubArea, assertSubGroup } from "./routes/links";
+import { assertAgent, assertLedgerGroup, assertSubArea } from "./routes/links";
 import { partyRouter } from "./routes/party";
 import { productRouter } from "./routes/product";
 

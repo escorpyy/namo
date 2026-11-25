@@ -1,7 +1,7 @@
 import { and, asc, eq, or, sql } from "drizzle-orm";
 import * as S from "../db/schema";
 import { HttpError } from "../routes/_util";
-import { documentType, formatNumber, stepNumber, numbersLeft, type DocumentType, type SeriesFormat, type SeriesMode } from "../../shared/numberSeries";
+import { documentType, formatNumber, stepNumber, numbersLeft, type DocumentType, type SeriesMode } from "../../shared/numberSeries";
 import { nextNumber, type Tx } from "./purchase/common";
 
 // The number series engine: which series a user may use, and the next number of a series.
@@ -18,7 +18,6 @@ export const DOC_TABLE: Record<DocumentType, { table: "PurchaseOrder" | "Purchas
 };
 
 export type SeriesRecord = typeof S.numberSeries.$inferSelect;
-const fmt = (s: SeriesRecord): SeriesFormat => s;
 
 /** the active series of a kind of document that this user may use in this branch, default first */
 export async function usableSeries(tx: Tx, companyId: number, docType: string, userId: number | null, branchId: number | null): Promise<SeriesRecord[]> {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { useOpenRequest, type OpenRequest } from "../../lib/openRequest";
+import { useOpenRequest } from "../../lib/openRequest";
 import { Calculator, Plus, Search } from "lucide-react";
 import { importAssessmentApi, purchaseApi, type PLookups } from "../../api";
 import { useDialog } from "../../components/Dialog";

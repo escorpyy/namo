@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { withInitialPostedChildInsert } from "../../db/audit";
 import * as S from "../../db/schema";
 import { HttpError } from "../../routes/_util";
@@ -7,7 +7,7 @@ import { assertGlEntryAllowed } from "../glEntryControl";
 import { assertStockCovers, recordMovements } from "../stockLedger";
 import { type Actor, type Opts, type Tx, inActorTx, parseDate, resolveFiscalYear, today } from "./common";
 import { type JvRow, type LockOpts, writeVoucher } from "./purchaseBill";
-import { ZERO, fmt, mul, roundTo, toMicro, type Micro } from "./money";
+import { ZERO, fmt, roundTo, toMicro, type Micro } from "./money";
 
 // PURCHASE RETURN (debit note): goods sent back to the vendor from one posted bill, in whole or in part.
 //

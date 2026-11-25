@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db";
 import * as S from "../db/schema";
 import { HttpError } from "../routes/_util";
-import { inActorTx, parseDate, type Actor, type Opts, type Tx } from "./purchase/common";
+import { inActorTx, type Actor, type Opts, type Tx } from "./purchase/common";
 import { financialReportRows } from "./financialReportRows";
 import { saveJournalVoucher, postJournalVoucher, reverseJournalVoucher } from "./journalVoucher";
 import { closingLines } from "./yearEndCloseMath";

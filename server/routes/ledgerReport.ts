@@ -66,8 +66,6 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
   const subOnLine = subLedgerId ? sql`AND l."subLedgerId" = ${subLedgerId}` : sql``;
   const subOnOpening = subLedgerId ? sql`AND o."subLedgerId" = ${subLedgerId}` : sql``;
   const subOnOpeningRows = subLedgerId ? sql`AND ob."subLedgerId" = ${subLedgerId}` : sql``;
-  const fromTs = `${start}`;
-  const toTs = `${end}`;
 
   // Stock ledgers move by themselves with the stock (see stockLedgerAuto); not for a sub-ledger statement.
   const auto = subLedgerId ? [] : await stockAutoRows(db, { companyId, branchId, fiscalYear, start, end });

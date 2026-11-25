@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { PLookups } from "../../api";
-import { blankLine, blankTerm, derivedQty, isBlankLine, isBlankTerm, lineAmount, pickableTerms, trimDec, type LineKind, type LineRow, type Product, type Term, type TermRow } from "../../lib/purchaseForm";
+import { blankLine, derivedQty, isBlankLine, lineAmount, trimDec, type LineKind, type LineRow, type Product } from "../../lib/purchaseForm";
 import { toPaise } from "../../lib/money";
 import { fillDownRows } from "../../lib/tableKinds";
 import { useGridRows } from "../table/useGridRows";
@@ -9,11 +9,10 @@ import { MasterReferencePicker, type ReferenceOption } from "../MasterReferenceP
 import { DateInput } from "../DateInput";
 import { BatchDialog, hasBatch } from "./BatchDialog";
 import { focusStep, money } from "./Bits";
-import type { PreviewTermResult } from "../../../shared/purchase-preview";
 
 type Errs = Record<string, string | undefined>;
 const decOnly = (re: RegExp, set: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => { if (re.test(e.target.value)) set(e.target.value); };
-const QTY = /^\d{0,12}(\.\d{0,6})?$/, RATE = /^\d{0,12}(\.\d{0,6})?$/, INT = /^\d{0,9}$/;
+const QTY = /^\d{0,12}(\.\d{0,6})?$/, RATE = /^\d{0,12}(\.\d{0,6})?$/;
 
 type ColKey = "n" | "p" | "aq" | "au" | "q" | "u" | "r" | "amt" | "terms" | "net" | "more" | "xd" | "lc" | "b" | "mf" | "ex" | "link" | "rm";
 const COL_SIZE: Record<ColKey, string> = {

@@ -9,10 +9,10 @@ import { assertMandatoryTerms, recalcTerms, saveTerms, type TermInput } from "./
 import { assertLinesMatchPurchaseType } from "./billTypes";
 import { landed } from "./landed";
 import { importCostBasis } from "./importCostBasis";
-import { resolveLines, type LineInput, type ResolvedLine } from "./lines";
+import { resolveLines, type LineInput } from "./lines";
 import { ZERO, fmt, mul, roundTo, toMicro, type Micro } from "./money";
 import { recordMovements, reverseMovements } from "../stockLedger";
-import { billedByChallanLine, billedByOrderLine, pending, receivedByOrderLine, withTolerance } from "./quantities";
+import { billedByChallanLine, billedByOrderLine, pending, withTolerance } from "./quantities";
 import { assertGlEntryAllowed } from "../glEntryControl";
 
 // PURCHASE BILL: the vendor's invoice. This is the document that hits the books.
@@ -476,7 +476,7 @@ export function postPurchaseBill(id: number, actor: Actor, opts: Opts & QtyOpts 
       if (assessment) throw new HttpError(409, "Reverse the applied import-cost assessment before posting another linked service invoice.");
     }
 
-    const vendor = await assertVendorLedger(tx, bill.companyId, bill.vendorGLId, bill.subLedgerId, { requireSubWhenFlagged: true });
+    await assertVendorLedger(tx, bill.companyId, bill.vendorGLId, bill.subLedgerId, { requireSubWhenFlagged: true });
 
     if (bill.invoiceType === "IMPORT") {
       const [d] = await tx.select().from(S.purchaseBillImportDetail).where(eq(S.purchaseBillImportDetail.purchaseBillId, id));

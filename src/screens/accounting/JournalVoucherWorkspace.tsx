@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { useOpenRequest, type OpenRequest } from "../../lib/openRequest";
+import { useOpenRequest } from "../../lib/openRequest";
 import { BookOpen, Plus, Search } from "lucide-react";
 import { flushSync } from "react-dom";
 import { journalApi, type JListRow, type JLookups } from "../../api";

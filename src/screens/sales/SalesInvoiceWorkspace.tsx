@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Receipt } from "lucide-react";
 import { salesChallanApi, salesInvoiceApi, type PLookups, type SalesInvoiceRow } from "../../api";
-import { blankLine, lineFromDoc, str } from "../../lib/purchaseForm";
+import { lineFromDoc, str } from "../../lib/purchaseForm";
 import { Pill, money } from "../../components/purchase/Bits";
 import DocWorkspace, { type DocWorkspaceConfig } from "../../components/purchase/DocWorkspace";
 import SalesInvoiceEntry, { STATE_OPTIONS, STATE_TONE, blankSForm, toPLookups, type SForm, type SalesScreenProps } from "./SalesInvoiceScreen";

@@ -5,7 +5,6 @@ import { parseLines, tabsOf, visible, isRequired, cleanLines, type Errors, type 
 import type { Mode } from "../types";
 import { Combobox } from "./Combobox";
 import { MasterReferencePicker } from "./MasterReferencePicker";
-import { MasterList } from "./MasterList";
 import { DateInput } from "./DateInput";
 import { LinesEditor } from "./LinesEditor";
 import { OptBadge } from "./OptBadge";

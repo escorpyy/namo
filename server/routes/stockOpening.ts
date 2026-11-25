@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import * as S from "../db/schema";
 import { HttpError, wrap } from "./_util";

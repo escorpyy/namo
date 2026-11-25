@@ -3,7 +3,6 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import * as S from "../db/schema";
 import * as P from "../services/purchase";
-import type { LockOverride } from "../services/periodLock";
 import { HttpError, wrap } from "./_util";
 import { whole, optWhole, q, companyOf, idOf, lockOverrideOf, actorOf, pick, rows, type Kind } from "./_input";
 

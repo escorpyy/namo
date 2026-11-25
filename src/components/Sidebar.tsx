@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import {
-    BarChart3, BookOpen, BookText, Boxes, Building2, CalendarRange, ChevronDown, ChevronRight,
-    ClipboardList, Database, FileBarChart2, FileText, FolderTree, Hash, KeyRound, Landmark,
-    Layers, LayoutDashboard, LineChart, Map, MapPin, Network, Package, PanelLeftClose,
-    PanelLeftOpen, Receipt, Ruler, Scale, Settings, ShoppingCart, SlidersHorizontal, Tag,
-    TrendingUp, UserCheck, UserCog, UserSquare, Users, Warehouse, Wrench,
+    ChevronDown, ChevronRight,
+    Database, FileBarChart2, FileText, Landmark,
+    LineChart, Package, PanelLeftClose,
+    PanelLeftOpen, Receipt, Settings, SlidersHorizontal, TrendingUp, Wrench,
   } from "lucide-react";
   import { MASTERS } from "../../shared/masters";
 

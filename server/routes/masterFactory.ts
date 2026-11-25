@@ -6,7 +6,7 @@ import { HttpError, idParam, sameCompany, wrap } from "./_util";
 import { actorOf } from "./_input";
 import { inActorTx } from "../services/purchase/common";
 import { activeJobFor, startJob } from "../services/ledgerReassign";
-import type { FieldDef, MasterDef } from "../../shared/masters";
+import type { MasterDef } from "../../shared/masters";
 
 type CountSrc = { table: any; column: string };
 type RefSrc = { table: any; column: string; via: string };

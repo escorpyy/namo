@@ -12,7 +12,7 @@ export const AUDITED_TABLES = [
   "CashBankVoucher", "CashBankVoucherLine", "CompanyLock", "JournalVoucher", "JournalVoucherLine", "OpeningBalance",
   "PurchaseBill", "PurchaseBillImportDetail", "PurchaseBillLine", "PurchaseDocumentTerm", "PurchaseDocumentTermAllocation",
   "PurchaseImportAssessment", "PurchaseImportAssessmentAllocation", "PurchaseImportAssessmentLine", "PurchaseImportAssessmentTerm",
-  "BillSettlement", "AdvanceApplication", "SalesDocumentTerm", "SalesInvoice", "SalesInvoiceLine",
+  "BillSettlement", "AdvanceApplication", "FiscalYearClose", "FiscalYearCloseVoucher", "SalesDocumentTerm", "SalesInvoice", "SalesInvoiceLine",
   // masters that decide where an amount posts (migration 0033)
   "PurchaseTerm", "SalesTerm", "GeneralLedger", "AccountSubGroup", "GeneralLedgerSetup", "Product", "StockDetail", "NonStockDetail", "ServiceDetail", "FixedAssetDetail", "BundleDetail",
 ] as const;

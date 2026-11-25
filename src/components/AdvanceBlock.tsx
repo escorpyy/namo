@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { cashBankApi, ApiError, type SettleKind, type AdvanceApplied, type OpenAdvance } from "../api";
 import { useDialog } from "./Dialog";
 import { groupIN } from "./purchase/Bits";
