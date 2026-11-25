@@ -6,7 +6,7 @@ import { guardPeriod } from "../periodLock";
 import { assertGlEntryAllowed } from "../glEntryControl";
 import { assertStockCovers, recordMovements } from "../stockLedger";
 import { type Actor, type Opts, type Tx, inActorTx, parseDate, resolveFiscalYear, today } from "./common";
-import { type JvRow, type LockOpts, writeVoucher } from "./purchaseBill";
+import { assertVendorReferenceFree, type JvRow, type LockOpts, writeVoucher } from "./purchaseBill";
 import { ZERO, fmt, roundTo, toMicro, type Micro } from "./money";
 
 // PURCHASE RETURN (debit note): goods sent back to the vendor from one posted bill, in whole or in part.
@@ -73,6 +73,8 @@ export function createPurchaseReturn(input: PurchaseReturnInput, actor: Actor, o
     const [reversed] = await tx.select({ id: B.id }).from(B).where(and(eq(B.reversalOfId, orig.id), eq(B.isPosted, true)));
     if (reversed) throw new HttpError(409, "This bill has been reversed.");
     if (!input.lines?.length) throw new HttpError(400, "Choose at least one line to return.", "lines");
+    const debitNoteNo = input.debitNoteNo?.trim() || null;
+    if (debitNoteNo) await assertVendorReferenceFree(tx, { companyId: orig.companyId, vendorGLId: orig.vendorGLId, subLedgerId: orig.subLedgerId, reference: debitNoteNo, excludeId: null, label: "Vendor credit note", field: "debitNoteNo" });
 
     const date = input.returnDate ? parseDate(input.returnDate, "returnDate") : today();
     if (date.getTime() < orig.invoiceDate.getTime()) throw new HttpError(400, "A return cannot be dated before the bill it returns goods from.", "returnDate");
@@ -128,7 +130,7 @@ export function createPurchaseReturn(input: PurchaseReturnInput, actor: Actor, o
       if (!gl) throw new HttpError(409, `Term ${m?.code ?? t.termId} has no ledger, so the return cannot be posted.`);
       rows.push(t.nature === "ADDITIVE" ? { generalLedgerId: gl, debit: ZERO, credit: amount, narration: `${m?.name ?? "Term"} ${narr}` } : { generalLedgerId: gl, debit: amount, credit: ZERO, narration: `${m?.name ?? "Term"} ${narr}` });
     }
-    rows.push({ generalLedgerId: orig.vendorGLId, debit: total, credit: ZERO, narration: `${narr}${input.debitNoteNo ? ` / debit note ${input.debitNoteNo}` : ""}`, agentId: orig.agentId });
+    rows.push({ generalLedgerId: orig.vendorGLId, debit: total, credit: ZERO, narration: `${narr}${debitNoteNo ? ` / debit note ${debitNoteNo}` : ""}`, agentId: orig.agentId });
     // merge same ledger on the same side
     const merged = new Map<string, JvRow>();
     for (const r of rows) { const k = `${r.generalLedgerId}:${r.debit > ZERO ? "D" : "C"}`; const e = merged.get(k); if (e) { e.debit += r.debit; e.credit += r.credit; } else merged.set(k, { ...r }); }
@@ -145,7 +147,7 @@ export function createPurchaseReturn(input: PurchaseReturnInput, actor: Actor, o
     const [rb] = await tx.insert(B).values({
       companyId: orig.companyId, branchId: orig.branchId, invoiceNumber: number, invoiceDate: date, fiscalYear: fy.code, invoiceType: orig.invoiceType, purchaseType: orig.purchaseType,
       vendorGLId: orig.vendorGLId, subLedgerId: orig.subLedgerId, agentId: orig.agentId, returnOfBillId: orig.id, journalVoucherId: voucherId,
-      vendorInvoiceNo: input.debitNoteNo?.trim() || null, dueDays: 0, basicAmount: fmt(basicBack, 2), termAmount: fmt(termNet, 2), totalAmount: fmt(total, 2), tdsApplicable: orig.tdsApplicable,
+      vendorInvoiceNo: debitNoteNo, dueDays: 0, basicAmount: fmt(basicBack, 2), termAmount: fmt(termNet, 2), totalAmount: fmt(total, 2), tdsApplicable: orig.tdsApplicable,
       remarks: `Return of ${orig.invoiceNumber}${input.reason ? `: ${input.reason}` : ""}`.slice(0, 1024),
       isPosted: true, postedAt: new Date(), postedBy: actor.userId, createdBy: actor.userId,
     }).returning({ id: B.id });

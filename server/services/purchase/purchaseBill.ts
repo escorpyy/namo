@@ -190,17 +190,21 @@ const VENDOR_INVOICE_NO_MAX = 30;
 // A bill that still counts: not itself a reversal, and not undone by a posted reversal.
 const liveBill = (alias: string) => sql.raw(`${alias}."reversalOfId" is null and not exists (select 1 from "PurchaseBill" r where r."reversalOfId" = ${alias}.id and r."isPosted")`);
 
-// The same supplier (ledger and sub-ledger) cannot have one invoice number on two live bills. A bill that was posted and reversed frees its number,
-// so the supplier's invoice can be entered again correctly. The lock keeps two people saving the same number at once from both passing.
-async function assertVendorInvoiceFree(tx: Tx, h: { companyId: number; vendorGLId: number; subLedgerId: number | null; vendorInvoiceNo: string; excludeId: number | null }) {
-  const key = h.vendorInvoiceNo.toLowerCase();
+// The same supplier (ledger and sub-ledger) cannot have one external reference on two live bills. A reversed bill frees its number, and the lock
+// keeps two people saving the same reference at once from both passing.
+export async function assertVendorReferenceFree(tx: Tx, h: { companyId: number; vendorGLId: number; subLedgerId: number | null; reference: string; excludeId: number | null; label?: string; field?: string }) {
+  const reference = h.reference.trim();
+  const label = h.label ?? "Vendor invoice";
+  const field = h.field ?? "vendorInvoiceNo";
+  if (reference.length > VENDOR_INVOICE_NO_MAX) throw new HttpError(400, `${label} no. can be at most ${VENDOR_INVOICE_NO_MAX} characters.`, field);
+  const key = reference.toLowerCase();
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`PurchaseBillVendorInvoice:${h.companyId}:${h.vendorGLId}:${key}`}))`);
   const dup = (await tx.execute(sql`
     select b."invoiceNumber" from "PurchaseBill" b
      where b."companyId" = ${h.companyId} and b."vendorGLId" = ${h.vendorGLId} and b."subLedgerId" is not distinct from ${h.subLedgerId}::int
        and lower(b."vendorInvoiceNo") = ${key} and b.id <> ${h.excludeId ?? 0} and ${liveBill("b")}
      limit 1`)) as any[];
-  if (dup[0]) throw new HttpError(409, `Vendor invoice ${h.vendorInvoiceNo} is already entered for this vendor, on bill ${dup[0].invoiceNumber}. Reverse that bill first if it was wrong.`, "vendorInvoiceNo");
+  if (dup[0]) throw new HttpError(409, `${label} ${reference} is already entered for this vendor, on bill ${dup[0].invoiceNumber}. Reverse that bill first if it was wrong.`, field);
 }
 
 // One customs declaration (Pragyapan Patra) belongs to one live bill of the company, otherwise its import VAT could be claimed twice.
@@ -300,7 +304,7 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
     const vendorInvoiceNo = input.vendorInvoiceNo?.trim() || null;
     if (vendorInvoiceNo) {
       if (vendorInvoiceNo.length > VENDOR_INVOICE_NO_MAX) throw new HttpError(400, `Vendor invoice no. can be at most ${VENDOR_INVOICE_NO_MAX} characters.`, "vendorInvoiceNo");
-      await assertVendorInvoiceFree(tx, { companyId: input.companyId, vendorGLId: input.vendorGLId, subLedgerId: input.subLedgerId ?? null, vendorInvoiceNo, excludeId: existing?.id ?? null });
+      await assertVendorReferenceFree(tx, { companyId: input.companyId, vendorGLId: input.vendorGLId, subLedgerId: input.subLedgerId ?? null, reference: vendorInvoiceNo, excludeId: existing?.id ?? null });
     }
     // Import details are cleaned and checked before anything is written.
     const importText: Record<string, string | null> = {};
