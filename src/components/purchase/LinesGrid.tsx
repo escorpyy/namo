@@ -14,7 +14,7 @@ type Errs = Record<string, string | undefined>;
 const decOnly = (re: RegExp, set: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => { if (re.test(e.target.value)) set(e.target.value); };
 const QTY = /^\d{0,12}(\.\d{0,6})?$/, RATE = /^\d{0,12}(\.\d{0,6})?$/;
 
-type ColKey = "n" | "p" | "aq" | "au" | "q" | "u" | "r" | "amt" | "terms" | "net" | "more" | "xd" | "lc" | "b" | "mf" | "ex" | "link" | "rm";
+export type ColKey = "n" | "p" | "aq" | "au" | "q" | "u" | "r" | "amt" | "terms" | "net" | "more" | "xd" | "lc" | "b" | "mf" | "ex" | "link" | "rm";
 const COL_SIZE: Record<ColKey, string> = {
   n: "24px", p: "minmax(150px,1.6fr)", aq: "64px", au: "84px", q: "78px", u: "44px", r: "84px", amt: "100px",
   terms: "92px", net: "104px", more: "190px",
@@ -84,13 +84,15 @@ interface Props {
   fill?: boolean;
   /** bill lines: start with the "More" and "Linked to" columns open when this browser has no saved choice (default: folded) */
   defaultMoreOpen?: boolean;
+  /** Entry Control: columns the company has hidden on this screen */
+  hideCols?: ColKey[];
 }
 
-export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, errors, calendar, clearError, contextKey, lockProducts, minimumExpectedDate, onOpenTerms, termSummary, fill, currency, defaultMoreOpen }: Props) {
+export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, errors, calendar, clearError, contextKey, lockProducts, minimumExpectedDate, onOpenTerms, termSummary, fill, currency, defaultMoreOpen, hideCols }: Props) {
   const unitCode = useMemo(() => new Map(lookups.units.map((u) => [u.id, u.code])), [lookups.units]);
   const productOpts = useMemo<ReferenceOption[]>(() => lookups.products.map((p) => ({ value: String(p.id), label: `${p.code} — ${p.description}`, code: p.code, name: p.description, detail: p.type.replaceAll("_", " "), searchText: `${p.type} ${p.tracksBatch ? "batch" : ""} ${p.tracksExpiry ? "expiry" : ""}`, isActive: p.isActive, badge: p.type === "STOCK" ? undefined : p.type.replace("_", " ").toLowerCase() })), [lookups.products]);
   const locOpts = useMemo<ReferenceOption[]>(() => lookups.locations.map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, isActive: l.isActive })), [lookups.locations]);
-  const hasTerms = (kind === "bill" || kind === "sales") && !!onOpenTerms; // a per-line "Term Amount" cell that opens the terms dialog
+  const hasTerms = (kind === "bill" || kind === "sales") && !!onOpenTerms && !hideCols?.includes("terms"); // a per-line "Term Amount" cell that opens the terms dialog
   const hasMore = kind === "bill" || kind === "sales"; // the "More" cell: location, batch, expiry
   const stockish = kind === "challan" || kind === "bill"; // order and sales lines have no location, batch or expiry columns
   // bill lines: the "More" and "Linked to" columns are folded away until the arrow at the right edge opens them (remembered in this browser)
@@ -99,7 +101,7 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
   // a problem inside a folded column must be visible: open it
   useEffect(() => { if (kind === "bill" && !moreOpen && Object.keys(errors).some((k) => errors[k] && k.endsWith(".more"))) setMoreOpen(true); }, [errors]); // eslint-disable-line react-hooks/exhaustive-deps
   const layout = useMemo(() => {
-    const showAlt = true;
+    const showAlt = !hideCols?.includes("aq");
     let showLoc = false, showBatch = false, showExpiry = false, showLink = false;
     for (const row of lines) {
       const p = products.get(row.productId);
@@ -110,9 +112,9 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
       if (stockish && row.link) showLink = true;
     }
     if (stockish && lines.some((row) => row.link)) showLink = true;
-    const cols = lineColumns(kind, showAlt, showLoc, showBatch, showExpiry, showLink, hasTerms, kind === "sales" || moreOpen);
+    const cols = lineColumns(kind, showAlt, showLoc, showBatch, showExpiry, showLink, hasTerms, kind === "sales" || moreOpen).filter((c) => !hideCols?.includes(c));
     return { cols, showAlt, showLoc, showBatch, showExpiry, showLink, template: cols.map((c) => COL_SIZE[c]).join(" "), heads: cols.map((c) => (currency && (c === "r" || c === "amt") ? `${COL_HEAD[c]} (${currency})` : kind === "bill" && c === "net" ? "Basic Amount" : COL_HEAD[c])) };
-  }, [kind, lines, products, onOpenTerms, currency, moreOpen]);
+  }, [kind, lines, products, onOpenTerms, currency, moreOpen, hideCols]);
 
   const patch = (i: number, p: Partial<LineRow>) => { onChange(lines.map((l, k) => (k === i ? { ...l, ...p } : l))); clearError(...Object.keys(errors).filter((k) => k.startsWith(`L.${i}.`)), "lines"); };
   const pick = (i: number, id: string) => {

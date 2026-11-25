@@ -51,6 +51,9 @@ ENTRY_MODULES.push({
   features: [
     { key: "agent", label: "Salesperson", group: "Header", controls: ["show", "mandatory"] },
     { key: "remarks", label: "Remarks", group: "Header", controls: ["show", "mandatory"] },
+    { key: "lineAlt", label: "Alternate qty and unit (lines)", group: "Lines", controls: ["show"] },
+    { key: "lineTerms", label: "Line terms and net amount (lines)", group: "Lines", controls: ["show"] },
+    { key: "lineMore", label: "Location, batch and expiry (lines)", group: "Lines", controls: ["show"] },
     { key: "creditDays", label: "Due days beyond the customer's credit days", hint: "Checked when the invoice is saved.", group: "Rules", controls: ["rule"], defaults: { rule: "WARN" } },
     { key: "zeroStock", label: "Selling stock that is not on hand", hint: "Checked when the invoice is posted. Ignore lets the stock go negative.", group: "Rules", controls: ["rule"], defaults: { rule: "BLOCK" } },
   ],

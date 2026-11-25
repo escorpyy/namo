@@ -18,7 +18,7 @@ import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import CustomerSide from "./CustomerSide";
 import { ExportPanel, DATE_KEYS, blankExport, exportFromDoc, foreignCurrency, type ExportValues } from "../../components/sales/ExportPanel";
 import { nprRate } from "../../lib/foreignRate";
-import { LinesGrid } from "../../components/purchase/LinesGrid";
+import { LinesGrid, type ColKey } from "../../components/purchase/LinesGrid";
 import { NumberField } from "../../components/purchase/NumberField";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
@@ -285,7 +285,7 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
             {f.invoiceType === "EXPORT" && <ExportPanel value={f.exp} onChange={(exp) => { s.patch({ exp }); s.clearError("exportDetail"); }} readOnly={ro} errors={s.errors} calendar={p.calendar} />}
 
             <section className="lg-card flex min-h-0 flex-1 flex-col">
-              <LinesGrid fill kind="sales" currency={f.invoiceType === "EXPORT" && foreignCurrency(f.exp) ? f.exp.exportCurrency.trim().toUpperCase() : undefined} lines={f.lines} onChange={(lines) => T.updateLines(lines, (c) => s.patch(c))} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
+              <LinesGrid fill kind="sales" hideCols={[...(ec("lineAlt").show ? [] : ["aq", "au"]), ...(ec("lineTerms").show ? [] : ["terms", "net"]), ...(ec("lineMore").show ? [] : ["more"])] as ColKey[]} currency={f.invoiceType === "EXPORT" && foreignCurrency(f.exp) ? f.exp.exportCurrency.trim().toUpperCase() : undefined} lines={f.lines} onChange={(lines) => T.updateLines(lines, (c) => s.patch(c))} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
                 onOpenTerms={(index, continueAfterApply) => T.open({ scope: "line", lineNumber: T.lineNumberAt(index), lineIndex: index, continueAfterApply })} termSummary={T.lineSummary} />
             </section>
             <div className="shrink-0"><RemarksTable value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} companyId={p.companyId} error={s.err("remarks")} /></div>

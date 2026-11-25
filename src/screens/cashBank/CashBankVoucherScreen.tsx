@@ -41,7 +41,7 @@ export const TONE: Record<CbStatus, "slate" | "green" | "red"> = { DRAFT: "slate
 export const STATUS_OPTIONS = [{ value: "DRAFT", label: "Draft" }, { value: "POSTED", label: "Posted" }, { value: "REVERSED", label: "Reversed" }];
 const HINTS = ["Enter: Next field (new line at the end)", "Shift+Enter: Previous", "Ctrl+S: Save draft", "Ctrl+D: Copy cell above", "Shift+Del: Remove line", "F6: Account panel", "F3: New", "F2: Edit"];
 // Line columns: No, Account / Party, Sub-ledger, Receipt, Payment, Narration, remove. Fluid, so the grid fits a 1366px screen without its own scroll bar.
-const TEMPLATE = "40px minmax(220px,1.6fr) minmax(150px,1fr) 124px 124px minmax(160px,1.2fr) 34px";
+const lineTemplate = (showSub: boolean, showNarration: boolean) => ["40px", "minmax(220px,1.6fr)", showSub && "minmax(150px,1fr)", "124px", "124px", showNarration && "minmax(160px,1.2fr)", "34px"].filter(Boolean).join(" ");
 const FILL_FIELDS = ["generalLedgerId", "subLedgerId", "receipt", "payment", "narration"] as const;
 // data-field of a line cell is L.<row>.<col>; the error key of a line is lines.<row>.<account | subLedger | amount>.
 const COL_OF: Record<string, "a" | "s" | "r" | "p" | "n"> = { account: "a", subLedger: "s", amount: "r" };
@@ -189,6 +189,10 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
     clear(`lines.${form!.lines.findIndex((l) => l.key === key)}.amount`);
   };
   const ec = useEntryControl(p.companyId, "CASH_BANK_VOUCHER");
+  // a ledger that needs a party sub-ledger keeps the column on screen whatever the company chose
+  const needsSubColumn = (form?.lines ?? []).some((l) => ledgerById.get(l.generalLedgerId)?.requiresSubLedger);
+  const showSubCol = ec("lineSubLedger").show || needsSubColumn, showNarrCol = ec("lineNarration").show;
+  const TEMPLATE = lineTemplate(showSubCol, showNarrCol);
   const focusField = (name: string, delay = 40) => window.setTimeout(() => document.querySelector<HTMLElement>(`[data-field="${name}"]:not(:disabled)`)?.focus(), delay);
   const addLine = () => { setForm((f) => (f ? { ...f, lines: [...f.lines, blankLine()] } : f)); if (form) focusField(`L.${form.lines.length}.a`); };
   const removeLineAt = (i: number, fromRowMode = false) => {
@@ -391,7 +395,7 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
                 {/* No scroll box of its own: the grid is as tall as its lines and the page scrolls. */}
                 <div data-grid="lines" data-nav="lines-grid" {...gridRows.gridProps} onKeyDown={(e) => { gridRows.handleKey(e); }} aria-label="Voucher entries" className="min-w-[860px] outline-none">
                   <div style={{ gridTemplateColumns: TEMPLATE }} className="xl-head">
-                    <span className="xl-rowhead">No</span><span>Account / Party</span><span>Sub-ledger</span><span className="text-right">Receipt</span><span className="text-right">Payment</span><span>Narration</span><span />
+                    <span className="xl-rowhead">No</span><span>Account / Party</span>{showSubCol && <span>Sub-ledger</span>}<span className="text-right">Receipt</span><span className="text-right">Payment</span>{showNarrCol && <span>Narration</span>}<span />
                   </div>
                   {form.lines.map((l, i) => {
                     const gl = ledgerById.get(l.generalLedgerId);
@@ -411,11 +415,13 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
                           <button type="button" className="xl-rowhead" {...gridRows.rowHeadProps(i)}>{i + 1}</button>
                           <MasterReferencePicker fieldName={`L.${i}.a`} label={`Line ${i + 1} account`} scopeKey="cash-bank-accounts" contextKey={String(p.companyId)} placeholder="Choose account / party…" value={l.generalLedgerId} hasError={!!err(`lines.${i}.account`)} selectedSubtext={l.generalLedgerId ? balanceSubtext(l.generalLedgerId) : undefined}
                             options={accountOptions} disabled={ro} onChange={(v) => { patchLine(l.key, { generalLedgerId: v, subLedgerId: "" }); clear(`lines.${i}.account`, `lines.${i}.subLedger`); }} onCommit={gridRows.afterCombo} />
+                          {showSubCol && <>
                           <MasterReferencePicker fieldName={`L.${i}.s`} label={`Line ${i + 1} sub-ledger`} scopeKey="cash-bank-line-subledgers" contextKey={`${p.companyId}:${l.generalLedgerId || "none"}`} placeholder={!gl ? "—" : needSub ? (subOptions.length ? "Choose sub-ledger…" : "None yet") : subOptions.length ? "None (optional)" : "— not needed —"} required={needSub} value={l.subLedgerId} hasError={!!err(`lines.${i}.subLedger`)} selectedSubtext={l.subLedgerId && gl ? balanceSubtext(gl.id, l.subLedgerId) : undefined}
                             options={subOptions} disabled={ro || !gl || (!needSub && subs.length === 0)} onChange={(v) => { patchLine(l.key, { subLedgerId: v }); clear(`lines.${i}.subLedger`); }} onCommit={gridRows.afterCombo} />
+                          </>}
                           <input data-field={`L.${i}.r`} aria-label={`Line ${i + 1} receipt`} inputMode="decimal" autoComplete="off" disabled={ro} placeholder="0.00" value={l.receipt} onChange={(e) => setAmount(l.key, "receipt", e.target.value)} onFocus={(e) => e.currentTarget.select()} className={`fld min-w-0 text-right font-mono tabular-nums ${err(`lines.${i}.amount`) ? "fld-err" : ""}`} />
                           <input data-field={`L.${i}.p`} aria-label={`Line ${i + 1} payment`} inputMode="decimal" autoComplete="off" disabled={ro} placeholder="0.00" value={l.payment} onChange={(e) => setAmount(l.key, "payment", e.target.value)} onFocus={(e) => e.currentTarget.select()} className={`fld min-w-0 text-right font-mono tabular-nums ${err(`lines.${i}.amount`) ? "fld-err" : ""}`} />
-                          <NarrationInput companyId={p.companyId} data-field={`L.${i}.n`} aria-label={`Line ${i + 1} narration`} disabled={ro} maxLength={MAX_NARRATION} value={l.narration} onText={(v) => patchLine(l.key, { narration: v })} onFocus={(e) => e.currentTarget.select()} className="fld min-w-0" />
+                          {showNarrCol && <NarrationInput companyId={p.companyId} data-field={`L.${i}.n`} aria-label={`Line ${i + 1} narration`} disabled={ro} maxLength={MAX_NARRATION} value={l.narration} onText={(v) => patchLine(l.key, { narration: v })} onFocus={(e) => e.currentTarget.select()} className="fld min-w-0" />}
                           <button type="button" data-nav="remove-line" tabIndex={-1} disabled={ro} onClick={() => removeLineAt(i)} aria-label={`Remove line ${i + 1}`} title="Remove line (Shift+Delete)" className="grid h-8 w-full place-items-center text-slate-400 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-30"><X size={14} /></button>
                         </div>
                         {msg && <p className="px-3 pb-1 pt-0.5 text-[12px] text-rose-700" role="alert">{msg}</p>}
