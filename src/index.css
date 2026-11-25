@@ -173,3 +173,11 @@
   .jv-print .sign { display: flex; justify-content: space-between; margin-top: 60px; }
   .jv-print .sign span { border-top: 1px solid #000; padding-top: 4px; width: 28%; text-align: center; }
 }
+
+/* Financial statement print: body.printing-fs is set only while the statement's Print button runs */
+@media print {
+  body.printing-fs > *:not(.jv-print) { display: block !important; }
+  body.printing-fs * { visibility: hidden; }
+  body.printing-fs .fs-print, body.printing-fs .fs-print * { visibility: visible; }
+  body.printing-fs .fs-print { position: absolute; left: 0; top: 0; width: 100%; border: 0; box-shadow: none; }
+}

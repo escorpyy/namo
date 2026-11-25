@@ -233,7 +233,7 @@ export default function App() {
             calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} onOpenSource={openSource}
           />
         ) : screen === "fs-trial-balance" || screen === "fs-profit-loss" || screen === "fs-balance-sheet" || screen === "nfrs-sme-trial-balance" || screen === "nfrs-sme-profit-loss" || screen === "nfrs-sme-balance-sheet" ? (
-          <FinancialStatementScreen
+          <FinancialStatementScreen companyName={co.name}
             key={`${screen}:${companyId}:${branchId}:${fyId}`} kind={screen === "fs-trial-balance" || screen === "nfrs-sme-trial-balance" ? "trial-balance" : screen === "fs-profit-loss" || screen === "nfrs-sme-profit-loss" ? "profit-loss" : "balance-sheet"}
             companyId={companyId} branchId={branchId} userId={ctx.user.id} fyCode={currentFy?.code ?? "-"}
             fyStart={currentFy?.startDate ?? ""} fyEnd={currentFy?.endDate ?? ""}
