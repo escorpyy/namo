@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type MutableRefObject } from "react";
 import { Printer, RefreshCw } from "lucide-react";
-import { financialReportsApi, type FinancialReportResult, type FinancialReportRow } from "../../api";
+import { financialReportsApi, type FinancialReportResult } from "../../api";
 import { adToBs } from "../../lib/nepaliDate";
 import { signed } from "../../components/reports/HierarchicalStatement";
 import type { StatusInfo } from "../../types";

@@ -8,7 +8,8 @@ import { BUSINESS_TIME_ZONE, dateInZone } from "../../../shared/businessDate";
 // Every service takes an optional `tx`. With none it opens its own transaction (the normal case: all or nothing).
 // With one it joins that transaction through a savepoint, so a caller (or a test) can wrap several calls and roll back.
 export type Tx = Parameters<Parameters<DB["transaction"]>[0]>[0];
-export type Opts = { tx?: Tx };
+// `acknowledge`: the user saw the Entry Control warnings of this request and chose to go on.
+export type Opts = { tx?: Tx; acknowledge?: boolean };
 // A rule the DATABASE refused (check / trigger / foreign key / unique) becomes a readable 409 instead of a raw exception.
 function translate(e: any): never {
   const c = e?.cause ?? e;
@@ -59,7 +60,8 @@ export function assertDateOrder(start: Date | null | undefined, end: Date | null
 export function assertDecimalPlaces(value: unknown, places: number, message: string, field: string): void {
   if (value === null || value === undefined || String(value).trim() === "") return;
   const match = /^[+-]?\d+(?:\.(\d+))?$/.exec(String(value).trim());
-  if (match && (match[1]?.length ?? 0) > places) throw new HttpError(400, message, field);
+  // trailing zeros are not decimals: the server itself hands out "10.000000" and the screen sends it back
+  if (match && (match[1] ?? "").replace(/0+$/, "").length > places) throw new HttpError(400, message, field);
 }
 export const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
 // Today's date in the business time zone (Nepal; APP_TIME_ZONE can change it), not the server's UTC date.

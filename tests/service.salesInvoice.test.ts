@@ -247,6 +247,45 @@ describe.skipIf(!DB_READY)("sales invoice service layer", () => {
     });
   });
 
+  it("Entry Control: Ignore / Warn / Block for stock that is not on hand and for credit days, and a mandatory salesperson", async () => {
+    await run(async (tx, w) => {
+      const tag = uniq();
+      const sub = (await rows(tx, sql`select "productSubGroupId" as id from "Product" where id = ${w.productId}`))[0].id;
+      const id = await ins(tx, "Product", { companyId: w.companyId, code: `EC${tag}`.slice(0, 10), description: "EC", type: "STOCK", productSubGroupId: sub, updatedAt: NOW });
+      await ins(tx, "StockDetail", { productId: id, baseUnitId: w.unitId, salesGLId: w.salesGLId, purchaseGLId: w.purchaseGLId, updatedAt: NOW });
+      const rule = (feature: string, ruleLevel: string) => tx.execute(sql`insert into "EntryControl" ("companyId", module, feature, "ruleLevel", "updatedAt") values (${w.companyId}, 'SALES_INVOICE', ${feature}, ${ruleLevel}, now()) on conflict ("companyId", module, feature) do update set "ruleLevel" = excluded."ruleLevel"`);
+      const none = [{ productId: id, qty: 2, unitId: w.unitId, rate: 100 }]; // no stock at all
+      const stockOf = async () => Number((await rows(tx, sql`select coalesce(sum(qty), 0) as q from "StockMovement" where "productId" = ${id}`))[0].q);
+
+      const d1 = await svc.saveSalesInvoice(draftInput(w, { lines: none }), ACTOR, { tx });
+      await expect(svc.postSalesInvoice(d1.id, ACTOR, { tx })).rejects.toMatchObject({ status: 409, code: "ENTRY_BLOCKED" }); // the default is Block
+      await rule("zeroStock", "WARN");
+      await expect(svc.postSalesInvoice(d1.id, ACTOR, { tx })).rejects.toMatchObject({ status: 409, code: "ENTRY_WARNING" });
+      expect(await stockOf()).toBe(0);
+      await svc.postSalesInvoice(d1.id, ACTOR, { tx, acknowledge: true }); // the user said go on
+      expect(await stockOf()).toBe(-2);
+      await rule("zeroStock", "IGNORE");
+      const d2 = await svc.saveSalesInvoice(draftInput(w, { lines: none }), ACTOR, { tx });
+      await svc.postSalesInvoice(d2.id, ACTOR, { tx });
+      expect(await stockOf()).toBe(-4);
+
+      // credit days: the customer allows 30, the invoice asks 45
+      const partyId = await ins(tx, "Party", { companyId: w.companyId, generalLedgerId: w.customerGLId, updatedAt: NOW });
+      await ins(tx, "CustomerDetail", { partyId, creditDays: 30, updatedAt: NOW });
+      const long = { lines: [{ productId: w.productId, qty: 1, unitId: w.unitId, rate: 100 }], dueDays: 45 };
+      await expect(svc.saveSalesInvoice(draftInput(w, long), ACTOR, { tx })).rejects.toMatchObject({ status: 409, code: "ENTRY_WARNING", field: "dueDays" }); // the default is Warn
+      await svc.saveSalesInvoice(draftInput(w, long), ACTOR, { tx, acknowledge: true });
+      await rule("creditDays", "BLOCK");
+      await expect(svc.saveSalesInvoice(draftInput(w, long), ACTOR, { tx, acknowledge: true })).rejects.toMatchObject({ code: "ENTRY_BLOCKED" }); // Block cannot be acknowledged away
+      await rule("creditDays", "IGNORE");
+      await svc.saveSalesInvoice(draftInput(w, long), ACTOR, { tx });
+
+      // a mandatory salesperson
+      await tx.execute(sql`insert into "EntryControl" ("companyId", module, feature, "isMandatory", "updatedAt") values (${w.companyId}, 'SALES_INVOICE', 'agent', true, now())`);
+      await expect(svc.saveSalesInvoice(draftInput(w, { lines: none, dueDays: 0 }), ACTOR, { tx })).rejects.toMatchObject({ status: 409, field: "agentId" });
+    });
+  });
+
   it("challan: confirming takes the goods out once, and an invoice that bills it takes nothing out again", async () => {
     await run(async (tx, w) => {
       const ch = await import("../server/services/salesChallan");

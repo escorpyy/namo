@@ -19,7 +19,7 @@ export type EntryFeature = {
 export type EntryValues = { show: boolean; edit: boolean; mandatory: boolean; rule: EntryRuleLevel };
 export const ENTRY_DEFAULTS: EntryValues = { show: true, edit: true, mandatory: false, rule: "WARN" };
 
-export type EntryModuleKey = "CASH_BANK_VOUCHER" | "JOURNAL_VOUCHER";
+export type EntryModuleKey = "CASH_BANK_VOUCHER" | "JOURNAL_VOUCHER" | "SALES_INVOICE";
 export type EntryModule = { key: EntryModuleKey; label: string; features: EntryFeature[] };
 
 export const ENTRY_MODULES: EntryModule[] = [
@@ -45,6 +45,16 @@ export const ENTRY_MODULES: EntryModule[] = [
     ],
   },
 ];
+
+ENTRY_MODULES.push({
+  key: "SALES_INVOICE", label: "Sales Invoice",
+  features: [
+    { key: "agent", label: "Salesperson", group: "Header", controls: ["show", "mandatory"] },
+    { key: "remarks", label: "Remarks", group: "Header", controls: ["show", "mandatory"] },
+    { key: "creditDays", label: "Due days beyond the customer's credit days", hint: "Checked when the invoice is saved.", group: "Rules", controls: ["rule"], defaults: { rule: "WARN" } },
+    { key: "zeroStock", label: "Selling stock that is not on hand", hint: "Checked when the invoice is posted. Ignore lets the stock go negative.", group: "Rules", controls: ["rule"], defaults: { rule: "BLOCK" } },
+  ],
+});
 
 export const ENTRY_MODULE_KEYS = ENTRY_MODULES.map((m) => m.key) as EntryModuleKey[];
 export const moduleOf = (key: string) => ENTRY_MODULES.find((m) => m.key === key);

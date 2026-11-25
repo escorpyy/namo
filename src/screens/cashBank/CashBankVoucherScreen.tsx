@@ -84,7 +84,7 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
   const emptyForm = useCallback((l: CbLookups): CbForm => {
     const banks = l.cashBankLedgers.filter((b) => b.isActive);
     return {
-      voucherDate: defaultDate(l.fiscalYears.find((y) => y.code === p.fyCode)), cashBankLedgerId: banks.length === 1 ? String(banks[0].id) : "", cashBankSubLedgerId: "", instrumentType: "", chequeNumber: "", chequeDate: "", payeeReference: "", remarks: "",
+      voucherDate: defaultDate(l.fiscalYears.find((y) => y.code === p.fyCode)), cashBankLedgerId: l.defaultCashBankLedgerId && banks.some((b) => b.id === l.defaultCashBankLedgerId) ? String(l.defaultCashBankLedgerId) : banks.length === 1 ? String(banks[0].id) : "", cashBankSubLedgerId: "", instrumentType: "", chequeNumber: "", chequeDate: "", payeeReference: "", remarks: "",
       lines: [blankLine(), blankLine()], settle: {},
     };
   }, [p.fyCode]);

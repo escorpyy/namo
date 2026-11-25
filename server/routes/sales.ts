@@ -5,7 +5,7 @@ import * as S from "../db/schema";
 import * as SI from "../services/salesInvoice";
 import * as SC from "../services/salesChallan";
 import { HttpError, wrap } from "./_util";
-import { whole, optWhole, q, companyOf, idOf, lockOverrideOf, actorOf, pick, rows, type Kind } from "./_input";
+import { whole, optWhole, q, companyOf, idOf, lockOverrideOf, acknowledgedOf, actorOf, pick, rows, type Kind } from "./_input";
 
 export const salesRouter = Router();
 const MAX_LINES = 500, MAX_TERMS = 100;
@@ -52,12 +52,12 @@ salesRouter.get("/invoices/:id", wrap(async (req, res) => { res.json(await SI.ge
 
 salesRouter.post("/invoices", wrap(async (req, res) => {
   const companyId = whole(req.body?.companyId ?? q(req, "companyId"), "companyId"), branchId = whole(req.body?.branchId, "branchId");
-  const result = await SI.saveSalesInvoice(invoiceInput(req.body, { companyId, branchId }), await actorOf(req), { lockOverride: lockOverrideOf(req) });
+  const result = await SI.saveSalesInvoice(invoiceInput(req.body, { companyId, branchId }), await actorOf(req), { lockOverride: lockOverrideOf(req), acknowledge: acknowledgedOf(req) });
   res.status(201).json({ result, document: await SI.getSalesInvoice(result.id, companyId) });
 }));
 salesRouter.put("/invoices/:id", wrap(async (req, res) => {
   const id = idOf(req), companyId = companyOf(req), invoice = await owned(id, companyId);
-  const result = await SI.saveSalesInvoice(invoiceInput(req.body, { companyId, branchId: invoice.branchId, id }), await actorOf(req), { lockOverride: lockOverrideOf(req) });
+  const result = await SI.saveSalesInvoice(invoiceInput(req.body, { companyId, branchId: invoice.branchId, id }), await actorOf(req), { lockOverride: lockOverrideOf(req), acknowledge: acknowledgedOf(req) });
   res.json({ result, document: await SI.getSalesInvoice(id, companyId) });
 }));
 salesRouter.delete("/invoices/:id", wrap(async (req, res) => {
@@ -68,7 +68,7 @@ salesRouter.delete("/invoices/:id", wrap(async (req, res) => {
 salesRouter.post("/invoices/:id/post", wrap(async (req, res) => {
   const id = idOf(req), companyId = companyOf(req);
   await owned(id, companyId);
-  const result = await SI.postSalesInvoice(id, await actorOf(req), { lockOverride: lockOverrideOf(req) });
+  const result = await SI.postSalesInvoice(id, await actorOf(req), { lockOverride: lockOverrideOf(req), acknowledge: acknowledgedOf(req) });
   res.json({ result, document: await SI.getSalesInvoice(id, companyId) });
 }));
 salesRouter.post("/invoices/:id/reverse", wrap(async (req, res) => {

@@ -55,7 +55,7 @@ export async function stockBalance(tx: Tx | typeof db, q: { companyId: number; b
 
 /** Refuses an issue the stock cannot cover. Stock is counted in the exact bucket (product, location, batch) the line names; a line that
  *  names no location draws on the stock that was received with no location. Lines taking from the same bucket are added up first. */
-export async function assertStockCovers(tx: Tx, h: { companyId: number; branchId: number }, lines: { lineNumber: number; productId: number; qty: string | number; locationId?: number | null; batchNo?: string | null }[]) {
+export async function assertStockCovers(tx: Tx, h: { companyId: number; branchId: number }, lines: { lineNumber: number; productId: number; qty: string | number; locationId?: number | null; batchNo?: string | null }[], onShort?: (message: string) => void) {
   const m = S.stockMovement;
   const stock = new Set((await tx.select({ id: S.product.id }).from(S.product).where(and(inArray(S.product.id, [...new Set(lines.map((l) => l.productId))]), eq(S.product.type, "STOCK")))).map((p) => p.id));
   const need = new Map<string, { first: number; productId: number; locationId: number | null; batchNo: string | null; qty: bigint }>();
@@ -74,7 +74,8 @@ export async function assertStockCovers(tx: Tx, h: { companyId: number; branchId
     const have = toMicro(r.qty);
     if (have < n.qty) {
       const where = [n.locationId === null ? "no location" : `location ${n.locationId}`, n.batchNo ? `batch ${n.batchNo}` : ""].filter(Boolean).join(", ");
-      throw new HttpError(409, `Line ${n.first}: not enough stock (${where}): ${fmt(have)} on hand, ${fmt(n.qty)} needed.`, "lines");
+      const message = `Line ${n.first}: not enough stock (${where}): ${fmt(have)} on hand, ${fmt(n.qty)} needed.`;
+      if (onShort) onShort(message); else throw new HttpError(409, message, "lines");
     }
   }
 }

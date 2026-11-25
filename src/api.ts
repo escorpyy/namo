@@ -28,6 +28,13 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
   } catch {
     /* non-JSON error page */
   }
+  // Entry Control "Warn": the server refuses until the user has seen the warning; ask, then repeat the same request as acknowledged.
+  if (res.status === 409 && data?.code === "ENTRY_WARNING" && typeof init?.body === "string" && !init.body.includes('"acknowledgeWarnings"')) {
+    if (window.confirm(`${data.message}\n\nContinue anyway?`)) {
+      return await req<T>(url, { ...init, body: JSON.stringify({ ...JSON.parse(init.body), acknowledgeWarnings: true }) });
+    }
+    throw new ApiError("Not saved: the warning was not accepted.", 409, data?.field);
+  }
   if (!res.ok) throw new ApiError(data?.message ?? `Request failed (${res.status})`, res.status, data?.field);
   return data as T;
 }
@@ -319,7 +326,7 @@ export const importAssessmentApi = {
 // ---- Cash / Bank Voucher: /api/cash-bank-vouchers ----
 export interface CbLedger { id: number; code: string; name: string; glType: string; requiresSubLedger: boolean; isCashOrBank: boolean; isActive: boolean }
 export interface CbSubLedger { id: number; code: string; name: string; generalLedgerId: number; isActive: boolean }
-export interface CbLookups { cashBankLedgers: CbLedger[]; ledgers: CbLedger[]; subLedgers: CbSubLedger[]; fiscalYears: { id: number; code: string; startDate: string; endDate: string; isActive: boolean; isClosed: boolean; isCurrent: boolean }[] }
+export interface CbLookups { defaultCashBankLedgerId?: number | null; cashBankLedgers: CbLedger[]; ledgers: CbLedger[]; subLedgers: CbSubLedger[]; fiscalYears: { id: number; code: string; startDate: string; endDate: string; isActive: boolean; isClosed: boolean; isCurrent: boolean }[] }
 export type CbStatus = "DRAFT" | "POSTED" | "REVERSED";
 export interface CbEntry { id: number; lineNumber: number; generalLedgerId: number; code: string; name: string; glType: string; subLedgerId: number | null; subLedgerCode: string | null; subLedgerName: string | null; receipt: string; payment: string; narration: string }
 export type SettleKind = "SALES_INVOICE" | "PURCHASE_BILL";

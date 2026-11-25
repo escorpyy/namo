@@ -1,4 +1,5 @@
 import { DateCell, FCell, FLabel, Filler, FormTable, RemarksTable, TextInput } from "../../components/purchase/BillTables";
+import { useEntryControl } from "../../lib/useEntryControl";
 import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import type { OpenRequest } from "../../lib/openRequest";
 import { RotateCcw, Send } from "lucide-react";
@@ -143,6 +144,7 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
 
   const restored = useRef(p.hookSnapRef.current);
   const localDirty = useRef(false);
+  const ec = useEntryControl(p.companyId, "SALES_INVOICE");
   const s = useDocScreen<SForm>(cfg, { companyId: p.companyId, branchId: p.branchId, fyCode: p.fyCode, userId: p.userId, calendar: p.calendar }, {
     setStatus: p.setStatus, dirtyRef: localDirty, externalMessage: p.externalMessage, hints: SALES_HINTS,
     sharedLookups: p.lookups, skipList: true, initialDocId: p.docId, initialForm: p.initialForm, restore: restored.current, snapshotRef: p.hookSnapRef,
@@ -245,11 +247,11 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
                   <FCell><select data-field="invoiceType" aria-label="Invoice Type" disabled={ro} value={f.invoiceType} onChange={(e) => s.patch({ invoiceType: e.target.value as SForm["invoiceType"] })} className="fld"><option value="LOCAL">Local</option><option value="EXPORT">Export</option></select></FCell>
                   <FLabel>Sales Type</FLabel>
                   <FCell error={s.err("salesType")}><select data-field="salesType" aria-label="Sales Type" disabled={ro} value={f.salesType} onChange={(e) => { s.patch({ salesType: e.target.value as SForm["salesType"] }); s.clearError("salesType"); }} className="fld"><option value="GOODS_SALES">Goods sales</option><option value="SERVICE_SALES">Service sales</option></select></FCell>
-                  <FLabel>Salesperson</FLabel>
-                  <FCell error={s.err("agentId")}>
-                    <MasterReferencePicker fieldName="agentId" label="Salesperson" scopeKey="agents" contextKey={String(p.companyId)} placeholder="Salesperson (optional)" value={f.agentId} hasError={!!s.err("agentId")} options={agents} disabled={ro} createMaster={{ key: "agents" }}
+                  {ec("agent").show ? <FLabel>{ec("agent").mandatory ? "Salesperson *" : "Salesperson"}</FLabel> : <FLabel>{""}</FLabel>}
+                  {ec("agent").show ? <FCell error={s.err("agentId")}>
+                    <MasterReferencePicker fieldName="agentId" label="Salesperson" scopeKey="agents" contextKey={String(p.companyId)} placeholder={ec("agent").mandatory ? "Salesperson (required)" : "Salesperson (optional)"} value={f.agentId} hasError={!!s.err("agentId")} options={agents} disabled={ro} createMaster={{ key: "agents" }}
                       onChange={(v) => s.patch({ agentId: v })} onCommit={(el, dir) => focusStep(el, dir)} />
-                  </FCell>
+                  </FCell> : <FCell>{null}</FCell>}
                 </tr>
                 <tr>
                   <FLabel required>Customer</FLabel>

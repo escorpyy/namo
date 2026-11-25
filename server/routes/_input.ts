@@ -22,6 +22,9 @@ export const idOf = (req: Request, name = "id") => whole(req.params[name], name)
 
 // The optional { password, reason } that overrides the company lock date for ONE request (ERP-025). Only the shape is checked here;
 // the service checks the password and the reason against the company's lock.
+/** The request says the user has seen the Entry Control warnings and goes on (see ruleOutcome). */
+export const acknowledgedOf = (req: Request) => req.body?.acknowledgeWarnings === true;
+
 export function lockOverrideOf(req: Request): LockOverride | undefined {
   const o = req.body?.lockOverride;
   if (o === undefined || o === null) return undefined;

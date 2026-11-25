@@ -336,8 +336,10 @@ export async function voucherLookups(companyId: number) {
     db.select({ id: S.fiscalYear.id, code: S.fiscalYear.code, startDate: S.fiscalYear.startDate, endDate: S.fiscalYear.endDate, isActive: S.fiscalYear.isActive, isClosed: S.fiscalYear.isClosed, isCurrent: S.fiscalYear.isCurrent })
       .from(S.fiscalYear).where(eq(S.fiscalYear.companyId, companyId)).orderBy(asc(S.fiscalYear.startDate)),
   ]);
+  // GL Setup "Cash Book": the ledger a new voucher starts with.
+  const [cashBook] = await db.select({ id: S.generalLedgerSetup.generalLedgerId }).from(S.generalLedgerSetup).where(and(eq(S.generalLedgerSetup.companyId, companyId), eq(S.generalLedgerSetup.role, "CASH_BOOK")));
   return {
-    cashBankLedgers: ledgers.filter((l) => l.isCashOrBank), ledgers, subLedgers: subs,
+    cashBankLedgers: ledgers.filter((l) => l.isCashOrBank), ledgers, subLedgers: subs, defaultCashBankLedgerId: cashBook?.id ?? null,
     fiscalYears: years.map((y) => ({ ...y, startDate: day(y.startDate)!, endDate: day(y.endDate)! })),
   };
 }

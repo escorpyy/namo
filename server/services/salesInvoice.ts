@@ -10,6 +10,7 @@ import { cleanExport, EXPORT_COLUMNS, NO_EXPORT, type ExportInput } from "./sale
 import { assertMandatorySalesTerms, recalcSalesTerms, saveSalesTerms, type SalesTermInput } from "./salesInvoiceTerms";
 import { mergeRows, writeVoucher, type JvRow } from "./voucherWriter";
 import { assertGlEntryAllowed } from "./glEntryControl";
+import { assertMandatory, entryControlsOf, ruleOutcome } from "./entryControl";
 import { assertStockCovers, recordMovements, reverseMovements } from "./stockLedger";
 import { assertLinesMatchSalesType, type SalesType } from "./salesTypes";
 import { billedBySalesChallanLine } from "./salesChallan";
@@ -270,6 +271,14 @@ export async function saveSalesInvoice(input: SaveInput, actor: Actor, opts: Wri
     const gl = await assertCustomerLedger(tx, input.companyId, customerGL, subLedgerId);
     const agentId = input.agentId ? Number(input.agentId) : null;
     await assertAgent(tx, input.companyId, agentId);
+    await assertMandatory(tx, input.companyId, "SALES_INVOICE", { agent: agentId, remarks }, { agent: "agentId" });
+    {
+      const [cd] = await tx.select({ creditDays: S.customerDetail.creditDays }).from(S.party).innerJoin(S.customerDetail, eq(S.customerDetail.partyId, S.party.id)).where(eq(S.party.generalLedgerId, customerGL));
+      if (cd?.creditDays != null && dueDays > cd.creditDays) {
+        const rule = (await entryControlsOf(tx, input.companyId)).SALES_INVOICE.creditDays.rule;
+        ruleOutcome(rule, opts.acknowledge, `Due days (${dueDays}) are more than this customer's credit days (${cd.creditDays}).`, "dueDays");
+      }
+    }
     const fy = await resolveFiscalYear(tx, input.companyId, invoiceDate, input.fiscalYear);
     // export block: stored only on an EXPORT invoice. In a foreign currency each line is typed with a foreignRate and priced in NPR.
     const hasExportData = !!input.exportDetail && Object.values(input.exportDetail).some((v) => v !== null && v !== undefined && String(v).trim() !== "");
@@ -355,7 +364,8 @@ export function postSalesInvoice(id: number, actor: Actor, opts: WriteOpts = {})
       if (sd?.tracksBatch && !line.batchNo) throw new HttpError(409, `Line ${line.lineNumber}: this product is batch-tracked; choose the batch it is sold from.`, "lines");
       if (sd?.tracksExpiry && !line.expiryDate) throw new HttpError(409, `Line ${line.lineNumber}: this product expires; enter the expiry date of the batch.`, "lines");
     }
-    await assertStockCovers(tx, { companyId: invoice.companyId, branchId: invoice.branchId }, ownStock.map((l) => l.line));
+    const stockRule = (await entryControlsOf(tx, invoice.companyId)).SALES_INVOICE.zeroStock.rule;
+    await assertStockCovers(tx, { companyId: invoice.companyId, branchId: invoice.branchId }, ownStock.map((l) => l.line), (message) => ruleOutcome(stockRule, opts.acknowledge, message, "lines"));
     const rows: JvRow[] = [];
     for (const { line, code, type, isActive } of lines) {
       if (!isActive) throw new HttpError(409, `Product ${code} is inactive and cannot be posted.`);

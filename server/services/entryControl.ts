@@ -20,6 +20,14 @@ export async function entryControlsOf(tx: Tx | typeof db, companyId: number): Pr
   return out;
 }
 
+/** A broken business rule, as the company's Entry Control wants it handled: Ignore does nothing, Block refuses, Warn refuses until the user
+ *  has acknowledged the warning (the screen asks, then repeats the request with acknowledgeWarnings). */
+export function ruleOutcome(level: "IGNORE" | "WARN" | "BLOCK", acknowledged: boolean | undefined, message: string, field?: string) {
+  if (level === "IGNORE") return;
+  if (level === "WARN" && acknowledged) return;
+  throw new HttpError(409, message, field, level === "WARN" ? "ENTRY_WARNING" : "ENTRY_BLOCKED");
+}
+
 /** What a field is worth to the server: a mandatory, shown feature must hold a value; a hidden one is not asked for. */
 export async function assertMandatory(tx: Tx | typeof db, companyId: number, module: EntryModuleKey, values: Record<string, unknown>, field: Record<string, string> = {}) {
   const controls = (await entryControlsOf(tx, companyId))[module];
