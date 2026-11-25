@@ -53,6 +53,9 @@ export function parseDate(v: string | Date | null | undefined, field = "date"): 
   return d;
 }
 export const optDate = (v: string | Date | null | undefined, field: string) => (v === null || v === undefined || v === "" ? null : parseDate(v, field));
+export function assertDateOrder(start: Date | null | undefined, end: Date | null | undefined, message: string, field: string): void {
+  if (start && end && end.getTime() < start.getTime()) throw new HttpError(400, message, field);
+}
 export const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
 // Today's date in the business time zone (Nepal; APP_TIME_ZONE can change it), not the server's UTC date.
 export const today = () => dateInZone(new Date(), process.env.APP_TIME_ZONE || BUSINESS_TIME_ZONE);

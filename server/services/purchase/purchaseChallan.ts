@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import * as S from "../../db/schema";
 import { HttpError } from "../../routes/_util";
-import { type Actor, type Opts, type Tx, assertBranch, assertVendorLedger, inActorTx, inTx, optDate, parseDate, resolveFiscalYear } from "./common";
+import { type Actor, type Opts, type Tx, assertBranch, assertDateOrder, assertVendorLedger, inActorTx, inTx, optDate, parseDate, resolveFiscalYear } from "./common";
 import { numberForSave } from "../numberSeries";
 import { resolveLines, type LineInput } from "./lines";
 import { ZERO, fmt, toMicro, type Micro } from "./money";
@@ -101,11 +101,14 @@ export function savePurchaseChallan(input: PurchaseChallanInput, actor: Actor, o
 
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i], src = input.lines[i];
+      const manufactureDate = optDate(src.manufactureDate, "manufactureDate");
+      const expiryDate = optDate(src.expiryDate, "expiryDate");
+      assertDateOrder(manufactureDate, expiryDate, `Line ${l.lineNumber}: expiry date cannot be before the manufacture date.`, "expiryDate");
       await tx.insert(S.purchaseChallanLine).values({
         purchaseChallanId: id, lineNumber: l.lineNumber, productId: l.productId, purchaseOrderLineId: src.purchaseOrderLineId ?? null,
         altQty: l.altQty === null ? null : fmt(l.altQty), altUnitId: l.altUnitId, qty: fmt(l.qty), unitId: l.unitId,
         rate: fmt(l.rate), basicAmount: fmt(l.basicAmount, 2), locationId: src.locationId ?? null, batchNo: src.batchNo?.trim() || null,
-        manufactureDate: optDate(src.manufactureDate, "manufactureDate"), expiryDate: optDate(src.expiryDate, "expiryDate"),
+        manufactureDate, expiryDate,
       });
     }
     return { id, challanNumber, fiscalYear: fy.code };

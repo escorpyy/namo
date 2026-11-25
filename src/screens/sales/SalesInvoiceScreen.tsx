@@ -23,7 +23,7 @@ import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoice
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
 import { focusStep } from "../../components/purchase/Bits";
 import {
-  addDaysIso, alwaysShowTerms, blankLine, dateErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, trimDec, termToPayload, validateLines, validateTerms,
+  addDaysIso, alwaysShowTerms, blankLine, dateErr, dateOrderErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, trimDec, termToPayload, validateLines, validateTerms,
   type LineRow, type TermRow,
 } from "../../lib/purchaseForm";
 import type { StatusInfo } from "../../types";
@@ -125,6 +125,7 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
       if (!customer) e.customerGLId = "Pick the customer.";
       else if (customer.requiresSubLedger && !f.subLedgerId) e.subLedgerId = `${customer.code} needs a sub ledger.`;
       e.dueDate = dateErr("Due date", f.dueDate);
+      if (!e.invoiceDate && !e.dueDate) e.dueDate = dateOrderErr(f.invoiceDate, f.dueDate, "Due date cannot be before the invoice date.");
       if (f.invoiceType === "EXPORT") {
         for (const k of DATE_KEYS) { const m = dateErr(k, f.exp[k] ?? ""); if (m) e[`exp.${k}`] = m; }
         const cur = f.exp.exportCurrency.trim();
@@ -153,6 +154,7 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
   const products = useMemo(() => new Map((lk?.products ?? []).map((x) => [String(x.id), x])), [lk]);
   const masters = useMemo(() => new Map((lk?.terms ?? []).map((x) => [String(x.id), x])), [lk]);
   const state = doc?.state as string | undefined;
+  const dueDateOrderError = f ? dateOrderErr(f.invoiceDate, f.dueDate, "Due date cannot be before the invoice date.") : undefined;
   const liveLines = f ? f.lines.filter((l) => !isBlankLine(l)).length : 0;
 
   // live totals from the same exact engine the server uses when it saves
@@ -272,7 +274,7 @@ export default function SalesInvoiceEntry(p: SalesScreenProps & EntryTabProps<SF
                   <FLabel>Due Days</FLabel>
                   <FCell error={s.err("dueDays")}><TextInput name="dueDays" label="Due Days" value={f.dueDays} max={4} readOnly={ro} error={s.err("dueDays")}
                     onChange={(v) => { if (!/^\d{0,4}$/.test(v)) return; const due = v ? addDaysIso(f.invoiceDate, Number(v)) : ""; s.patch(due ? { dueDays: v, dueDate: due } : { dueDays: v }); if (due) s.clearError("dueDate"); }} /></FCell>
-                  <DateCell name="dueDate" label="Due Date" value={f.dueDate} onChange={(v) => { s.patch({ dueDate: v }); s.clearError("dueDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("dueDate")} />
+                  <DateCell name="dueDate" label="Due Date" value={f.dueDate} onChange={(v) => { s.patch({ dueDate: v }); s.clearError("dueDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("dueDate") ?? dueDateOrderError} />
                   <Filler pairs={3} />
                 </tr>
               </FormTable>

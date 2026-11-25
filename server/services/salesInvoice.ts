@@ -3,7 +3,7 @@ import * as S from "../db/schema";
 import { HttpError } from "../routes/_util";
 import { guardPeriod, type LockOverride } from "./periodLock";
 import { numberForSave, usableSeries } from "./numberSeries";
-import { type Actor, type Opts, addDays, assertBranch, inActorTx, inTx, optDate, parseDate, resolveFiscalYear, today } from "./purchase/common";
+import { type Actor, type Opts, addDays, assertBranch, assertDateOrder, inActorTx, inTx, optDate, parseDate, resolveFiscalYear, today } from "./purchase/common";
 import { resolveLines, type LineInput } from "./purchase/lines";
 import { fmt, mul, roundTo, toMicro, ZERO } from "./purchase/money";
 import { cleanExport, EXPORT_COLUMNS, NO_EXPORT, type ExportInput } from "./salesExport";
@@ -248,6 +248,7 @@ export async function saveSalesInvoice(input: SaveInput, actor: Actor, opts: Wri
   const dueDays = input.dueDays === undefined ? 0 : Number(input.dueDays);
   if (!Number.isInteger(dueDays) || dueDays < 0 || dueDays > 3650) throw new HttpError(400, "Due days must be a whole number from 0 to 3650.", "dueDays");
   const dueDate = input.dueDate ? optDate(input.dueDate, "dueDate") : (dueDays ? addDays(invoiceDate, dueDays) : null);
+  assertDateOrder(invoiceDate, dueDate, "Due date cannot be before the invoice date.", "dueDate");
   const invoiceType = input.invoiceType ?? "LOCAL";
   if (invoiceType !== "LOCAL" && invoiceType !== "EXPORT") throw new HttpError(400, "Invoice type must be Local or Export.", "invoiceType");
   const salesType = input.salesType ?? "GOODS_SALES";

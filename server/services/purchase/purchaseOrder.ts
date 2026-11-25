@@ -1,7 +1,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import * as S from "../../db/schema";
 import { HttpError } from "../../routes/_util";
-import { type Actor, type Opts, type Tx, assertBranch, assertVendorLedger, inActorTx, inTx, optDate, parseDate, resolveFiscalYear } from "./common";
+import { type Actor, type Opts, type Tx, assertBranch, assertDateOrder, assertVendorLedger, inActorTx, inTx, optDate, parseDate, resolveFiscalYear } from "./common";
 import { numberForSave } from "../numberSeries";
 import { assertMandatoryTerms, recalcTerms, saveTerms, type TermInput } from "./docTerms";
 import { resolveLines, type LineInput } from "./lines";
@@ -41,8 +41,13 @@ export function savePurchaseOrder(input: PurchaseOrderInput, actor: Actor, opts:
   return inActorTx(actor, opts.tx, async (tx) => {
     const orderDate = parseDate(input.orderDate, "orderDate");
     const expectedDate = optDate(input.expectedDate, "expectedDate");
-    if (expectedDate && expectedDate < orderDate) throw new HttpError(400, "Expected date cannot be before the order date.", "expectedDate");
+    assertDateOrder(orderDate, expectedDate, "Expected date cannot be before the order date.", "expectedDate");
     if (!input.lines?.length) throw new HttpError(400, "An order needs at least one line.", "lines");
+    const lineExpectedDates = input.lines.map((line, i) => {
+      const date = optDate(line.expectedDate, `lines.${i}.expectedDate`);
+      assertDateOrder(orderDate, date, `Line ${i + 1}: expected date cannot be before the order date.`, "lines");
+      return date;
+    });
 
     let existing: Awaited<ReturnType<typeof lockOrder>> | null = null;
     if (input.id) {
@@ -80,7 +85,7 @@ export function savePurchaseOrder(input: PurchaseOrderInput, actor: Actor, opts:
       const [row] = await tx.insert(S.purchaseOrderLine).values({
         purchaseOrderId: id, lineNumber: l.lineNumber, productId: l.productId,
         altQty: l.altQty === null ? null : fmt(l.altQty), altUnitId: l.altUnitId, qty: fmt(l.qty), unitId: l.unitId,
-        rate: fmt(l.rate), basicAmount: fmt(l.basicAmount, 2), expectedDate: optDate(input.lines[i].expectedDate, "line expectedDate"),
+        rate: fmt(l.rate), basicAmount: fmt(l.basicAmount, 2), expectedDate: lineExpectedDates[i],
       }).returning({ id: S.purchaseOrderLine.id });
       lineIdByNumber.set(l.lineNumber, row.id);
     }

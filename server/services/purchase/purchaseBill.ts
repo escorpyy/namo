@@ -3,7 +3,7 @@ import { withInitialPostedChildInsert } from "../../db/audit";
 import * as S from "../../db/schema";
 import { HttpError } from "../../routes/_util";
 import { guardPeriod, type LockOverride } from "../periodLock";
-import { type Actor, type Opts, type Tx, addDays, assertBranch, assertVendorLedger, idList, inActorTx, inTx, optDate, parseDate, resolveFiscalYear, today } from "./common";
+import { type Actor, type Opts, type Tx, addDays, assertBranch, assertDateOrder, assertVendorLedger, idList, inActorTx, inTx, optDate, parseDate, resolveFiscalYear, today } from "./common";
 import { numberForSave } from "../numberSeries";
 import { assertMandatoryTerms, recalcTerms, saveTerms, type TermInput } from "./docTerms";
 import { assertLinesMatchPurchaseType } from "./billTypes";
@@ -296,6 +296,7 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
     const numbered = await numberForSave(tx, { companyId: input.companyId, userId: actor.userId, documentType: "PURCHASE_BILL", seriesId: input.numberSeriesId, typed: input.invoiceNumber, branchId: input.branchId, fiscalYear: fy.code, existing: keepsNumber ? { number: existing!.invoiceNumber, numberSeriesId: existing!.numberSeriesId } : null });
     const invoiceNumber = numbered.number;
     const dueDate = input.dueDate ? parseDate(input.dueDate, "dueDate") : addDays(invoiceDate, dueDays);
+    assertDateOrder(invoiceDate, dueDate, "Due date cannot be before the invoice date.", "dueDate");
     const vendorInvoiceNo = input.vendorInvoiceNo?.trim() || null;
     if (vendorInvoiceNo) {
       if (vendorInvoiceNo.length > VENDOR_INVOICE_NO_MAX) throw new HttpError(400, `Vendor invoice no. can be at most ${VENDOR_INVOICE_NO_MAX} characters.`, "vendorInvoiceNo");
@@ -334,13 +335,16 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
     const lineIdByNumber = new Map<number, number>();
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i], src = input.lines[i];
+      const manufactureDate = optDate(src.manufactureDate, "manufactureDate");
+      const expiryDate = optDate(src.expiryDate, "expiryDate");
+      assertDateOrder(manufactureDate, expiryDate, `Line ${l.lineNumber}: expiry date cannot be before the manufacture date.`, "expiryDate");
       const [row] = await tx.insert(S.purchaseBillLine).values({
         purchaseBillId: id, lineNumber: l.lineNumber, productId: l.productId,
         challanLineId: src.challanLineId ?? null, purchaseOrderLineId: src.purchaseOrderLineId ?? null,
         altQty: l.altQty === null ? null : fmt(l.altQty), altUnitId: l.altUnitId, qty: fmt(l.qty), unitId: l.unitId, rate: fmt(l.rate), basicAmount: fmt(l.basicAmount, 2),
         foreignRate: lineInputs[i].foreignRate === null ? null : fmt(lineInputs[i].foreignRate!), foreignAmount: foreignAmounts[i] === null ? null : fmt(foreignAmounts[i]!),
         locationId: src.locationId ?? null, batchNo: src.batchNo?.trim() || null,
-        manufactureDate: optDate(src.manufactureDate, "manufactureDate"), expiryDate: optDate(src.expiryDate, "expiryDate"),
+        manufactureDate, expiryDate,
       }).returning({ id: S.purchaseBillLine.id });
       lineIdByNumber.set(l.lineNumber, row.id);
     }

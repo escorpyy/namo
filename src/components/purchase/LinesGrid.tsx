@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { PLookups } from "../../api";
-import { blankLine, derivedQty, isBlankLine, lineAmount, trimDec, type LineKind, type LineRow, type Product } from "../../lib/purchaseForm";
+import { blankLine, dateOrderErr, derivedQty, isBlankLine, lineAmount, trimDec, type LineKind, type LineRow, type Product } from "../../lib/purchaseForm";
 import { toPaise } from "../../lib/money";
 import { fillDownRows } from "../../lib/tableKinds";
 import { useGridRows } from "../table/useGridRows";
@@ -75,6 +75,8 @@ interface Props {
   clearError: (...k: string[]) => void;
   contextKey: string;
   lockProducts?: boolean;
+  /** purchase orders: a line delivery date cannot precede this header date */
+  minimumExpectedDate?: string;
   rateLabel?: string;
   currency?: string; // export invoice in a foreign currency: the rate and amount are typed in it (no NPR rate is pre-filled)
   onOpenTerms?: (index: number, continueAfterApply?: () => void) => void;
@@ -84,7 +86,7 @@ interface Props {
   defaultMoreOpen?: boolean;
 }
 
-export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, errors, calendar, clearError, contextKey, lockProducts, onOpenTerms, termSummary, fill, currency, defaultMoreOpen }: Props) {
+export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, errors, calendar, clearError, contextKey, lockProducts, minimumExpectedDate, onOpenTerms, termSummary, fill, currency, defaultMoreOpen }: Props) {
   const unitCode = useMemo(() => new Map(lookups.units.map((u) => [u.id, u.code])), [lookups.units]);
   const productOpts = useMemo<ReferenceOption[]>(() => lookups.products.map((p) => ({ value: String(p.id), label: `${p.code} — ${p.description}`, code: p.code, name: p.description, detail: p.type.replaceAll("_", " "), searchText: `${p.type} ${p.tracksBatch ? "batch" : ""} ${p.tracksExpiry ? "expiry" : ""}`, isActive: p.isActive, badge: p.type === "STOCK" ? undefined : p.type.replace("_", " ").toLowerCase() })), [lookups.products]);
   const locOpts = useMemo<ReferenceOption[]>(() => lookups.locations.map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, isActive: l.isActive })), [lookups.locations]);
@@ -213,7 +215,8 @@ export function LinesGrid({ kind, lines, onChange, lookups, products, readOnly, 
             const p = products.get(l.productId);
             const useAlt = !!(l.altQty && l.altUnitId);
             const off = readOnly;
-            const bad = (c: string) => !!errors[`L.${i}.${c}`];
+            const expectedDateOrderError = kind === "order" ? dateOrderErr(minimumExpectedDate ?? "", l.expectedDate, "Expected date cannot be before the order date.") : undefined;
+            const bad = (c: string) => !!errors[`L.${i}.${c}`] || (c === "xd" && !!expectedDateOrderError);
             const cls = (c: string, extra = "") => `fld ${kind === "bill" ? "h-7" : "h-8"} ${extra} ${bad(c) ? "fld-err" : ""} ${off ? "bg-slate-100 text-slate-600" : ""}`;
             const altOpts: ReferenceOption[] = p ? p.alternateUnits.map((a) => ({ value: String(a.unitId), label: unitCode.get(a.unitId) ?? String(a.unitId), code: unitCode.get(a.unitId) ?? String(a.unitId), detail: `Alternate unit · factor ${a.conversionFactor}`, isActive: true })) : [];
             const altUnavailable = !p || altOpts.length === 0;

@@ -8,7 +8,7 @@ import { COMMON_HELP, DocShell, HINTS, Pill, money } from "../../components/purc
 import { AgentCells, DateCell, FCell, FLabel, Filler, FormTable, RemarksTable, TextInput, VendorRow } from "../../components/purchase/BillTables";
 import { LinesGrid, TermsGrid } from "../../components/purchase/LinesGrid";
 import {
-  alwaysShowTerms, blankLine, dateErr, defaultDate, isBlankLine, isBlankTerm, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, validateLines, validateTerms,
+  alwaysShowTerms, blankLine, dateErr, dateOrderErr, defaultDate, isBlankLine, isBlankTerm, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, validateLines, validateTerms,
   type LineRow, type TermRow,
 } from "../../lib/purchaseForm";
 import type { StatusInfo } from "../../types";
@@ -63,9 +63,14 @@ export default function PurchaseOrderEntry(p: PurchaseScreenProps & EntryTabProp
       else if (vendor.requiresSubLedger && !f.subLedgerId) e.subLedgerId = `${vendor.code} needs a sub ledger.`;
       e.vendorRefDate = dateErr("Vendor reference date", f.vendorRefDate);
       e.expectedDate = dateErr("Expected date", f.expectedDate);
-      if (!e.orderDate && !e.expectedDate && f.expectedDate && f.expectedDate < f.orderDate) e.expectedDate = "Expected date is before the order date.";
+      if (!e.orderDate && !e.expectedDate) e.expectedDate = dateOrderErr(f.orderDate, f.expectedDate, "Expected date cannot be before the order date.");
       const prods = new Map(lk.products.map((x) => [String(x.id), x]));
-      Object.assign(e, validateLines(f.lines, prods, { rate: "optional", tracking: false }), validateTerms(f.terms, new Map(lk.terms.map((x) => [String(x.id), x])), f.lines.filter((l) => !isBlankLine(l)).length));
+      const lineErrors = validateLines(f.lines, prods, { rate: "optional", tracking: false });
+      f.lines.forEach((line, i) => {
+        const message = dateOrderErr(f.orderDate, line.expectedDate, `Line ${i + 1}: expected date cannot be before the order date.`);
+        if (message && !lineErrors[`L.${i}.xd`]) lineErrors[`L.${i}.xd`] = message;
+      });
+      Object.assign(e, lineErrors, validateTerms(f.terms, new Map(lk.terms.map((x) => [String(x.id), x])), f.lines.filter((l) => !isBlankLine(l)).length));
       return e;
     },
     editable: (d) => d.status === "DRAFT", deletable: (d) => d.status === "DRAFT", label: (d) => d.orderNumber,
@@ -83,6 +88,7 @@ export default function PurchaseOrderEntry(p: PurchaseScreenProps & EntryTabProp
   lookupsRef.current = s.lookups;
   useEffect(() => { p.onMeta(p.tabId, { title: s.doc ? String(s.doc.orderNumber) : "New order", dirty: s.dirty, docId: s.doc?.id ?? null }); }, [s.doc?.orderNumber, s.doc?.id, s.dirty, p.tabId]); // eslint-disable-line react-hooks/exhaustive-deps
   const f = s.form, lk = s.lookups, doc = s.doc, ro = s.readOnly;
+  const expectedDateOrderError = f ? dateOrderErr(f.orderDate, f.expectedDate, "Expected date cannot be before the order date.") : undefined;
   const products = useMemo(() => new Map((lk?.products ?? []).map((x) => [String(x.id), x])), [lk]);
   const masters = useMemo(() => new Map((lk?.terms ?? []).map((x) => [String(x.id), x])), [lk]);
   const status = doc?.status as string | undefined;
@@ -109,7 +115,7 @@ export default function PurchaseOrderEntry(p: PurchaseScreenProps & EntryTabProp
               <FLabel>Vendor Ref No</FLabel>
               <FCell error={s.err("vendorRefNo")}><TextInput name="vendorRefNo" label="Vendor Ref No" value={f.vendorRefNo} onChange={(v) => s.patch({ vendorRefNo: v })} readOnly={ro} error={s.err("vendorRefNo")} /></FCell>
               <DateCell name="vendorRefDate" label="Vendor Ref Date" value={f.vendorRefDate} onChange={(v) => { s.patch({ vendorRefDate: v }); s.clearError("vendorRefDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("vendorRefDate")} />
-              <DateCell name="expectedDate" label="Expected By" value={f.expectedDate} onChange={(v) => { s.patch({ expectedDate: v }); s.clearError("expectedDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("expectedDate")} />
+              <DateCell name="expectedDate" label="Expected By" value={f.expectedDate} onChange={(v) => { s.patch({ expectedDate: v }); s.clearError("expectedDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("expectedDate") ?? expectedDateOrderError} />
             </tr>
             <VendorRow lk={lk} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} readOnly={ro} err={s.err} contextKey={String(p.companyId)} onChange={(c) => { s.patch(c); s.clearError("vendorGLId", "subLedgerId"); }} />
             <tr>
@@ -118,7 +124,7 @@ export default function PurchaseOrderEntry(p: PurchaseScreenProps & EntryTabProp
             </tr>
           </FormTable>
           <h2 className="text-[13px] font-semibold">Lines</h2>
-          <LinesGrid kind="order" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} />
+          <LinesGrid kind="order" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} minimumExpectedDate={f.orderDate} />
           <RemarksTable value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} companyId={p.companyId} error={s.err("remarks")} />
           {ro && doc && doc.lines.length > 0 && (
             <div className="overflow-x-auto rounded-sm border border-slate-300 bg-white/60" tabIndex={0} aria-label="Order line progress; scroll horizontally if needed">

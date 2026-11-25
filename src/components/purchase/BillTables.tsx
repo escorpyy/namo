@@ -4,7 +4,7 @@ import { purchaseApi, type PDoc, type PListRow, type PLookups } from "../../api"
 import { formatImportCost } from "../../../shared/import-costing";
 import { toMicro } from "../../../shared/purchase-calculation";
 import { adToBs } from "../../lib/nepaliDate";
-import { addDaysIso, isBlankTerm, type Term, type TermRow } from "../../lib/purchaseForm";
+import { addDaysIso, dateOrderErr, isBlankTerm, type Term, type TermRow } from "../../lib/purchaseForm";
 import { AdvanceBlock } from "../AdvanceBlock";
 import { Combobox, type ComboOption } from "../Combobox";
 import { DateInput } from "../DateInput";
@@ -113,6 +113,7 @@ export function BillHeaderTable(p: BillHeaderProps) {
   const service = f.purchaseType.startsWith("SERVICE_PURCHASE_");
   const noCost = ro || !f.importCostForBillId;
   const links = [f.challanNo && `Challan ${f.challanNo}`, f.orderNo && `Order ${f.orderNo}`].filter(Boolean).join(" · ");
+  const dueDateError = err("dueDate") ?? dateOrderErr(f.invoiceDate, f.dueDate, "Due date cannot be before the invoice date.");
   const stacked = !!p.stacked;
   const field = (key: string, label: ReactNode, control: ReactNode, options: { error?: string; required?: boolean; title?: string; span?: number; tableSpan?: number; cellClass?: string } = {}) => {
     const span = options.span ?? 1;
@@ -153,7 +154,7 @@ export function BillHeaderTable(p: BillHeaderProps) {
     patch(due ? { dueDays: v, dueDate: due } : { dueDays: v });
     if (due) clearError("dueDate");
   }} />, { error: err("dueDays") });
-  const h12 = field("h12", `Due Date (${cal})`, <DateInput fieldName="dueDate" value={f.dueDate} calendar={cal} hasError={!!err("dueDate")} onBlurField={() => {}} disabled={ro} onChange={(v) => { patch({ dueDate: v }); clearError("dueDate"); }} />, { error: err("dueDate"), cellClass: DATE_CELL });
+  const h12 = field("h12", `Due Date (${cal})`, <DateInput fieldName="dueDate" value={f.dueDate} calendar={cal} hasError={!!dueDateError} onBlurField={() => {}} disabled={ro} onChange={(v) => { patch({ dueDate: v }); clearError("dueDate"); }} />, { error: dueDateError, cellClass: DATE_CELL });
   const s1 = (<Fragment key="s1">
         <FLabel>Cost of goods bill</FLabel>
           <FCell error={err("importCostForBillId")}>

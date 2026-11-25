@@ -12,7 +12,7 @@ import { RailPanel, useRail } from "../../components/purchase/Rails";
 import { useTermsDialog } from "../../components/purchase/TermsDialog";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
 import {
-  alwaysShowTerms, blankLine, copyBillForm, dateErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
+  alwaysShowTerms, blankLine, copyBillForm, dateErr, dateOrderErr, defaultDate, effectiveQty, isBlankLine, isBlankTerm, lineAmount, lineFromDoc, lineToPayload, str, termFromDoc, termToPayload, trimDec, validateLines, validateTerms,
   type LineRow, type TermRow,
 } from "../../lib/purchaseForm";
 import { parseDec } from "../../../shared/decimal";
@@ -108,6 +108,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
       else if (vendor.requiresSubLedger && !f.subLedgerId) e.subLedgerId = `${vendor.code} needs a sub ledger.`;
       e.vendorInvoiceDate = dateErr("Vendor invoice date", f.vendorInvoiceDate);
       e.dueDate = dateErr("Due date", f.dueDate);
+      if (!e.invoiceDate && !e.dueDate) e.dueDate = dateOrderErr(f.invoiceDate, f.dueDate, "Due date cannot be before the invoice date.");
       if (f.dueDays && !/^\d{1,4}$/.test(f.dueDays)) e.dueDays = "Due days must be a whole number.";
       if (f.importCostForBillId && !f.purchaseType.startsWith("SERVICE_PURCHASE_")) e.importCostForBillId = "Only a service purchase bill can be linked to a goods bill as a cost.";
       for (const k of IMPORT_FIELDS) if (f.invoiceType === "IMPORT" && k.kind === "date") { const m = dateErr(k.label, f.imp[k.key] ?? ""); if (m) e[`imp.${k.key}`] = m; }
