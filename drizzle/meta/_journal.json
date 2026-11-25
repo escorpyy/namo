@@ -372,6 +372,13 @@
       "when": 1795492291505,
       "tag": "0052_purchase_tds_return",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1795493291505,
+      "tag": "0053_drop_company_retained_earnings",
+      "breakpoints": true
     }
   ]
 }

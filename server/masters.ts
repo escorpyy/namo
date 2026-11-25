@@ -107,10 +107,6 @@ const CFG: Record<string, ServerCfg> = {
     // ctx.id = is company ki id (create me undefined)
     validate: async (data, { id }) => {
       if (data.isVatRegistered && !data.vatNo) throw new HttpError(400, "VAT No is required for a VAT-registered company.", "vatNo");
-      if (data.retainedEarningsGLId != null) {
-        const [gl] = await db.select({ c: S.generalLedger.companyId }).from(S.generalLedger).where(eq(S.generalLedger.id, data.retainedEarningsGLId));
-        if (!id || gl?.c !== id) throw new HttpError(400, "Retained Earnings GL must be a ledger of this company.", "retainedEarningsGLId");
-      }
     },
   },
   branches: {

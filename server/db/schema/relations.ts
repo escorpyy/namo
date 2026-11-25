@@ -46,11 +46,6 @@ import {
 // ============================================================
 
 export const companyRelations = relations(company, ({ one, many }) => ({
-  retainedEarningsGL: one(generalLedger, {
-    fields: [company.retainedEarningsGLId],
-    references: [generalLedger.id],
-    relationName: "CompanyRetainedEarningsGL",
-  }),
   branches: many(branch),
   fiscalYears: many(fiscalYear),
   userAccess: many(userCompanyAccess),
@@ -203,13 +198,6 @@ export const generalLedgerRelations = relations(generalLedger, ({ one, many }) =
   }),
 
   party: one(party), // inverse side of Party.generalLedgerId (1:1)
-  // Inverse of Company.retainedEarningsGLId. Drizzle's one() can't carry a
-  // bare relationName on the inverse side, so this is many() — it returns
-  // at most one row because Company.retainedEarningsGLId is unique.
-  retainedEarningsFor: many(company, {
-    relationName: "CompanyRetainedEarningsGL",
-  }),
-
   journalVoucherLines: many(journalVoucherLine),
   cashBankVoucherLines: many(cashBankVoucherLine),
   openingBalances: many(openingBalance),

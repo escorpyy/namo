@@ -349,7 +349,6 @@ const list: MasterDef[] = [
       { ...text("website", "Website", 255, false), span: 2 },
       { name: "baseCurrency", label: "Base Currency", type: "text", required: true, max: 3, upper: true, default: "NPR", section: "Defaults" },
       { name: "defaultCalendarPref", label: "Calendar", type: "select", required: true, options: CALENDAR_PREF, default: "BS" },
-      { name: "retainedEarningsGLId", label: "Retained Earnings GL", type: "lookup", lookup: "general-ledger", lookupScope: "record", editOnly: true, span: 2, placeholder: "Year-end close se pehle set karna zaroori" },
     ],
     columns: [{ name: "code", label: "Code", width: "70px", kind: "mono" }, { name: "name", label: "Name", width: "1fr", kind: "text" }, ON_COL],
     unique: [["code"]],

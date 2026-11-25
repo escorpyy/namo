@@ -154,12 +154,6 @@ describe.skipIf(!DB_READY)("company consistency across all tenant-scoped tables 
         await tx.execute(sql`update "PurchaseTerm" set "calcBase" = 'SINGLE_TERM', "baseTermId" = ${A.term2} where id = ${A.term}`);
       });
     });
-    it("Company.retainedEarningsGLId must be one of that company's own ledgers", async () => {
-      await run(async (tx, { A, B }) => {
-        await refused(tx, () => upd(tx, "Company", A.co, "retainedEarningsGLId", B.gl));
-        await upd(tx, "Company", A.co, "retainedEarningsGLId", A.gl); // control
-      });
-    });
   });
 
   describe("derived links (child table has no companyId; company comes from its owner)", () => {

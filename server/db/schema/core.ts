@@ -56,21 +56,12 @@ export const company = pgTable(
     baseCurrency: varchar({ length: 3 }).notNull().default("NPR"),
     defaultCalendarPref: calendarPreferenceEnum().notNull().default("BS"),
 
-    // Year-end P&L closing target. Nullable for a brand-new company, but
-    // must be set before any roll-forward runs. A trigger (not expressible
-    // here) must ensure the GL belongs to this same company.
-    retainedEarningsGLId: integer().references(
-      (): AnyPgColumn => generalLedger.id,
-      { onDelete: "restrict" },
-    ),
-
     isActive: boolean().notNull().default(true),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("Company_code_key").on(t.code),
-    uniqueIndex("Company_retainedEarningsGLId_key").on(t.retainedEarningsGLId),
     index("Company_isActive_idx").on(t.isActive),
   ],
 );

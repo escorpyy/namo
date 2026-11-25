@@ -128,16 +128,7 @@ describe.skipIf(!DB_READY)("Company, Branch and Fiscal Year masters (API)", () =
       expect((await tcRow()).code).toBe(`TC${tag}`);
     });
 
-    it("Retained Earnings GL: not on create, only a ledger of this company on edit", async () => {
-      const seededGl = (await rows("general-ledger", companyId)).find((g) => g.code === "GL010").id;
-      const onCreate = await call("POST", "/api/masters/companies", coBody({ code: `RE${tag}`, name: `ZZ Re ${tag}`, retainedEarningsGLId: seededGl }));
-      expect(onCreate.status).toBe(400);
-      expect(onCreate.body.field).toBe("retainedEarningsGLId");
-      const foreign = await call("PUT", `/api/masters/companies/${tc}`, coBody({ retainedEarningsGLId: seededGl })); // company 1's ledger
-      expect(foreign.status).toBe(400);
-      expect(foreign.body.field).toBe("retainedEarningsGLId");
-      expect((await call("PUT", `/api/masters/companies/${tc}`, coBody({ retainedEarningsGLId: 999999 }))).status).toBe(400);
-
+    it("a company's own ledger can be created (group -> sub group -> ledger)", async () => {
       // the company's own ledger: group -> sub group -> ledger
       const g = await call("POST", `/api/masters/account-groups?companyId=${tc}`, { code: `EQ${tag}`, description: `Equity ${tag}`, type: "EQUITY", isActive: true });
       const sg = await call("POST", `/api/masters/account-sub-groups?companyId=${tc}`, { accountGroupId: g.body.id, code: `S1${tag}`, description: `Reserves ${tag}`, isActive: true });
@@ -146,32 +137,16 @@ describe.skipIf(!DB_READY)("Company, Branch and Fiscal Year masters (API)", () =
         isCashOrBank: false, postsToCashBook: false, requiresSubLedger: false, allowDocAdjust: false,
       });
       expect([g.status, sg.status, gl.status]).toEqual([201, 201, 201]);
-      const ok = await call("PUT", `/api/masters/companies/${tc}`, coBody({ retainedEarningsGLId: gl.body.id }));
-      expect(ok.status).toBe(200);
-      expect(ok.body.retainedEarningsGLId).toBe(gl.body.id);
-      expect([ok.body.accountGroupCount, ok.body.ledgerCount]).toEqual([1, 1]);
+      const ok = await call("GET", `/api/masters/companies`);
+      const mine = (ok.body as any[]).find((c) => c.id === tc);
+      expect([mine.accountGroupCount, mine.ledgerCount]).toEqual([1, 1]);
 
       reGl = gl.body.id;
       reSg = sg.body.id;
       tcGroup = g.body.id;
     });
 
-    it("a ledger that is the company's Retained Earnings GL is not deleted (the database refuses it)", async () => {
-      const inUse = await del("general-ledger", reGl);
-      expect(inUse.status).not.toBe(200);
-      expect((await rows("general-ledger", tc)).some((x) => x.id === reGl)).toBe(true);
-      expect((await tcRow()).retainedEarningsGLId).toBe(reGl);
-    });
-
-    // ERP-018 (fixed): drizzle wraps database errors, the Postgres code is on err.cause; app.ts now reads it there (tests/api.dbErrors.test.ts covers every code).
-    it("deleting that ledger answers a clear 409, not a 500 with the SQL text", async () => {
-      const inUse = await del("general-ledger", reGl);
-      expect(inUse.status).toBe(409);
-      expect(String(inUse.body.message)).not.toMatch(/Failed query/);
-    });
-
-    it("once the company no longer points at it, the ledger and its sub group can be deleted", async () => {
-      expect((await call("PUT", `/api/masters/companies/${tc}`, coBody({ retainedEarningsGLId: null }))).status).toBe(200);
+    it("the ledger and its sub group can be deleted", async () => {
       expect((await del("general-ledger", reGl)).status).toBe(200);
       expect((await del("account-sub-groups", reSg)).status).toBe(200);
     });
