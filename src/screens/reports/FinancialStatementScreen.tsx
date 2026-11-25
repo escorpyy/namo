@@ -24,7 +24,6 @@ function TrialBalanceAmounts({ rows }: { rows: FinancialReportRow[] }) {
   return <>
     <td className="px-3 py-1.5 text-right tabular-nums">{money(opening.debit)}</td><td className="px-3 py-1.5 text-right tabular-nums">{money(opening.credit)}</td>
     <td className="px-3 py-1.5 text-right tabular-nums">{money(debit)}</td><td className="px-3 py-1.5 text-right tabular-nums">{money(credit)}</td>
-    <td className="px-3 py-1.5 text-right text-slate-400">—</td><td className="px-3 py-1.5 text-right text-slate-400">—</td>
     <td className="px-3 py-1.5 text-right tabular-nums">{money(closing.debit)}</td><td className="px-3 py-1.5 text-right tabular-nums">{money(closing.credit)}</td>
   </>;
 }
@@ -72,10 +71,10 @@ function TrialBalance({ result, rows }: { result: FinancialReportResult; rows: F
       }),
     ];
   });
-  return <table className="w-full min-w-[1360px] text-xs">
+  return <table className="w-full min-w-[1120px] text-xs">
     <thead><tr className="bg-slate-700 text-left text-white">
       <th className="px-2 py-2">SN</th><th className="px-3 py-2">Particulars</th>
-      <th className="px-3 py-2 text-right">Opening Dr.</th><th className="px-3 py-2 text-right">Opening Cr.</th><th className="px-3 py-2 text-right">During Dr.</th><th className="px-3 py-2 text-right">During Cr.</th><th className="px-3 py-2 text-right">Adjustment Dr.</th><th className="px-3 py-2 text-right">Adjustment Cr.</th><th className="px-3 py-2 text-right">Closing Dr.</th><th className="px-3 py-2 text-right">Closing Cr.</th>
+      <th className="px-3 py-2 text-right">Opening Dr.</th><th className="px-3 py-2 text-right">Opening Cr.</th><th className="px-3 py-2 text-right">During Dr.</th><th className="px-3 py-2 text-right">During Cr.</th><th className="px-3 py-2 text-right">Closing Dr.</th><th className="px-3 py-2 text-right">Closing Cr.</th>
     </tr></thead>
     <tbody>{tableRows}</tbody>
     <tfoot><tr className="border-t-2 bg-slate-100 font-semibold"><td colSpan={2} className="px-3 py-2">Total</td><TrialBalanceAmounts rows={result.rows} /></tr></tfoot>
