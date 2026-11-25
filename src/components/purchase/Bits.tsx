@@ -119,6 +119,14 @@ export function focusStep(el: Element, dir: 1 | -1) {
 // Enter / Shift+Enter walks the fields of a purchase form in document order (Ctrl+Enter from a multi-line field).
 export function formEnterKey(e: React.KeyboardEvent) {
   const el = e.target as HTMLElement;
+  // Do not steal Enter from an active IME composition, and do not let a held key
+  // repeatedly walk through the form. A repeated Enter is consumed here so the
+  // browser cannot submit/activate something while the first key is held.
+  if (e.nativeEvent.isComposing) return;
+  if (e.repeat) {
+    if (e.key === "Enter") e.preventDefault();
+    return;
+  }
   if (e.key !== "Enter" || el.getAttribute("role") === "combobox" || !el.hasAttribute("data-field")) return;
   if (el instanceof HTMLTextAreaElement) {
     if (!e.ctrlKey && !e.metaKey) return;

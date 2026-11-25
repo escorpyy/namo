@@ -130,7 +130,7 @@ export function BillHeaderTable(p: BillHeaderProps) {
     ? <input disabled className="fld" value={links} placeholder="—" aria-label="Linked documents" />
     : <Combobox fieldName="purchaseChallanId" placeholder="— (none)" value={f.purchaseChallanId} hasError={!!err("purchaseChallanId")} options={p.challanOptions} allowClear onChange={(value) => p.onPickChallan(value)} onCommit={(el, dir) => focusStep(el, dir)} />,
   { title: "A confirmed challan fills the vendor and the lines", error: err("purchaseChallanId") });
-  const h2 = field("h2", "Invoice No", <NumberField bare label="Invoice No" documentType="PURCHASE_BILL" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.invoiceNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => patch(c)} />, { span: 2, cellClass: "[&_.fld]:!h-9 [&_.fld]:!text-sm" });
+  const h2 = field("h2", "Invoice No", <NumberField bare fieldName="docNumber" label="Invoice No" documentType="PURCHASE_BILL" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.invoiceNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => patch(c)} />, { span: 2, cellClass: "[&_.fld]:!h-9 [&_.fld]:!text-sm" });
   const h3 = field("h3", `Invoice Date (${cal})`, <DateInput fieldName="invoiceDate" value={f.invoiceDate} calendar={cal} hasError={!!err("invoiceDate")} onBlurField={() => {}} disabled={ro} onChange={(v) => {
     const due = f.dueDays ? addDaysIso(v, Number(f.dueDays)) : "";
     patch(due ? { invoiceDate: v, dueDate: due } : { invoiceDate: v });

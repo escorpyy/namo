@@ -316,6 +316,11 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const h = H.current;
+      if (e.isComposing) return;
+      if (e.repeat) {
+        if (e.key === "Enter") e.preventDefault();
+        return;
+      }
       if (h.dialogOpen) return;
       if (h.help) { if (e.key === "Escape" || e.key === "F1") { e.preventDefault(); setHelp(false); } return; }
       const k = e.key, kl = k.toLowerCase(), ctrl = e.ctrlKey || e.metaKey, typing = (e.target as HTMLElement).tagName === "INPUT" || (e.target as HTMLElement).tagName === "TEXTAREA";

@@ -11,11 +11,12 @@ interface Props {
   label: string; documentType: string; companyId: number; branchId: number; fyCode: string; userId: number;
   existingNumber?: string; readOnly: boolean;
   seriesId: string; number: string; onChange: (p: { numberSeriesId: string; docNumber: string }) => void;
+  fieldName?: string;
   /** no label of its own (a table cell next to a header cell carries it); `label` is then only the accessible name */
   bare?: boolean;
 }
 
-export function NumberField({ label, documentType, companyId, branchId, fyCode, userId, existingNumber, readOnly, seriesId, number, onChange, bare }: Props) {
+export function NumberField({ label, documentType, companyId, branchId, fyCode, userId, existingNumber, readOnly, seriesId, number, onChange, fieldName = "documentNumber", bare }: Props) {
   const [list, setList] = useState<AvailableSeries[]>([]);
   const [asking, setAsking] = useState(false);
   const isNew = existingNumber === undefined;
@@ -51,13 +52,13 @@ export function NumberField({ label, documentType, companyId, branchId, fyCode, 
       {wrap(
         <div className="flex gap-1">
           {list.length > 1 && (
-            <select className="fld w-[42%] min-w-0" aria-label={`${label} series`} value={chosen} onChange={(e) => onChange({ numberSeriesId: e.target.value, docNumber: "" })}>
+              <select data-field={`${fieldName}.series`} className="fld w-[42%] min-w-0" aria-label={`${label} series`} value={chosen} onChange={(e) => onChange({ numberSeriesId: e.target.value, docNumber: "" })}>
               {list.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
             </select>
           )}
           <input
             className={`fld min-w-0 flex-1 font-mono ${auto ? "bg-slate-100 text-slate-600" : ""}`} disabled={auto} aria-label={label} maxLength={30} autoComplete="off"
-            value={auto ? cur?.next ?? "" : number} placeholder={cur?.mode === "MANUAL" ? "type the number" : cur?.next ?? ""}
+            data-field={fieldName} value={auto ? cur?.next ?? "" : number} placeholder={cur?.mode === "MANUAL" ? "type the number" : cur?.next ?? ""}
             onChange={(e) => onChange({ numberSeriesId: seriesId, docNumber: e.target.value })}
           />
         </div>,

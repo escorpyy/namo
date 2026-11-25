@@ -75,6 +75,11 @@ export function Combobox({ value, options, onChange, onCommit, onBlurField, fiel
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.nativeEvent.isComposing) return;
+    if (e.repeat) {
+      if (e.key === "Enter") e.preventDefault();
+      return;
+    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       e.stopPropagation();
@@ -92,6 +97,11 @@ export function Combobox({ value, options, onChange, onCommit, onBlurField, fiel
       e.stopPropagation();
       // Take the highlighted row when the user chose it (typed, moved, or Alt+Enter); a bare Enter keeps the current value.
       const row = open && (typed || navigated.current || e.altKey) ? filtered[Math.min(active, filtered.length - 1)] : undefined;
+      if (open && typed && filtered.length === 0) {
+        e.preventDefault();
+        setOpen(true);
+        return;
+      }
       const next = row ? row.value : value;
       if (row) pick(row);
       else if (open) { setOpen(false); setQuery(""); }

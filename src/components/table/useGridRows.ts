@@ -76,6 +76,13 @@ export function useGridRows(o: GridRowsOptions) {
 
   /** true when the key was used */
   const handleKey = (e: KeyboardEvent<HTMLElement>): boolean => {
+    // IME confirmation belongs to the input method, not grid navigation. A
+    // held Enter must not race through several cells/rows.
+    if (e.nativeEvent.isComposing) return false;
+    if (e.repeat) {
+      if (e.key === "Enter") e.preventDefault();
+      return e.key === "Enter";
+    }
     const el = e.target as HTMLElement, grid = e.currentTarget, ctrl = e.ctrlKey || e.metaKey, isD = e.key.toLowerCase() === "d" && ctrl && !e.shiftKey && !e.altKey;
     const use = () => { e.preventDefault(); e.stopPropagation(); return true; };
     if (el === grid) { // ROW MODE
