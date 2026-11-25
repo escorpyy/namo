@@ -12,6 +12,7 @@ import { useDialog } from "../../components/Dialog";
 import { MasterReferencePicker, type ReferenceOption } from "../../components/MasterReferencePicker";
 import { DocHeader, Field, Pill, focusStep, formEnterKey, groupIN } from "../../components/purchase/Bits";
 import { DateField, TextField } from "../../components/purchase/HeadFields";
+import { useEntryControl } from "../../lib/useEntryControl";
 import { useGridRows } from "../../components/table/useGridRows";
 import { dateErr, defaultDate } from "../../lib/purchaseForm";
 import {
@@ -187,6 +188,7 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
     patchLine(key, { [side]: v, ...((parseAmount(v) ?? 0n) > 0n ? { [other]: "" } : {}) } as Partial<Line>);
     clear(`lines.${form!.lines.findIndex((l) => l.key === key)}.amount`);
   };
+  const ec = useEntryControl(p.companyId, "CASH_BANK_VOUCHER");
   const focusField = (name: string, delay = 40) => window.setTimeout(() => document.querySelector<HTMLElement>(`[data-field="${name}"]:not(:disabled)`)?.focus(), delay);
   const addLine = () => { setForm((f) => (f ? { ...f, lines: [...f.lines, blankLine()] } : f)); if (form) focusField(`L.${form.lines.length}.a`); };
   const removeLineAt = (i: number, fromRowMode = false) => {
@@ -372,16 +374,16 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
                   )}
                 </div>
                 <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-                  <Field label="Instrument" error={err("instrumentType")} className="w-[150px] shrink-0">
+                  {ec("instrument").show && <Field label="Instrument" error={err("instrumentType")} className="w-[150px] shrink-0">
                     <select data-field="instrumentType" disabled={ro} value={form.instrumentType} onChange={(e) => { patch({ instrumentType: e.target.value }); clear("instrumentType", "chequeNumber", "chequeDate"); }} className="fld min-w-0">
                       <option value="">None / cash</option>
                       {INSTRUMENTS.map((i) => <option key={i.value} value={i.value}>{i.label}</option>)}
                     </select>
-                  </Field>
-                  <TextField className="w-[140px] shrink-0" label={form.instrumentType === "CHEQUE" ? "Cheque No" : "Reference No"} name="chequeNumber" value={form.chequeNumber} onChange={(v) => { patch({ chequeNumber: v }); clear("chequeNumber"); }} readOnly={ro || !instrumentOn} max={MAX_CHEQUE_NO} placeholder="e.g. 008421" required={form.instrumentType === "CHEQUE"} error={err("chequeNumber")} />
-                  <div className="w-[150px] shrink-0"><DateField label={form.instrumentType === "CHEQUE" ? "Cheque Date" : "Instrument Date"} name="chequeDate" value={form.chequeDate} onChange={(v) => { patch({ chequeDate: v }); clear("chequeDate"); }} calendar={p.calendar} readOnly={ro || !instrumentOn} error={err("chequeDate")} required={form.instrumentType === "CHEQUE"} /></div>
-                  <TextField className="min-w-[170px] flex-1" label="Payee / Reference" name="payeeReference" value={form.payeeReference} onChange={(v) => { patch({ payeeReference: v }); clear("payeeReference"); }} readOnly={ro} max={MAX_PAYEE} placeholder="Optional" error={err("payeeReference")} />
-                  <TextField className="min-w-[200px] flex-[1.3]" label="Remarks" name="remarks" value={form.remarks} onChange={(v) => { patch({ remarks: v }); clear("remarks"); }} readOnly={ro} max={MAX_REMARKS} narrationCompanyId={p.companyId} placeholder="Optional note for this voucher" error={err("remarks")} />
+                  </Field>}
+                  {ec("chequeNumber").show && <TextField className="w-[140px] shrink-0" label={form.instrumentType === "CHEQUE" ? "Cheque No" : "Reference No"} name="chequeNumber" value={form.chequeNumber} onChange={(v) => { patch({ chequeNumber: v }); clear("chequeNumber"); }} readOnly={ro || !instrumentOn} max={MAX_CHEQUE_NO} placeholder="e.g. 008421" required={form.instrumentType === "CHEQUE" || ec("chequeNumber").mandatory} error={err("chequeNumber")} />}
+                  {ec("chequeDate").show && <div className="w-[150px] shrink-0"><DateField label={form.instrumentType === "CHEQUE" ? "Cheque Date" : "Instrument Date"} name="chequeDate" value={form.chequeDate} onChange={(v) => { patch({ chequeDate: v }); clear("chequeDate"); }} calendar={p.calendar} readOnly={ro || !instrumentOn} error={err("chequeDate")} required={form.instrumentType === "CHEQUE" || ec("chequeDate").mandatory} /></div>}
+                  {ec("payeeReference").show && <TextField className="min-w-[170px] flex-1" label="Payee / Reference" name="payeeReference" value={form.payeeReference} onChange={(v) => { patch({ payeeReference: v }); clear("payeeReference"); }} readOnly={ro} max={MAX_PAYEE} placeholder={ec("payeeReference").mandatory ? "Required" : "Optional"} required={ec("payeeReference").mandatory} error={err("payeeReference")} />}
+                  {ec("remarks").show && <TextField className="min-w-[200px] flex-[1.3]" label="Remarks" name="remarks" value={form.remarks} onChange={(v) => { patch({ remarks: v }); clear("remarks"); }} readOnly={ro} max={MAX_REMARKS} narrationCompanyId={p.companyId} placeholder={ec("remarks").mandatory ? "Required" : "Optional note for this voucher"} required={ec("remarks").mandatory} error={err("remarks")} />}
                 </div>
               </section>
 

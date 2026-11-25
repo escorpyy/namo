@@ -10,6 +10,7 @@ import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
 import { JournalLinesGrid } from "../../components/journal/JournalLinesGrid";
 import { COMMON_HELP, DocHeader, Field, Pill, formEnterKey, HINTS } from "../../components/purchase/Bits";
 import { DateField } from "../../components/purchase/HeadFields";
+import { useEntryControl } from "../../lib/useEntryControl";
 import { NumberField } from "../../components/purchase/NumberField";
 import { defaultDate } from "../../lib/purchaseForm";
 import { BillSettlementPanel, SettlementList } from "../cashBank/BillSettlementPanel";
@@ -70,6 +71,7 @@ export default function JournalVoucherEntry(p: JournalEntryProps) {
   const restored = useRef(p.hookSnapRef.current);
   const localDirty = useRef(false);
   const beforeSave = useRef<() => boolean>(() => true);
+  const ec = useEntryControl(p.companyId, "JOURNAL_VOUCHER");
   const s = useDocScreen<JForm>(cfg, { companyId: p.companyId, branchId: p.branchId, fyCode: p.fyCode, userId: p.userId, calendar: p.calendar }, {
     setStatus: p.setStatus, dirtyRef: localDirty, externalMessage: p.externalMessage, hints: HINT_LIST,
     sharedLookups: p.lookups as unknown as PLookups, skipList: true, initialDocId: p.docId, initialForm: p.initialForm, restore: restored.current, snapshotRef: p.hookSnapRef,
@@ -223,11 +225,11 @@ export default function JournalVoucherEntry(p: JournalEntryProps) {
           <div className="flex min-h-0 flex-1 flex-col">
             <JournalLinesGrid lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} accountBalances={accountBalances} balanceStatus={balanceStatus} readOnly={ro} errors={s.errors} clearError={s.clearError} contextKey={String(p.companyId)} companyId={p.companyId} />
           </div>
-          <div className="shrink-0">
-            <Field label="Remarks (for the whole voucher)" error={s.err("remarks")}>
+          {ec("remarks").show && <div className="shrink-0">
+            <Field label="Remarks (for the whole voucher)" error={s.err("remarks")} required={ec("remarks").mandatory}>
               <NarrationInput multiline companyId={p.companyId} data-field="remarks" rows={2} maxLength={1024} disabled={ro} value={f.remarks} onText={(v) => { s.patch({ remarks: v }); s.clearError("remarks"); }} className={`fld h-auto py-1.5 ${ro ? "bg-slate-100 text-slate-600" : ""}`} />
             </Field>
-          </div>
+          </div>}
         </div>
         <footer className="tape flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2.5 px-5 py-3">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-6 gap-y-1 text-[13px]" aria-live="polite">

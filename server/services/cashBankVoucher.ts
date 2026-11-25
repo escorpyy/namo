@@ -8,6 +8,7 @@ import { recheckSettlements, settlementsOf, writeSettlements, type SettlementInp
 import { guardPeriod, type LockOverride } from "./periodLock";
 import { type Actor, type Opts, type Tx, assertBranch, inActorTx, parseDate, resolveFiscalYear, today } from "./purchase/common";
 import { assertGlEntryAllowed } from "./glEntryControl";
+import { assertMandatory } from "./entryControl";
 
 // Cash / Bank Voucher (ERP-006). The rules that need no database live in shared/cashBankVoucher.ts (the screen uses them too); this file
 // owns everything that does: ledgers and sub-ledgers must exist in the company and be usable, the number, the lock date, the fiscal year,
@@ -119,12 +120,23 @@ async function lockVoucher(tx: Tx, id: number, companyId: number) {
 const markPosted = (tx: Tx, id: number, actor: Actor) =>
   tx.update(S.cashBankVoucher).set({ isPosted: true, postedAt: new Date(), postedBy: actor.userId }).where(eq(S.cashBankVoucher.id, id));
 
+
+// Entry Control (company settings): features set Mandatory must be filled, whatever the screen did.
+const assertEntryControl = (tx: Tx, input: VoucherInput) => {
+  const lines = (input.lines ?? []).filter((l) => l.generalLedgerId);
+  return assertMandatory(tx, input.companyId, "CASH_BANK_VOUCHER", {
+    chequeNumber: input.chequeNumber, chequeDate: input.chequeDate, payeeReference: input.payeeReference, remarks: input.remarks,
+    lineSubLedger: lines.every((l) => l.subLedgerId) ? "x" : "", lineNarration: lines.every((l) => (l.narration ?? "").trim()) ? "x" : "",
+  });
+};
+
 // ---------- write ----------
 export function createVoucher(input: VoucherInput, actor: Actor, opts: Opts & LockOpts & { post?: boolean } = {}) {
   return inActorTx(actor, opts.tx, async (tx) => {
     const problems = voucherProblems(input, input.lines);
     const dateProblem = problems.find((p) => p.field === "voucherDate");
     if (dateProblem) throw new HttpError(400, dateProblem.message, dateProblem.field);
+    await assertEntryControl(tx, input);
     await assertBranch(tx, input.companyId, input.branchId);
     const date = parseDate(input.voucherDate, "voucherDate");
     await guardPeriod(tx, input.companyId, [date], opts.lockOverride, "voucherDate");
@@ -149,6 +161,7 @@ export function updateVoucher(id: number, input: VoucherInput, actor: Actor, opt
     const problems = voucherProblems(input, input.lines);
     const dateProblem = problems.find((p) => p.field === "voucherDate");
     if (dateProblem) throw new HttpError(400, dateProblem.message, dateProblem.field);
+    await assertEntryControl(tx, input);
     const date = parseDate(input.voucherDate, "voucherDate");
     await guardPeriod(tx, v.companyId, [date, v.voucherDate], opts.lockOverride, "voucherDate");
     const fy = await resolveFiscalYear(tx, v.companyId, date, input.fiscalYear);

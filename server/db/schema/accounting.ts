@@ -150,6 +150,27 @@ export const generalLedgerSetup = pgTable(
   ],
 );
 
+// Entry Control: a company's choices for the features of each source module (see shared/entryControl.ts). No row means the feature's defaults.
+export const entryControl = pgTable(
+  "EntryControl",
+  {
+    id: serial().primaryKey(),
+    companyId: integer().notNull().references(() => company.id, { onDelete: "restrict" }),
+    module: varchar({ length: 40 }).notNull(),
+    feature: varchar({ length: 40 }).notNull(),
+    isShown: boolean().notNull().default(true),
+    isEditable: boolean().notNull().default(true),
+    isMandatory: boolean().notNull().default(false),
+    ruleLevel: varchar({ length: 6 }).notNull().default("WARN"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("EntryControl_companyId_module_feature_key").on(t.companyId, t.module, t.feature),
+    check("EntryControl_ruleLevel_check", sql`${t.ruleLevel} in ('IGNORE','WARN','BLOCK')`),
+  ],
+);
+
 // ============================================================
 // SUB LEDGER
 // Finer-grained posting account under a GL and/or tied to a Party; used

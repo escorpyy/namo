@@ -9,6 +9,7 @@ import { guardPeriod, type LockOverride } from "./periodLock";
 import { type Actor, type Opts, type Tx, assertBranch, inActorTx, parseDate, resolveFiscalYear, today } from "./purchase/common";
 import { ZERO, fmt, toMicro, type Micro } from "./purchase/money";
 import { assertGlEntryAllowed } from "./glEntryControl";
+import { assertMandatory } from "./entryControl";
 
 async function assertNotActiveClose(tx: Tx, companyId: number, fiscalYearCode: string) {
   const [operation] = await tx.execute(sql`select current_setting('namo.year_end_close_operation', true) as allowed`) as any[];
@@ -203,6 +204,9 @@ export function saveJournalVoucher(input: JournalVoucherInput, actor: Actor, opt
     await guardPeriod(tx, input.companyId, existing ? [existing.voucherDate, date] : [date], opts.lockOverride, "voucherDate");
     const fy = await resolveFiscalYear(tx, input.companyId, date, input.fiscalYear ?? null);
     const lines = await resolveLines(tx, input.companyId, input.lines ?? []);
+    await assertMandatory(tx, input.companyId, "JOURNAL_VOUCHER", {
+      remarks, lineSubLedger: lines.every((l) => l.subLedgerId) ? "x" : "", lineNarration: lines.every((l) => l.narration) ? "x" : "",
+    });
     await assertGlEntryAllowed(tx, input.companyId, lines.map((line) => line.generalLedgerId), "JOURNAL");
     if (existing?.isPosted) assertPostable(lines);
     // The database refuses ANY voucher whose lines do not balance at commit (drafts too, migration 0007): say so in plain words first.

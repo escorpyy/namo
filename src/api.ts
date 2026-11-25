@@ -86,6 +86,12 @@ export const glSetupApi = {
   save: (companyId: number, userId: number, roles: GLSetupRole[]) =>
     req<{ roles: GLSetupRole[]; ledgers: GLSetupLedger[] }>("/api/gl-setup", { method: "PUT", body: JSON.stringify({ companyId, userId, roles }) }),
 };
+export interface EntryControlData { modules: import("../shared/entryControl").EntryModule[]; controls: import("../shared/entryControl").EntryControlMap }
+export const entryControlApi = {
+  get: (companyId: number) => req<EntryControlData>(`/api/entry-control?companyId=${companyId}`),
+  save: (companyId: number, userId: number, controls: EntryControlData["controls"]) =>
+    req<EntryControlData>("/api/entry-control", { method: "PUT", body: JSON.stringify({ companyId, userId, controls }) }),
+};
 export interface ProductGLDefaults {
   companyId: number;
   stock: { openingGLId: number | null; closingPLGLId: number | null; closingBSGLId: number | null; purchaseGLId: number | null; purchaseReturnGLId: number | null; salesGLId: number | null; salesReturnGLId: number | null };

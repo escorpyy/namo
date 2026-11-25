@@ -27,6 +27,7 @@ import PurchaseOrderWorkspace from "./screens/purchase/PurchaseOrderWorkspace";
 import PurchaseChallanWorkspace from "./screens/purchase/PurchaseChallanWorkspace";
 import ImportCostAssessmentWorkspace from "./screens/purchase/ImportCostAssessmentWorkspace";
 import GLSetupScreen from "./screens/GLSetupScreen";
+import EntryControlScreen from "./screens/EntryControlScreen";
 import KeyboardShortcutsScreen from "./screens/KeyboardShortcutsScreen";
 import { READY_SCREEN_OPTIONS } from "./components/Sidebar";
 import {
@@ -216,6 +217,8 @@ export default function App() {
             branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
             calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} openRequest={openRequest}
           />
+        ) : screen === "entry-control" ? (
+          <EntryControlScreen key={`${screen}:${companyId}`} companyId={companyId} userId={ctx.user.id} setStatus={setStatus} dirtyRef={dirtyRef} />
         ) : screen === "inv-stock-valuation" ? (
           <StockValuationScreen
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"}
