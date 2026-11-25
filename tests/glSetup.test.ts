@@ -13,10 +13,10 @@ describe("GL Setup roles and entry controls", () => {
   it("defines each requested GL role exactly once and exposes every entry control", () => {
     const expected: GlRoleKey[] = [
       "PROFIT_AND_LOSS", "CASH_BOOK", "SALES_ACCOUNT", "SALES_RETURN_ACCOUNT", "PURCHASE_ACCOUNT",
-      "PURCHASE_RETURN_ACCOUNT", "OPENING_STOCK_PL", "CLOSING_STOCK_PL", "CLOSING_STOCK_BS",
+      "PURCHASE_RETURN_ACCOUNT", "INPUT_VAT", "OUTPUT_VAT", "IMPORT_INPUT_VAT", "OPENING_STOCK_PL", "CLOSING_STOCK_PL", "CLOSING_STOCK_BS",
     ];
     expect(GL_SETUP_ROLES.map((role) => role.key)).toEqual(expected);
-    expect(new Set(GL_SETUP_ROLES.map((role) => role.key)).size).toBe(9);
+    expect(new Set(GL_SETUP_ROLES.map((role) => role.key)).size).toBe(12);
     expect(GL_ENTRY_TYPES.map((entry) => entry.entryType)).toEqual([
       "JOURNAL", "CASH_BANK", "SALES_INVOICE", "SALES_RETURN", "PURCHASE_BILL", "PURCHASE_RETURN", "OPENING_BALANCE", "STOCK_OPENING",
     ]);

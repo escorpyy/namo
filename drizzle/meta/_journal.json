@@ -393,6 +393,13 @@
       "when": 1795577121647,
       "tag": "0055_quiet_wild_pack",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1795602160666,
+      "tag": "0056_first_brother_voodoo",
+      "breakpoints": true
     }
   ]
 }

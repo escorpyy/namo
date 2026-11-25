@@ -146,7 +146,7 @@ export const generalLedgerSetup = pgTable(
     uniqueIndex("GeneralLedgerSetup_companyId_role_key").on(t.companyId, t.role),
     index("GeneralLedgerSetup_companyId_idx").on(t.companyId),
     index("GeneralLedgerSetup_generalLedgerId_idx").on(t.generalLedgerId),
-    check("GeneralLedgerSetup_role_check", sql`${t.role} in ('PROFIT_AND_LOSS','CASH_BOOK','SALES_ACCOUNT','SALES_RETURN_ACCOUNT','PURCHASE_ACCOUNT','PURCHASE_RETURN_ACCOUNT','OPENING_STOCK_PL','CLOSING_STOCK_PL','CLOSING_STOCK_BS')`),
+    check("GeneralLedgerSetup_role_check", sql`${t.role} in ('PROFIT_AND_LOSS','CASH_BOOK','SALES_ACCOUNT','SALES_RETURN_ACCOUNT','PURCHASE_ACCOUNT','PURCHASE_RETURN_ACCOUNT','INPUT_VAT','OUTPUT_VAT','IMPORT_INPUT_VAT','OPENING_STOCK_PL','CLOSING_STOCK_PL','CLOSING_STOCK_BS')`),
   ],
 );
 
