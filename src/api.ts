@@ -179,7 +179,7 @@ const qstr = (o: Record<string, string | number | undefined | null>) =>
 export interface LedgerReportProduct { id: number; code: string; description: string; qty: string; unit: string; altQty?: string | null; altUnit?: string | null; rate: string; amount: string; location?: string | null; batch?: string | null; expiry?: string | null }
 export interface LedgerReportRow {
   lineId: number; voucherId: number; generalLedgerId: number; subLedgerId: number | null; d: string; voucherNumber: string;
-  kind: "JOURNAL" | "CASH_BANK"; voucherLabel: string; posted: boolean; postedAt: string | null; postedBy: number | null; postedByName: string | null;
+  kind: "JOURNAL" | "CASH_BANK" | "STOCK"; voucherLabel: string; posted: boolean; postedAt: string | null; postedBy: number | null; postedByName: string | null;
   remarks: string | null; narration: string | null; reference: string | null; reversalOfId: number | null; hasReversal: boolean;
   ledgerCode: string; ledgerName: string;
   accountSubGroupId: number | null; accountSubGroupCode: string | null; accountSubGroupName: string | null;

@@ -231,6 +231,21 @@ ledgerReportRouter.get("/", wrap(async (req, res) => {
       LEFT JOIN "User" u ON u.id = v."postedBy" LEFT JOIN "CashBankVoucher" rv ON rv."reversalOfId" = v.id AND rv."isPosted" = true
       WHERE v."companyId" = ${companyId} AND v."branchId" = ${branchId} AND v."fiscalYear" = ${fiscalYear}
         AND v."voucherDate" BETWEEN ${start}::date AND ${end}::date ${idsFilter(ledgerIds, sql`g.id`)} ${subOnLine}
+      UNION ALL
+      -- the stock ledgers' automatic movement (see stockLedgerAuto): one line per ledger, dated the end of the period
+      SELECT -sa.gl, 0, sa.gl, NULL::int, sa.d, 'STOCK'::text, 'STOCK'::text,
+        'Stock value (automatic)'::text, true, NULL::timestamp, NULL::int, NULL::text, NULL::text, 'Stock value as per Stock Valuation'::text,
+        NULL::text, NULL::int, false, g.code, g.name,
+        ${grouped ? sql`sg.id, sg.code, sg.description, ag.id, ag.code, ag.description, COALESCE(ledgerParty."agentId", g."agentId"), a.code, a.name, COALESCE(pt."subAreaId", g."subAreaId"), sa2.code, sa2.name, ar.id, ar.code, ar.name, NULL::int, NULL::text, NULL::text` : attrNoneCb},
+        NULL::text, NULL::text,
+        sa.dr::text, sa.cr::text, 'STOCK'::text, 'Stock valuation (automatic)', '[]'::jsonb, '[]'::jsonb, 'inv-stock-valuation'::text, 0
+      FROM ${autoSql} JOIN "GeneralLedger" g ON g.id = sa.gl
+      ${grouped ? sql`LEFT JOIN "AccountSubGroup" sg ON sg.id = g."accountSubGroupId" JOIN "AccountGroup" ag ON ag.id = g."accountGroupId"
+      LEFT JOIN "Party" ledgerParty ON ledgerParty."generalLedgerId" = g.id
+      LEFT JOIN "Party" pt ON pt.id = (SELECT p0.id FROM "Party" p0 WHERE p0."generalLedgerId" = g.id)
+      LEFT JOIN "Agent" a ON a.id = COALESCE(ledgerParty."agentId", g."agentId")
+      LEFT JOIN "SubArea" sa2 ON sa2.id = COALESCE(pt."subAreaId", g."subAreaId") LEFT JOIN "Area" ar ON ar.id = sa2."areaId"` : sql``}
+      WHERE g."companyId" = ${companyId} AND sa.d BETWEEN ${start}::date AND ${end}::date ${idsFilter(ledgerIds, sql`g.id`)}
     ), opening AS (
       SELECT c.id AS gl, COALESCE(o.net,0) + COALESCE(p.net,0) AS amount
       FROM (SELECT g.id FROM "GeneralLedger" g WHERE g."companyId" = ${companyId} ${idsFilter(ledgerIds, sql`g.id`)}) c
