@@ -75,7 +75,9 @@ async function resolveTerms(tx: Tx, companyId: number, input: TermInput[]) {
     if (master.category !== "COSTING") throw new HttpError(400, `Charge term ${master.code} is not in the Costing category.`, "terms");
     if (master.isProductwise) throw new HttpError(400, `Charge term ${master.code} must be a header-level term.`, "terms");
     if (!basisOk(value.allocationBasis)) throw new HttpError(400, `Charge term ${master.code} needs VALUE or QUANTITY allocation.`, "terms");
-    const capitalizable = value.capitalizable ?? master.affectsStockValue;
+    const recoverableVat = master.vatTreatment === "INPUT_VAT" || master.vatTreatment === "IMPORT_INPUT_VAT";
+    // Recoverable VAT is a tax receivable, never part of landed inventory value.
+    const capitalizable = recoverableVat ? false : (value.capitalizable ?? master.affectsStockValue);
     if (typeof capitalizable !== "boolean") throw new HttpError(400, `Charge term ${master.code}: affects-stock-value must be true or false.`, "terms");
     const calcType = value.calcType ?? master.defaultCalcType;
     if (calcType !== "PERCENT" && calcType !== "AMOUNT") throw new HttpError(400, `Charge term ${master.code} has an invalid calculation type.`, "terms");
@@ -117,7 +119,7 @@ async function resolveTerms(tx: Tx, companyId: number, input: TermInput[]) {
       if (againstLedgerId === master.generalLedgerId) throw new HttpError(400, `Charge ${master.code}: the against ledger must differ from the term's own ledger.`, "terms");
       await checkAgainstLedger(tx, companyId, master.code, againstLedgerId, againstSubLedgerId);
     }
-    out.push({ termId: master.id, code: master.code, name: master.name, nature: master.nature, calcBase: master.calcBase, baseTermId, sequence: master.sequence, calcType, rate, inputAmount, isOverridden, overrideAmount, allocationBasis: value.allocationBasis, capitalizable,
+    out.push({ termId: master.id, code: master.code, name: master.name, nature: master.nature, vatTreatment: master.vatTreatment, calcBase: master.calcBase, baseTermId, sequence: master.sequence, calcType, rate, inputAmount, isOverridden, overrideAmount, allocationBasis: value.allocationBasis, capitalizable,
       generalLedgerId: master.generalLedgerId ?? null, againstLedgerId, againstSubLedgerId, allocationMode: allocationMode as "AUTO" | "MANUAL", manual });
   }
   return out;
@@ -194,7 +196,7 @@ async function calculate(tx: Tx, targetBillId: number, terms: any[], manualByKey
       isOverridden: !!row.isOverridden, overrideAmount: row.overrideAmount == null ? null : toMicro(String(row.overrideAmount)),
     };
     const manualAmounts = row.allocationMode === "MANUAL" ? (manualByKey.get(key) ?? new Map<number, Micro>()) : undefined;
-    return { term: engine, allocationBasis: row.allocationBasis as Basis, capitalizable: !!row.capitalizable, manualAmounts } satisfies ImportAssessmentTermInput;
+    return { term: engine, vatTreatment: row.vatTreatment ?? "NONE", allocationBasis: row.allocationBasis as Basis, capitalizable: !!row.capitalizable, manualAmounts } satisfies ImportAssessmentTermInput & { vatTreatment: string };
   });
   let result;
   try { result = calculateImportCosting(lines, sources, normalizedTerms); }
@@ -206,7 +208,7 @@ async function calculate(tx: Tx, targetBillId: number, terms: any[], manualByKey
   const termDtos = normalizedTerms.map((row) => {
     const r = result.termResults.get(row.term.key)!;
     const difference = result.manualDifference.get(row.term.key);
-    return { termId: row.term.termId, key: row.term.key, baseAmount: resultAmount(r.baseAmount), calculatedAmount: resultAmount(r.calculatedAmount), finalAmount: resultAmount(r.finalAmount), nature: row.term.nature,
+    return { termId: row.term.termId, key: row.term.key, vatTreatment: row.vatTreatment, baseAmount: resultAmount(r.baseAmount), calculatedAmount: resultAmount(r.calculatedAmount), finalAmount: resultAmount(r.finalAmount), nature: row.term.nature,
       allocationMode: row.manualAmounts ? "MANUAL" : "AUTO", manualDifference: difference === undefined ? null : resultAmount(difference) };
   });
   const preview = {

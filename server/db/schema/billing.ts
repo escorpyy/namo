@@ -19,6 +19,7 @@ import {
   billingCalcTypeEnum,
   billingTermCategoryEnum,
   billingTermNatureEnum,
+  billingVatTreatmentEnum,
   purchaseTermDocTypeEnum,
   roundingMethodEnum,
   salesTermDocTypeEnum,
@@ -74,6 +75,7 @@ export const purchaseTerm = pgTable(
     name: varchar({ length: 100 }).notNull(),
     category: billingTermCategoryEnum().notNull().default("GENERAL"),
     nature: billingTermNatureEnum().notNull(),
+    vatTreatment: billingVatTreatmentEnum().notNull().default("NONE"),
 
     // true = line level, false = header level
     isProductwise: boolean().notNull().default(false),
@@ -179,6 +181,7 @@ export const purchaseDocumentTerm = pgTable(
     // Snapshot of the master at entry time
     sequence: integer().notNull(),
     nature: billingTermNatureEnum().notNull(),
+    vatTreatment: billingVatTreatmentEnum().notNull().default("NONE"),
     calcBase: billingCalcBaseEnum().notNull(),
     generalLedgerId: integer().references(() => generalLedger.id, {
       onDelete: "restrict",
@@ -265,6 +268,7 @@ export const salesTerm = pgTable(
     name: varchar({ length: 100 }).notNull(),
     category: billingTermCategoryEnum().notNull().default("GENERAL"),
     nature: billingTermNatureEnum().notNull(),
+    vatTreatment: billingVatTreatmentEnum().notNull().default("NONE"),
 
     isProductwise: boolean().notNull().default(false),
     isMandatory: boolean().notNull().default(false),
@@ -344,6 +348,7 @@ export const salesDocumentTerm = pgTable(
 
     sequence: integer().notNull(),
     nature: billingTermNatureEnum().notNull(),
+    vatTreatment: billingVatTreatmentEnum().notNull().default("NONE"),
     calcBase: billingCalcBaseEnum().notNull(),
     generalLedgerId: integer().references(() => generalLedger.id, {
       onDelete: "restrict",

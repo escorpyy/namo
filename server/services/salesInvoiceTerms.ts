@@ -72,7 +72,7 @@ export async function saveSalesTerms(tx: Tx, ctx: { companyId: number; docId: nu
     }
     await tx.insert(S.salesDocumentTerm).values({
       companyId: ctx.companyId, documentType: "SALES_INVOICE", documentId: ctx.docId, documentLineId: lineId, termId: m.id,
-      sequence: m.sequence, nature: m.nature, calcBase: m.calcBase, generalLedgerId: m.generalLedgerId,
+      sequence: m.sequence, nature: m.nature, vatTreatment: m.vatTreatment, calcBase: m.calcBase, generalLedgerId: m.generalLedgerId,
       calcType, rate, inputAmount, isOverridden, finalAmount,
     });
   }

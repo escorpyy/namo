@@ -62,7 +62,7 @@ describe.skipIf(!DB_READY)("Cost assessment: local and import, against ledgers, 
     // Terms as the owner described them: own ledger fixed in the master, the against ledger chosen per case (a default may exist).
     W.labour = await ins("PurchaseTerm", { companyId: W.co, code: c("LABOUR"), name: "Unloading labour", category: "COSTING", nature: "ADDITIVE", sequence: 5, defaultCalcType: "AMOUNT", defaultValue: "200", generalLedgerId: W.labourGL, affectsStockValue: true, updatedAt: NOW });
     W.idty = await ins("PurchaseTerm", { companyId: W.co, code: c("IDUTY"), name: "Customs duty", category: "COSTING", nature: "ADDITIVE", sequence: 10, defaultCalcType: "PERCENT", defaultValue: "10", generalLedgerId: W.dutyGL, defaultAgainstLedgerId: W.bank, affectsStockValue: true, updatedAt: NOW });
-    W.ivat = await ins("PurchaseTerm", { companyId: W.co, code: c("IVAT"), name: "Import VAT", category: "COSTING", nature: "ADDITIVE", sequence: 20, defaultCalcType: "PERCENT", defaultValue: "13", calcBase: "RUNNING_TOTAL", generalLedgerId: W.vatGL, defaultAgainstLedgerId: W.bank, affectsStockValue: false, updatedAt: NOW });
+    W.ivat = await ins("PurchaseTerm", { companyId: W.co, code: c("IVAT"), name: "Import VAT", category: "COSTING", nature: "ADDITIVE", sequence: 20, defaultCalcType: "PERCENT", defaultValue: "13", calcBase: "RUNNING_TOTAL", vatTreatment: "IMPORT_INPUT_VAT", generalLedgerId: W.vatGL, defaultAgainstLedgerId: W.bank, affectsStockValue: false, updatedAt: NOW });
     W.rebate = await ins("PurchaseTerm", { companyId: W.co, code: c("REBATE"), name: "Supplier rebate", category: "COSTING", nature: "DEDUCTIVE", sequence: 30, defaultCalcType: "AMOUNT", defaultValue: "20", generalLedgerId: W.rebateGL, affectsStockValue: true, updatedAt: NOW });
   });
 

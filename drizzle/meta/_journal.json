@@ -400,6 +400,13 @@
       "when": 1795602160666,
       "tag": "0056_first_brother_voodoo",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1795602774502,
+      "tag": "0057_open_silhouette",
+      "breakpoints": true
     }
   ]
 }

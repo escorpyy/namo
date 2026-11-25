@@ -122,6 +122,15 @@ export const billingAllocationBasisEnum = pgEnum("BillingAllocationBasis", [
   "VALUE",
 ]);
 
+// Explicit tax meaning keeps VAT reporting and landed-cost treatment independent of names or ledgers.
+export const billingVatTreatmentEnum = pgEnum("BillingVatTreatment", [
+  "NONE",
+  "INPUT_VAT",
+  "OUTPUT_VAT",
+  "IMPORT_INPUT_VAT",
+  "NON_RECOVERABLE_VAT",
+]);
+
 export const purchaseTermDocTypeEnum = pgEnum("PurchaseTermDocType", [
   "PURCHASE_ORDER",
   "PURCHASE_BILL",

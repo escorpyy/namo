@@ -163,6 +163,16 @@ const TERM_NATURE: Opt[] = [
   { value: "ADDITIVE", label: "ADDITIVE (+)", hotkey: "A", badge: "bg-green-100 text-green-800 border-green-300" },
   { value: "DEDUCTIVE", label: "DEDUCTIVE (−)", hotkey: "D", badge: "bg-red-100 text-red-800 border-red-300" },
 ];
+const PURCHASE_VAT_TREATMENT: Opt[] = [
+  { value: "NONE", label: "Not a VAT term" },
+  { value: "INPUT_VAT", label: "Input VAT (recoverable)" },
+  { value: "IMPORT_INPUT_VAT", label: "Import Input VAT (recoverable)" },
+  { value: "NON_RECOVERABLE_VAT", label: "Non-recoverable VAT" },
+];
+const SALES_VAT_TREATMENT: Opt[] = [
+  { value: "NONE", label: "Not a VAT term" },
+  { value: "OUTPUT_VAT", label: "Output VAT" },
+];
 const CALC_TYPE: Opt[] = [
   { value: "PERCENT", label: "PERCENT (%)", hotkey: "P" },
   { value: "AMOUNT", label: "AMOUNT", hotkey: "A" },
@@ -184,6 +194,7 @@ function termMaster(kind: "purchase" | "sales"): MasterDef {
     { name: "code", label: "Code", type: "text", required: true, max: 20, upper: true },
     text("name", "Name", 100),
     { name: "category", label: "Category", type: "select", required: true, options: TERM_CATEGORY, default: "GENERAL" },
+    { name: "vatTreatment", label: "VAT treatment", type: "select", required: true, options: purchase ? PURCHASE_VAT_TREATMENT : SALES_VAT_TREATMENT, default: "NONE", section: "Tax classification" },
     // Round Off only: how the document total is made a whole rupee. Nearest = half a rupee goes up; Up / Down always go that way.
     { name: "roundingMethod", label: "Rounding", type: "select", options: ROUNDING_METHOD, default: "NEAREST", showIf: { field: "category", in: ["ROUNDED"] } },
     { name: "nature", label: "Nature", type: "select", required: true, options: TERM_NATURE, hideIf: { field: "category", in: ["ROUNDED"] } },

@@ -101,7 +101,7 @@ export async function saveTerms(
 
     await tx.insert(S.purchaseDocumentTerm).values({
       companyId: ctx.companyId, documentType: ctx.docType, documentId: ctx.docId, documentLineId: lineId, termId: m.id,
-      sequence: m.sequence, nature: m.nature, calcBase: m.calcBase, generalLedgerId: m.generalLedgerId,
+      sequence: m.sequence, nature: m.nature, vatTreatment: m.vatTreatment, calcBase: m.calcBase, generalLedgerId: m.generalLedgerId,
       distributeToLines: m.distributeToLines, allocationBasis: m.allocationBasis, calcType, rate, inputAmount,
       isOverridden, finalAmount,
     });

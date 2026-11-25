@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { boolean, check, date, foreignKey, index, integer, numeric, pgTable, serial, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 import { createdAt, updatedAt } from "./_helpers";
-import { billingAllocationBasisEnum, billingCalcBaseEnum, billingCalcTypeEnum, billingTermNatureEnum } from "./enums";
+import { billingAllocationBasisEnum, billingCalcBaseEnum, billingCalcTypeEnum, billingTermNatureEnum, billingVatTreatmentEnum } from "./enums";
 import { branch, company, user } from "./core";
 import { generalLedger, subLedger } from "./accounting";
 import { journalVoucher } from "./vouchers";
@@ -61,6 +61,7 @@ export const purchaseImportAssessmentTerm = pgTable("PurchaseImportAssessmentTer
   code: varchar({ length: 20 }).notNull(),
   name: varchar({ length: 100 }).notNull(),
   nature: billingTermNatureEnum().notNull(),
+  vatTreatment: billingVatTreatmentEnum().notNull().default("NONE"),
   calcBase: billingCalcBaseEnum().notNull(),
   baseTermId: integer(),
   sequence: integer().notNull(),

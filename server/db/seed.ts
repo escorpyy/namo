@@ -450,7 +450,9 @@ async function main() {
       };
       await ensureTerm({ companyId: co.id, code: "CUSTOMS", name: "Customs Duty", category: "COSTING", nature: "ADDITIVE", sequence: 10, isProductwise: false, defaultCalcType: "PERCENT", defaultValue: "10", calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "VALUE", generalLedgerId: purchases?.id ?? null });
       await ensureTerm({ companyId: co.id, code: "EXCISE", name: "Excise Duty", category: "COSTING", nature: "ADDITIVE", sequence: 20, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "QUANTITY", generalLedgerId: purchases?.id ?? null });
-      await ensureTerm({ companyId: co.id, code: "VAT", name: "Input VAT", category: "GENERAL", nature: "ADDITIVE", sequence: 90, isProductwise: false, defaultCalcType: "PERCENT", defaultValue: "13", generalLedgerId: vatInput.id });
+      await ensureTerm({ companyId: co.id, code: "VAT", name: "Input VAT", category: "GENERAL", nature: "ADDITIVE", sequence: 90, isProductwise: false, defaultCalcType: "PERCENT", defaultValue: "13", vatTreatment: "INPUT_VAT", generalLedgerId: vatInput.id });
+      // Older demo databases already have this term; only classify the known seeded VAT row and leave custom mappings untouched.
+      await db.update(S.purchaseTerm).set({ vatTreatment: "INPUT_VAT" }).where(and(eq(S.purchaseTerm.companyId, co.id), eq(S.purchaseTerm.code, "VAT"), eq(S.purchaseTerm.name, "Input VAT"), eq(S.purchaseTerm.vatTreatment, "NONE")));
     }
     if (!(await hasRows(S.salesTerm, co.id))) {
       const gl = async (code: string) => (await db.select().from(S.generalLedger).where(and(eq(S.generalLedger.companyId, co.id), eq(S.generalLedger.code, code))))[0];

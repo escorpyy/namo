@@ -13,12 +13,24 @@ function checkTermFlags(data: { isMandatory?: boolean; category?: string }) {
   if (data.isMandatory && data.category === "COSTING") throw new HttpError(400, "Always show is only for General and Rounded terms.", "isMandatory");
 }
 
+function checkVatTreatment(data: Record<string, any>, kind: "purchase" | "sales") {
+  const allowed = kind === "purchase"
+    ? ["NONE", "INPUT_VAT", "IMPORT_INPUT_VAT", "NON_RECOVERABLE_VAT"]
+    : ["NONE", "OUTPUT_VAT"];
+  if (!allowed.includes(data.vatTreatment)) throw new HttpError(400, "VAT treatment is not valid for this term type.", "vatTreatment");
+  if (data.category === "ROUNDED" && data.vatTreatment !== "NONE") throw new HttpError(400, "A Rounded term cannot be a VAT term.", "vatTreatment");
+}
+
 // A Rounded (Round Off) term works out its own amount and sign from the document total, so it is document-wise, on the running total, never
 // spread over lines, and there is only one active one per company (a document can only carry one, and it has to be the last term).
 // The Round Off form only asks for the rounding method (Nearest / Up / Down), a ledger and the usual code, name and flags. Everything else
 // is fixed here (the form hides it and does not send it): document-wise, on the running total, an automatic amount, always priced last.
 const ROUNDED_FIXED = { nature: "ADDITIVE", isProductwise: false, sequence: 900, defaultCalcType: "AMOUNT", defaultValue: 0, calcBase: "RUNNING_TOTAL", baseTermId: null, distributeToLines: false, allocationBasis: null, isEditable: false };
-const fillRoundedTerm = (raw: Record<string, any>) => (raw.category === "ROUNDED" ? { ...raw, ...ROUNDED_FIXED, roundingMethod: raw.roundingMethod || "NEAREST" } : raw);
+const fillRoundedTerm = (raw: Record<string, any>) => ({
+  ...raw,
+  vatTreatment: raw.vatTreatment ?? "NONE",
+  ...(raw.category === "ROUNDED" ? { ...ROUNDED_FIXED, roundingMethod: raw.roundingMethod || "NEAREST" } : {}),
+});
 
 async function checkRoundedTerm(table: typeof S.purchaseTerm | typeof S.salesTerm, data: Record<string, any>, companyId: number, id?: number | null) {
   // Only a Rounded term has a rounding method; every other term stores the default.
@@ -213,6 +225,7 @@ const CFG: Record<string, ServerCfg> = {
     },
     validate: async (data, { companyId, id }) => {
       checkTermFlags(data);
+      checkVatTreatment(data, "purchase");
       await checkRoundedTerm(S.purchaseTerm, data, companyId, id);
       if (data.generalLedgerId != null) {
         const [g] = await db.select({ c: S.generalLedger.companyId }).from(S.generalLedger).where(eq(S.generalLedger.id, data.generalLedgerId));
@@ -249,6 +262,7 @@ const CFG: Record<string, ServerCfg> = {
     },
     validate: async (data, { companyId, id }) => {
       checkTermFlags(data);
+      checkVatTreatment(data, "sales");
       await checkRoundedTerm(S.salesTerm, data, companyId, id);
       if (data.generalLedgerId != null) {
         const [g] = await db.select({ c: S.generalLedger.companyId }).from(S.generalLedger).where(eq(S.generalLedger.id, data.generalLedgerId));

@@ -44,7 +44,7 @@ describe.skipIf(!DB_READY)("Purchase / Sales Term masters (API)", () => {
   it("creates a term and upper-cases the code", async () => {
     const r = await post(P, { ...purchase, code: `i${tag}`.toLowerCase(), name: "Insurance", sequence: 600 });
     expect(r.status).toBe(201);
-    expect(r.body.code).toBe(`I${tag}`);
+    expect(r.body).toMatchObject({ code: `I${tag}`, vatTreatment: "NONE" });
   });
 
   it("a purchase term must have its own general ledger", async () => {
@@ -53,9 +53,9 @@ describe.skipIf(!DB_READY)("Purchase / Sales Term masters (API)", () => {
   });
 
   it("saves the stock-value flag and a default against ledger, and the against ledger must differ from the term's own ledger", async () => {
-    const ok = await post(P, { ...purchase, code: `V${tag}`, name: "Import VAT", category: "COSTING", sequence: 603, affectsStockValue: false, defaultAgainstLedgerId: glB });
+    const ok = await post(P, { ...purchase, code: `V${tag}`, name: "Import VAT", category: "COSTING", vatTreatment: "IMPORT_INPUT_VAT", sequence: 603, affectsStockValue: false, defaultAgainstLedgerId: glB });
     expect(ok.status, JSON.stringify(ok.body)).toBe(201);
-    expect(ok.body.affectsStockValue).toBe(false);
+    expect(ok.body).toMatchObject({ affectsStockValue: false, vatTreatment: "IMPORT_INPUT_VAT" });
     expect(ok.body.defaultAgainstLedgerId).toBe(glB);
     const same = await post(P, { ...purchase, code: `W${tag}`, name: "Same ledger", category: "COSTING", sequence: 604, defaultAgainstLedgerId: glA });
     expect(same.status).toBe(400);
@@ -157,5 +157,11 @@ describe.skipIf(!DB_READY)("Purchase / Sales Term masters (API)", () => {
     const r = await post(S, { ...base, code: `U${tag}`, name: "x", sequence: 611, generalLedgerId: glA, distributeToLines: true, allocationBasis: "VALUE" });
     expect(r.status).toBe(201);
     expect(r.body.distributeToLines).toBeUndefined();
+    expect(r.body.vatTreatment).toBe("NONE");
+    const output = await post(S, { ...base, code: `O${tag}`, name: "Output VAT", sequence: 612, generalLedgerId: glA, vatTreatment: "OUTPUT_VAT" });
+    expect(output.status, JSON.stringify(output.body)).toBe(201);
+    expect(output.body.vatTreatment).toBe("OUTPUT_VAT");
+    const wrong = await post(S, { ...base, code: `P${tag}`, name: "Input VAT", sequence: 613, generalLedgerId: glA, vatTreatment: "INPUT_VAT" });
+    expect(wrong.status).toBe(400);
   });
 });
