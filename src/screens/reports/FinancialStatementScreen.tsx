@@ -15,7 +15,7 @@ const money = (v: string | number) => Number(v || 0).toLocaleString(undefined, {
 const signed = (v: string | number) => Number(v) >= 0 ? money(v) : `(${money(-Number(v))})`;
 const splitBalance = (v: string | number) => ({ debit: Math.max(amount(v), 0), credit: Math.max(-amount(v), 0) });
 type TrialBalanceSubGroup = { id: number; code: string; name: string; rows: FinancialReportRow[] };
-type TrialBalanceGroup = { id: number; code: string; name: string; rows: FinancialReportRow[]; subGroups: Map<number, TrialBalanceSubGroup> };
+type TrialBalanceGroup = { id: number; code: string; name: string; accountType: FinancialReportRow["accountType"]; rows: FinancialReportRow[]; subGroups: Map<number, TrialBalanceSubGroup> };
 
 function TrialBalanceAmounts({ rows }: { rows: FinancialReportRow[] }) {
   const opening = rows.reduce((sum, r) => { const side = splitBalance(r.opening); return { debit: sum.debit + side.debit, credit: sum.credit + side.credit }; }, { debit: 0, credit: 0 });
@@ -33,7 +33,7 @@ function TrialBalance({ result, rows }: { result: FinancialReportResult; rows: F
   const groups = new Map<number, TrialBalanceGroup>();
   for (const row of rows) {
     let group = groups.get(row.accountGroupId);
-    if (!group) { group = { id: row.accountGroupId, code: row.accountGroupCode, name: row.accountGroupName, rows: [], subGroups: new Map() }; groups.set(group.id, group); }
+    if (!group) { group = { id: row.accountGroupId, code: row.accountGroupCode, name: row.accountGroupName, accountType: row.accountType, rows: [], subGroups: new Map() }; groups.set(group.id, group); }
     if (row.accountSubGroupId == null) group.rows.push(row);
     else {
       let subGroup = group.subGroups.get(row.accountSubGroupId);
@@ -42,33 +42,43 @@ function TrialBalance({ result, rows }: { result: FinancialReportResult; rows: F
     }
   }
   const orderedGroups = [...groups.values()].sort((a, b) => a.code.localeCompare(b.code));
+  const typeLabels: Record<FinancialReportRow["accountType"], string> = { ASSET: "ASSETS", LIABILITY: "LIABILITIES", EQUITY: "EQUITY", REVENUE: "REVENUE", EXPENSE: "EXPENSES" };
+  const typeOrder: FinancialReportRow["accountType"][] = ["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"];
   let serialNumber = 0;
   const ledgerRows = (items: FinancialReportRow[], level: number) => items.slice().sort((a, b) => a.code.localeCompare(b.code)).map((r) => {
     serialNumber += 1;
     return <tr key={r.generalLedgerId} className="border-t hover:bg-blue-50">
-      <td className="px-2 py-1.5 text-slate-500">{serialNumber}</td><td className="px-3 py-1.5 font-medium text-slate-800" style={{ paddingLeft: 12 + level * 20 }}>{r.code} — {r.name}</td><td className="px-2 py-1.5">{r.accountType}</td><td className="px-2 py-1.5">{Number(r.closing) >= 0 ? "DB" : "CR"}</td>
+      <td className="px-2 py-1.5 text-slate-500">{serialNumber}</td><td className="px-3 py-1.5 font-medium text-slate-800" style={{ paddingLeft: 12 + level * 20 }}>{r.code} — {r.name}</td>
       <TrialBalanceAmounts rows={[r]} />
     </tr>;
   });
-  const tableRows = orderedGroups.flatMap((group) => {
-    const subGroups = [...group.subGroups.values()].sort((a, b) => a.code.localeCompare(b.code));
-    const allRows = [...group.rows, ...subGroups.flatMap((subGroup) => subGroup.rows)];
+  const tableRows = typeOrder.flatMap((type) => {
+    const typeGroups = orderedGroups.filter((group) => group.accountType === type);
+    if (!typeGroups.length) return [];
+    const typeRows = typeGroups.flatMap((group) => [...group.rows, ...[...group.subGroups.values()].flatMap((subGroup) => subGroup.rows)]);
     return [
-      <tr key={`group-${group.id}`} className="border-t bg-slate-100 font-semibold text-slate-700"><td colSpan={4} className="px-3 py-2">{group.code} — {group.name}</td><TrialBalanceAmounts rows={allRows} /></tr>,
-      ...ledgerRows(group.rows, 1),
-      ...subGroups.flatMap((subGroup) => [
-        <tr key={`subgroup-${group.id}-${subGroup.id}`} className="border-t bg-slate-50 font-medium text-slate-700"><td colSpan={4} className="px-3 py-1.5" style={{ paddingLeft: 28 }}>{subGroup.code ? `${subGroup.code} — ` : ""}{subGroup.name}</td><TrialBalanceAmounts rows={subGroup.rows} /></tr>,
-        ...ledgerRows(subGroup.rows, 2),
-      ]),
+      <tr key={`type-${type}`} className="border-t bg-slate-200 font-bold uppercase tracking-wide text-slate-700"><td colSpan={2} className="px-3 py-2">{typeLabels[type]}</td><TrialBalanceAmounts rows={typeRows} /></tr>,
+      ...typeGroups.flatMap((group) => {
+        const subGroups = [...group.subGroups.values()].sort((a, b) => a.code.localeCompare(b.code));
+        const allRows = [...group.rows, ...subGroups.flatMap((subGroup) => subGroup.rows)];
+        return [
+          <tr key={`group-${group.id}`} className="border-t bg-slate-100 font-semibold text-slate-700"><td colSpan={2} className="px-3 py-2" style={{ paddingLeft: 28 }}>{group.code} — {group.name}</td><TrialBalanceAmounts rows={allRows} /></tr>,
+          ...ledgerRows(group.rows, 2),
+          ...subGroups.flatMap((subGroup) => [
+            <tr key={`subgroup-${group.id}-${subGroup.id}`} className="border-t bg-slate-50 font-medium text-slate-700"><td colSpan={2} className="px-3 py-1.5" style={{ paddingLeft: 48 }}>{subGroup.code ? `${subGroup.code} — ` : ""}{subGroup.name}</td><TrialBalanceAmounts rows={subGroup.rows} /></tr>,
+            ...ledgerRows(subGroup.rows, 3),
+          ]),
+        ];
+      }),
     ];
   });
   return <table className="w-full min-w-[1360px] text-xs">
     <thead><tr className="bg-slate-700 text-left text-white">
-      <th className="px-2 py-2">SN</th><th className="px-3 py-2">Particulars</th><th className="px-2 py-2">Type</th><th className="px-2 py-2">DB/CR</th>
+      <th className="px-2 py-2">SN</th><th className="px-3 py-2">Particulars</th>
       <th className="px-3 py-2 text-right">Opening Dr.</th><th className="px-3 py-2 text-right">Opening Cr.</th><th className="px-3 py-2 text-right">During Dr.</th><th className="px-3 py-2 text-right">During Cr.</th><th className="px-3 py-2 text-right">Adjustment Dr.</th><th className="px-3 py-2 text-right">Adjustment Cr.</th><th className="px-3 py-2 text-right">Closing Dr.</th><th className="px-3 py-2 text-right">Closing Cr.</th>
     </tr></thead>
     <tbody>{tableRows}</tbody>
-    <tfoot><tr className="border-t-2 bg-slate-100 font-semibold"><td colSpan={4} className="px-3 py-2">Total</td><TrialBalanceAmounts rows={result.rows} /></tr></tfoot>
+    <tfoot><tr className="border-t-2 bg-slate-100 font-semibold"><td colSpan={2} className="px-3 py-2">Total</td><TrialBalanceAmounts rows={result.rows} /></tr></tfoot>
   </table>;
 }
 
