@@ -61,7 +61,8 @@ export default function GLSetupScreen({ companyId, userId, setStatus, dirtyRef }
     const shouldSave = dirty;
     if (!shouldSave && !applyMode) return;
     const changed = rolesToApply ?? changedProductRoles();
-    if (changed.length && !applyMode) { setPendingRoles(changed); return; }
+    // Product defaults follow the setup automatically; a product's own explicit ledger is kept.
+    if (changed.length && !applyMode) applyMode = "PRESERVE_EXPLICIT";
     setBusy(true);
     try {
       if (shouldSave) {

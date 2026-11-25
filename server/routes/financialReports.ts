@@ -33,5 +33,8 @@ financialReportsRouter.get("/:kind", wrap(async (req, res) => {
     const pnl = await financialReportRows(db, { companyId, branchId, fiscalYear, start, end, kind: "profit-loss", excludeActiveCloseJournals: false });
     currentResult = -pnl.reduce((sum, row) => sum + numeric(row.closing), 0);
   }
-  res.json({ kind, fiscalYear, from: start, to: end, rows: result, totals: { ...total, currentResult: currentResult.toFixed(2), balanced: kind === "trial-balance" ? Math.abs(total.closing) < 0.005 : undefined } });
+  // The Profit and Loss Account chosen in GL Setup names the period result on the statements.
+  const plRow = (await db.execute(sql`SELECT g.id, g.code, g.name FROM "GeneralLedgerSetup" s JOIN "GeneralLedger" g ON g.id = s."generalLedgerId" WHERE s."companyId" = ${companyId} AND s.role = 'PROFIT_AND_LOSS'`) as any[])[0];
+  const resultLedger = plRow ? { id: Number(plRow.id), code: String(plRow.code), name: String(plRow.name) } : null;
+  res.json({ kind, fiscalYear, from: start, to: end, rows: result, resultLedger, totals: { ...total, currentResult: currentResult.toFixed(2), balanced: kind === "trial-balance" ? Math.abs(total.closing) < 0.005 : undefined } });
 }));

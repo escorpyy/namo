@@ -444,6 +444,7 @@ export interface FinancialReportRow {
 export interface FinancialReportResult {
   kind: FinancialReportKind; fiscalYear: string; from: string; to: string;
   rows: FinancialReportRow[];
+  resultLedger?: { id: number; code: string; name: string } | null;
   totals: { opening: number; debit: number; credit: number; closing: number; currentResult: string; balanced?: boolean };
 }
 export const financialReportsApi = {
