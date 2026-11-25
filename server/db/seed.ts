@@ -132,6 +132,7 @@ async function main() {
       ["AG01", "SG09", "Prepaid Expenses"],
       ["AG01", "SG10", "Short-term Security Deposits"],
       ["AG01", "SG11", "Other Receivables"],
+      ["AG01", "SG12", "Cash Equivalents & Short-term Investments"],
       // Fixed assets
       ["AG02", "SG01", "Land & Buildings"],
       ["AG02", "SG02", "Plant & Machinery"],
@@ -139,17 +140,21 @@ async function main() {
       ["AG02", "SG04", "Vehicles"],
       ["AG02", "SG05", "Computers & Office Equipment"],
       ["AG02", "SG06", "Accumulated Depreciation"],
+      ["AG02", "SG07", "Construction in Progress"],
       // Current liabilities
       ["AG03", "SG01", "Sundry Creditors"],
       ["AG03", "SG02", "Duties & Taxes Payable"],
       ["AG03", "SG03", "Outstanding Expenses"],
       ["AG03", "SG04", "Customer Advances"],
       ["AG03", "SG05", "Short-term Borrowings"],
+      ["AG03", "SG06", "Tax and Statutory Payables"],
+      ["AG03", "SG07", "Deferred Revenue"],
       // Equity
       ["AG04", "SG01", "Owner's Capital"],
       ["AG04", "SG02", "Drawings"],
       ["AG04", "SG03", "Partners' Capital"],
       ["AG04", "SG04", "Share Capital"],
+      ["AG04", "SG05", "Retained Earnings"],
       // Income
       ["AG05", "SG01", "Sales Accounts"],
       ["AG05", "SG02", "Sales Returns"],
@@ -157,11 +162,13 @@ async function main() {
       ["AG06", "SG02", "Discount Received"],
       ["AG06", "SG03", "Commission Received"],
       ["AG06", "SG04", "Rent Received"],
+      ["AG06", "SG05", "Other Operating Income"],
       // Expenses
       ["AG07", "SG01", "Purchase Accounts"],
       ["AG07", "SG02", "Purchase Returns"],
       ["AG07", "SG03", "Direct Wages"],
       ["AG07", "SG04", "Freight Inward"],
+      ["AG07", "SG05", "Factory / Production Overheads"],
       ["AG08", "SG01", "Administrative Expenses"],
       ["AG08", "SG02", "Salaries & Wages"],
       ["AG08", "SG03", "Rent & Utilities"],
@@ -169,6 +176,8 @@ async function main() {
       ["AG08", "SG05", "Repairs & Maintenance"],
       ["AG08", "SG06", "Depreciation"],
       ["AG08", "SG07", "Selling & Distribution Expenses"],
+      ["AG08", "SG08", "Finance Costs"],
+      ["AG08", "SG09", "Professional & Compliance Expenses"],
       // Non-current liabilities
       ["AG09", "SG01", "Long-term Loans"],
       ["AG09", "SG02", "Secured Loans"],
@@ -186,37 +195,93 @@ async function main() {
       ["AG13", "SG01", "Long-term Investments"],
       ["AG13", "SG02", "Long-term Security Deposits"],
       ["AG13", "SG03", "Intangible Assets"],
+      ["AG13", "SG04", "Long-term Deposits"],
     ] as const;
 
     for (const [groupCode, subCode, description] of subgroupDefinitions) {
       await ensureSub(groupCode, subCode, description);
     }
 
-    // Demo General Ledgers (pehle zaroori sub groups ensure karte hain, purani DB me bhi chalega)
-    if (!(await hasRows(S.generalLedger, co.id))) {
-      const ensureSub = async (groupCode: string, subCode: string, description: string) => {
-        const [g] = await db.select().from(S.accountGroup).where(and(eq(S.accountGroup.companyId, co.id), eq(S.accountGroup.code, groupCode)));
-        const [ex] = await db.select().from(S.accountSubGroup).where(and(eq(S.accountSubGroup.accountGroupId, g.id), eq(S.accountSubGroup.code, subCode)));
-        return ex ?? (await db.insert(S.accountSubGroup).values({ accountGroupId: g.id, code: subCode, description }).returning())[0];
-      };
-      const cash = await ensureSub("AG01", "SG01", "Cash-in-Hand");
-      const bank = await ensureSub("AG01", "SG02", "Bank Accounts");
-      const stock = await ensureSub("AG01", "SG03", "Stock-in-Hand");
-      const cap = await ensureSub("AG04", "SG01", "Owner's Capital");
-      const sales = await ensureSub("AG05", "SG01", "Sales Accounts");
-      const adm = await ensureSub("AG08", "SG01", "Administrative Expenses");
-      await db.insert(S.generalLedger).values([
-        { companyId: co.id, code: "GL001", name: "Cash in Hand", accountGroupId: cash.accountGroupId, accountSubGroupId: cash.id, normalBalance: "DEBIT", isCashOrBank: true, postsToCashBook: true },
-        { companyId: co.id, code: "GL002", name: "Nabil Bank A/C", accountGroupId: bank.accountGroupId, accountSubGroupId: bank.id, normalBalance: "DEBIT", isCashOrBank: true },
-        { companyId: co.id, code: "GL003", name: "Stock in Hand", accountGroupId: stock.accountGroupId, accountSubGroupId: stock.id, normalBalance: "DEBIT" },
-        { companyId: co.id, code: "GL010", name: "Owner's Capital", accountGroupId: cap.accountGroupId, accountSubGroupId: cap.id, normalBalance: "CREDIT" },
-        { companyId: co.id, code: "GL020", name: "Sales", accountGroupId: sales.accountGroupId, accountSubGroupId: sales.id, normalBalance: "CREDIT" },
-        { companyId: co.id, code: "GL030", name: "Rent Expense", accountGroupId: adm.accountGroupId, accountSubGroupId: adm.id, normalBalance: "DEBIT" },
-        { companyId: co.id, code: "GL031", name: "Salary Expense", accountGroupId: adm.accountGroupId, accountSubGroupId: adm.id, normalBalance: "DEBIT" },
-        // Where the Round Off term posts for now (it can be a debit or a credit); point the term at an income ledger later if that is wanted.
-        { companyId: co.id, code: "GL032", name: "Other Expenses", accountGroupId: adm.accountGroupId, accountSubGroupId: adm.id, normalBalance: "DEBIT" },
-      ]);
-    }
+    // Demo General Ledgers: stable codes are preserved, while missing ledgers are added on every seed run.
+    // The catalogue follows the Class 11/12 pattern: balance-sheet families first, then trading, income and expense heads.
+    const ensureLedger = async (
+      code: string,
+      name: string,
+      groupCode: string,
+      subCode: string,
+      normalBalance: "DEBIT" | "CREDIT",
+      flags: Partial<{ isCashOrBank: boolean; postsToCashBook: boolean; requiresSubLedger: boolean }> = {},
+    ) => {
+      const [existing] = await db.select().from(S.generalLedger).where(and(eq(S.generalLedger.companyId, co.id), eq(S.generalLedger.code, code)));
+      if (existing) return existing; // Never move or rewrite a user's explicit ledger mapping.
+      const subgroup = await ensureSub(groupCode, subCode, subCode);
+      return (await db.insert(S.generalLedger).values({
+        companyId: co.id, code, name, accountGroupId: subgroup.accountGroupId, accountSubGroupId: subgroup.id, normalBalance, ...flags,
+      }).returning())[0];
+    };
+
+    const ledgerDefinitions: [string, string, string, string, "DEBIT" | "CREDIT", Partial<{ isCashOrBank: boolean; postsToCashBook: boolean; requiresSubLedger: boolean }>][] = [
+      // Current assets and control accounts
+      ["GL001", "Cash in Hand", "AG01", "SG01", "DEBIT", { isCashOrBank: true, postsToCashBook: true }],
+      ["GL002", "Nabil Bank A/C", "AG01", "SG02", "DEBIT", { isCashOrBank: true }],
+      ["GL003", "Stock in Hand", "AG01", "SG03", "DEBIT", {}],
+      ["GL004", "Accounts Receivable - Control", "AG01", "SG04", "DEBIT", {}],
+      ["GL005", "Supplier Advances", "AG01", "SG07", "DEBIT", {}],
+      ["GL006", "Prepaid Expenses", "AG01", "SG09", "DEBIT", {}],
+      ["GL007", "Other Receivables", "AG01", "SG11", "DEBIT", {}],
+      ["GL008", "Short-term Investments", "AG01", "SG12", "DEBIT", {}],
+      // Fixed assets and contra asset
+      ["GL060", "Vehicles", "AG02", "SG04", "DEBIT", {}],
+      ["GL061", "Accumulated Depreciation - Vehicles", "AG02", "SG06", "CREDIT", {}],
+      ["GL063", "Land & Buildings", "AG02", "SG01", "DEBIT", {}],
+      ["GL064", "Plant & Machinery", "AG02", "SG02", "DEBIT", {}],
+      ["GL065", "Furniture & Fixtures", "AG02", "SG03", "DEBIT", {}],
+      ["GL066", "Computers & Office Equipment", "AG02", "SG05", "DEBIT", {}],
+      ["GL067", "Construction in Progress", "AG02", "SG07", "DEBIT", {}],
+      // Current and non-current liabilities
+      ["GL011", "Accounts Payable - Control", "AG03", "SG01", "CREDIT", {}],
+      ["GL012", "Outstanding Expenses", "AG03", "SG03", "CREDIT", {}],
+      ["GL013", "Customer Advances", "AG03", "SG04", "CREDIT", {}],
+      ["GL014", "Short-term Borrowings", "AG03", "SG05", "CREDIT", {}],
+      ["GL015", "Long-term Loans", "AG09", "SG01", "CREDIT", {}],
+      ["GL016", "Provision for Income Tax", "AG10", "SG01", "CREDIT", {}],
+      // Equity
+      ["GL010", "Owner's Capital", "AG04", "SG01", "CREDIT", {}],
+      ["GL017", "Drawings", "AG04", "SG02", "DEBIT", {}],
+      ["GL018", "Retained Earnings", "AG04", "SG05", "CREDIT", {}],
+      // Trading and income
+      ["GL020", "Sales", "AG05", "SG01", "CREDIT", {}],
+      ["GL021", "Sales Returns", "AG05", "SG02", "DEBIT", {}],
+      ["GL022", "Interest Received", "AG06", "SG01", "CREDIT", {}],
+      ["GL023", "Discount Received", "AG06", "SG02", "CREDIT", {}],
+      ["GL024", "Commission Received", "AG06", "SG03", "CREDIT", {}],
+      ["GL025", "Other Operating Income", "AG06", "SG05", "CREDIT", {}],
+      // Direct and indirect expenses
+      ["GL040", "Purchases", "AG07", "SG01", "DEBIT", {}],
+      ["GL041", "Purchase Returns", "AG07", "SG02", "CREDIT", {}],
+      ["GL042", "Direct Wages", "AG07", "SG03", "DEBIT", {}],
+      ["GL043", "Freight Inward", "AG07", "SG04", "DEBIT", {}],
+      ["GL044", "Factory Overheads", "AG07", "SG05", "DEBIT", {}],
+      ["GL030", "Rent Expense", "AG08", "SG03", "DEBIT", {}],
+      ["GL031", "Salary Expense", "AG08", "SG02", "DEBIT", {}],
+      ["GL032", "Other Expenses", "AG08", "SG01", "DEBIT", {}],
+      ["GL033", "Bank Charges", "AG08", "SG04", "DEBIT", {}],
+      ["GL034", "Repairs & Maintenance", "AG08", "SG05", "DEBIT", {}],
+      ["GL035", "Selling & Distribution Expense", "AG08", "SG07", "DEBIT", {}],
+      ["GL036", "Interest Expense", "AG08", "SG08", "DEBIT", {}],
+      ["GL037", "Professional & Compliance Expense", "AG08", "SG09", "DEBIT", {}],
+      ["GL062", "Depreciation Expense", "AG08", "SG06", "DEBIT", {}],
+      // Stock-flow and tax ledgers used by product, term and GL setup defaults
+      ["GL050", "Opening Stock", "AG07", "SG01", "DEBIT", {}],
+      ["GL051", "Closing Stock (P&L)", "AG05", "SG01", "CREDIT", {}],
+      ["GL070", "VAT Input (Receivable)", "AG01", "SG05", "DEBIT", {}],
+      ["GL071", "VAT Output (Payable)", "AG03", "SG06", "CREDIT", {}],
+      ["GL072", "Import VAT Input (Receivable)", "AG01", "SG05", "DEBIT", {}],
+      ["GL073", "Customs Duty", "AG07", "SG04", "DEBIT", {}],
+      ["GL074", "Excise Duty", "AG07", "SG04", "DEBIT", {}],
+    ];
+    for (const [code, name, groupCode, subCode, normalBalance, flags] of ledgerDefinitions)
+      await ensureLedger(code, name, groupCode, subCode, normalBalance, flags);
 
     if (!(await hasRows(S.area, co.id))) {
       const areas = await db.insert(S.area).values([
@@ -353,8 +418,9 @@ async function main() {
       };
       const purchSub = await sub("AG07", "SG01", "Purchase Accounts");
       const salesSub = await sub("AG05", "SG01", "Sales Accounts");
-      const vehSub = await sub("AG02", "SG01", "Vehicles");
-      const admSub = await sub("AG08", "SG01", "Administrative Expenses");
+      const vehSub = await sub("AG02", "SG04", "Vehicles");
+      const accDepSub = await sub("AG02", "SG06", "Accumulated Depreciation");
+      const admSub = await sub("AG08", "SG06", "Depreciation");
       const stockSub = await sub("AG01", "SG03", "Stock-in-Hand");
       const sales = await gl("GL020", "Sales", salesSub, "CREDIT");
       const purchases = await gl("GL040", "Purchases", purchSub, "DEBIT");
@@ -364,7 +430,7 @@ async function main() {
       const closePL = await gl("GL051", "Closing Stock (P&L)", salesSub, "CREDIT");
       const closeBS = await gl("GL003", "Stock in Hand", stockSub, "DEBIT");
       const vehicles = await gl("GL060", "Vehicles", vehSub, "DEBIT");
-      const accDep = await gl("GL061", "Accumulated Depreciation - Vehicles", vehSub, "CREDIT");
+      const accDep = await gl("GL061", "Accumulated Depreciation - Vehicles", accDepSub, "CREDIT");
       const depExp = await gl("GL062", "Depreciation Expense", admSub, "DEBIT");
 
       const unit = async (c: string) => (await db.select().from(S.productUnit).where(and(eq(S.productUnit.companyId, co.id), eq(S.productUnit.code, c))))[0];
@@ -451,6 +517,8 @@ async function main() {
       await ensureTerm({ companyId: co.id, code: "CUSTOMS", name: "Customs Duty", category: "COSTING", nature: "ADDITIVE", sequence: 10, isProductwise: false, defaultCalcType: "PERCENT", defaultValue: "10", calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "VALUE", generalLedgerId: purchases?.id ?? null });
       await ensureTerm({ companyId: co.id, code: "EXCISE", name: "Excise Duty", category: "COSTING", nature: "ADDITIVE", sequence: 20, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "ITEM_VALUE", distributeToLines: true, allocationBasis: "QUANTITY", generalLedgerId: purchases?.id ?? null });
       await ensureTerm({ companyId: co.id, code: "VAT", name: "Input VAT", category: "GENERAL", nature: "ADDITIVE", sequence: 90, isProductwise: false, defaultCalcType: "PERCENT", defaultValue: "13", vatTreatment: "INPUT_VAT", generalLedgerId: vatInput.id });
+      const importVat = await gl("GL072");
+      await ensureTerm({ companyId: co.id, code: "IMPORT_VAT", name: "Import Input VAT", category: "GENERAL", nature: "ADDITIVE", sequence: 95, isProductwise: false, defaultCalcType: "PERCENT", defaultValue: "13", calcBase: "ITEM_VALUE", vatTreatment: "INPUT_VAT", generalLedgerId: importVat?.id ?? vatInput.id });
       // Older demo databases already have this term; only classify the known seeded VAT row and leave custom mappings untouched.
       await db.update(S.purchaseTerm).set({ vatTreatment: "INPUT_VAT" }).where(and(eq(S.purchaseTerm.companyId, co.id), eq(S.purchaseTerm.code, "VAT"), eq(S.purchaseTerm.name, "Input VAT"), eq(S.purchaseTerm.vatTreatment, "NONE")));
     }
@@ -463,6 +531,20 @@ async function main() {
         { companyId: co.id, code: "PACK", name: "Packing Charges", category: "COSTING", nature: "ADDITIVE", sequence: 40, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "ITEM_VALUE", generalLedgerId: sales?.id ?? null },
         { companyId: co.id, code: "ROUND", name: "Round Off", category: "ROUNDED", nature: "ADDITIVE", sequence: 900, isProductwise: false, defaultCalcType: "AMOUNT", defaultValue: "0", calcBase: "RUNNING_TOTAL", isMandatory: true, isEditable: false, generalLedgerId: otherExpenses?.id ?? null },
       ]);
+    }
+    // Output VAT is a liability, so keep it separate from sales and make the default available
+    // even when an older company already has its original sales-term rows.
+    {
+      const [existing] = await db.select({ id: S.salesTerm.id }).from(S.salesTerm).where(and(eq(S.salesTerm.companyId, co.id), eq(S.salesTerm.code, "VAT")));
+      if (!existing) {
+        const [outputVat] = await db.select().from(S.generalLedger).where(and(eq(S.generalLedger.companyId, co.id), eq(S.generalLedger.code, "GL071")));
+        if (outputVat) await db.insert(S.salesTerm).values({
+          companyId: co.id, code: "VAT", name: "Output VAT", category: "GENERAL", nature: "ADDITIVE", sequence: 90,
+          isProductwise: false, defaultCalcType: "PERCENT", defaultValue: "13", calcBase: "ITEM_VALUE",
+          vatTreatment: "OUTPUT_VAT", generalLedgerId: outputVat.id,
+        });
+      }
+      await db.update(S.salesTerm).set({ vatTreatment: "OUTPUT_VAT" }).where(and(eq(S.salesTerm.companyId, co.id), eq(S.salesTerm.code, "VAT"), eq(S.salesTerm.name, "Output VAT"), eq(S.salesTerm.vatTreatment, "NONE")));
     }
   }
 
