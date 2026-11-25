@@ -379,6 +379,13 @@
       "when": 1795493291505,
       "tag": "0053_drop_company_retained_earnings",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1795576327391,
+      "tag": "0054_clear_naoko",
+      "breakpoints": true
     }
   ]
 }
