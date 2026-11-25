@@ -181,3 +181,11 @@
   body.printing-fs .fs-print, body.printing-fs .fs-print * { visibility: visible; }
   body.printing-fs .fs-print { position: absolute; left: 0; top: 0; width: 100%; border: 0; box-shadow: none; }
 }
+
+/* The input being worked on: light blue background and a matching blue border, so it is obvious where the cursor is. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="button"]):not([type="submit"]):focus:not(:disabled):not([readonly]),
+select:focus:not(:disabled),
+textarea:focus:not(:disabled):not([readonly]) {
+  background-color: #eaf3ff;
+  border-color: #3b82f6;
+}
