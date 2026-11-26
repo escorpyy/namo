@@ -51,7 +51,7 @@ describe.skipIf(!DB_READY)("Code numbering (API)", () => {
     const g = await call("POST", `/api/masters/product-groups?companyId=${companyId}`, { code: group, name: `Group ${tag}`, isActive: true });
     expect(g.status, JSON.stringify(g.body)).toBe(201);
 
-    expect(await suggest("product-sub-groups", {}).then((r) => r.body)).toMatchObject({ code: null, reason: expect.stringMatching(/Choose the Product Group/) });
+    expect(await suggest("product-sub-groups", {}).then((r) => r.body)).toMatchObject({ mode: "SUGGESTED", code: expect.stringMatching(/^PS\d{3}$/) }); // the default policy needs no parent
 
     // Product sub-groups use the same two-letter + three-digit policy as every other master.
     expect((await save("product-sub-groups", { mode: "SUGGESTED", template: "{PARENT}{SEQ:3}" })).status).toBe(200);

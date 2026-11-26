@@ -100,7 +100,9 @@ async function main() {
       await ensureGroup(code, description, type);
     }
 
-    const ensureSub = async (groupCode: string, subCode: string, description: string) => {
+    // `named` is the description to give the sub group; without it an existing sub group is left as it is (the ledger catalogue only needs to find it).
+    const ensureSub = async (groupCode: string, subCode: string, named?: string) => {
+      const description = named ?? subCode;
       const [group] = await db.select().from(S.accountGroup).where(
         and(eq(S.accountGroup.companyId, co.id), eq(S.accountGroup.code, groupCode)),
       );
@@ -121,11 +123,11 @@ async function main() {
       const [nameOwner] = await db.select().from(S.accountSubGroup).where(
         and(eq(S.accountSubGroup.accountGroupId, group.id), eq(S.accountSubGroup.description, description)),
       );
-      if (nameOwner && nameOwner.code !== subCode) {
+      if (named && nameOwner && nameOwner.code !== subCode) {
         throw new Error(`Cannot seed subgroup ${groupCode}/${subCode} (${description}): description is already used by ${nameOwner.code}.`);
       }
       if (existing) {
-        if (existing.description !== description) {
+        if (named && existing.description !== description) {
           const [updated] = await db.update(S.accountSubGroup)
             .set({ description, isActive: true })
             .where(eq(S.accountSubGroup.id, existing.id))
@@ -234,7 +236,7 @@ async function main() {
     ) => {
       const [existing] = await db.select().from(S.generalLedger).where(and(eq(S.generalLedger.companyId, co.id), eq(S.generalLedger.code, code)));
       if (existing) return existing; // Never move or rewrite a user's explicit ledger mapping.
-      const subgroup = await ensureSub(groupCode, subCode, subCode);
+      const subgroup = await ensureSub(groupCode, subCode);
       return (await db.insert(S.generalLedger).values({
         companyId: co.id, code, name, accountGroupId: subgroup.accountGroupId, accountSubGroupId: subgroup.id, normalBalance, ...flags,
       }).returning())[0];

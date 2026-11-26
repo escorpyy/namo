@@ -30,7 +30,7 @@ describe.skipIf(!DB_READY)("number series engine (database)", () => {
     } catch (e) { if (!(e instanceof Rollback)) throw e; }
   };
   const series = async (tx: any, co: number, over: Record<string, unknown> = {}) =>
-    (await tx.insert(S.numberSeries).values({ companyId: co, documentType: "PURCHASE_BILL", name: uniq(), prefix: "LP-", padding: 2, ...over }).returning())[0];
+    (await tx.insert(S.numberSeries).values({ companyId: co, documentType: "PURCHASE_BILL", name: uniq(), mode: "AUTOMATIC", prefix: "LP-", padding: 2, ...over }).returning())[0];
   const W = (c: any, over: Record<string, unknown> = {}) => ({ companyId: c.co, branchId: c.br, fiscalYear: "2082/083", ...over });
 
   it("counts up per branch and per fiscal year, and each starts again", async () => {
