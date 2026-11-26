@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCashFlow } from "../src/lib/cashFlow";
+import { buildCashFlow, withPrior } from "../src/lib/cashFlow";
 
 let id = 0;
 const row = (accountType: string, gc: string, group: string, name: string, opening: number, closing: number, o: any = {}) =>
@@ -28,5 +28,25 @@ describe("cash flow (indirect)", () => {
     expect(cf.openingCash).toBe(1000);
     expect(cf.closingCash).toBe(1450);
     expect(Math.abs(cf.difference)).toBeLessThan(0.005);
+  });
+
+  it("takes depreciation off the fixed asset group even when an investment group has the earlier code", () => {
+    const pl = [row("EXPENSE", "AG07", "Indirect Expenses", "Depreciation Expense", 0, 100, { dr: 100 })];
+    const investment = row("ASSET", "AG01", "Non-current Assets", "Long-term Investments", 0, 250);
+    const cash = row("ASSET", "AG00", "Current Assets", "Cash", 1000, 750, { cash: true });
+    const equipment = (closing: number) => row("ASSET", "AG02", "Fixed Assets", "Equipment", 500, closing);
+    const capital = row("EQUITY", "AG05", "Capital", "Owner Capital", -1500, -1500);
+    const expected = [{ label: "Net (acquisition) / disposal of Non-current Assets", amount: -250 }];
+    // Through an accumulated depreciation ledger, and written off the asset directly: nothing was bought or sold either way.
+    for (const fixed of [[equipment(500), row("ASSET", "AG02", "Fixed Assets", "Accumulated Depreciation", 0, -100)], [equipment(400)]]) {
+      const cf = buildCashFlow([cash, investment, ...fixed, capital], pl, -100, -100);
+      expect(cf.investingLines).toEqual(expected);
+      expect(Math.abs(cf.difference)).toBeLessThan(0.005);
+    }
+  });
+
+  it("puts both years side by side, with nil where a line is missing", () => {
+    expect(withPrior([{ label: "A", amount: 1 }, { label: "B", amount: 2 }], [{ label: "B", amount: 3 }, { label: "C", amount: 4 }]))
+      .toEqual([{ label: "A", amount: 1, prior: 0 }, { label: "B", amount: 2, prior: 3 }, { label: "C", amount: 0, prior: 4 }]);
   });
 });
