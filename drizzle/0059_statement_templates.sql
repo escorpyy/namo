@@ -33,6 +33,7 @@ CREATE TABLE "StatementLine" (
 	CONSTRAINT "StatementLine_not_own_parent_check" CHECK ("StatementLine"."parentLineId" IS NULL OR "StatementLine"."parentLineId" <> "StatementLine"."id")
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX "StatementLine_id_templateId_statement_key" ON "StatementLine" USING btree ("id","templateId","statement");--> statement-breakpoint
 CREATE TABLE "StatementLineFormula" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"templateId" integer NOT NULL,
@@ -96,7 +97,6 @@ ALTER TABLE "StatementLineMapping" ADD CONSTRAINT "StatementLineMapping_line_sco
 ALTER TABLE "StatementTemplate" ADD CONSTRAINT "StatementTemplate_companyId_Company_id_fk" FOREIGN KEY ("companyId") REFERENCES "public"."Company"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "StatementTemplate" ADD CONSTRAINT "StatementTemplate_createdBy_User_id_fk" FOREIGN KEY ("createdBy") REFERENCES "public"."User"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "StatementLine_id_templateId_key" ON "StatementLine" USING btree ("id","templateId");--> statement-breakpoint
-CREATE UNIQUE INDEX "StatementLine_id_templateId_statement_key" ON "StatementLine" USING btree ("id","templateId","statement");--> statement-breakpoint
 CREATE UNIQUE INDEX "StatementLine_templateId_statement_code_key" ON "StatementLine" USING btree ("templateId","statement","code");--> statement-breakpoint
 CREATE UNIQUE INDEX "StatementLine_templateId_role_singleton_key" ON "StatementLine" USING btree ("templateId","role") WHERE "StatementLine"."role" IS NOT NULL AND "StatementLine"."role" <> 'SCOE_COLUMN';--> statement-breakpoint
 CREATE INDEX "StatementLine_templateId_statement_sortOrder_idx" ON "StatementLine" USING btree ("templateId","statement","sortOrder");--> statement-breakpoint
