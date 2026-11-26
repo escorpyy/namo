@@ -4,7 +4,7 @@ import { db } from "../db";
 import * as S from "../db/schema";
 import * as P from "../services/purchase";
 import { HttpError, wrap } from "./_util";
-import { whole, optWhole, q, companyOf, idOf, lockOverrideOf, actorOf, pick, rows, type Kind } from "./_input";
+import { whole, optWhole, q, companyOf, idOf, lockOverrideOf, acknowledgedOf, actorOf, pick, rows, type Kind } from "./_input";
 
 // Purchase documents over HTTP: Order -> Challan -> Bill. These routes only check what the HTTP layer must (ids are whole numbers,
 // the document belongs to the company in the URL, field types are what the service expects) and then call the service layer, which
@@ -176,13 +176,13 @@ purchaseRouter.get("/bills/:id", wrap(async (req, res) => { res.json(await P.get
 purchaseRouter.post("/bills", wrap(async (req, res) => {
   refuseAdditionalBill(req.body);
   const companyId = whole(req.body?.companyId ?? q(req, "companyId"), "companyId"), branchId = whole(req.body?.branchId, "branchId");
-  const result = await P.savePurchaseBill(billInput(req.body, { companyId, branchId }), await actorOf(req), { lockOverride: lockOverrideOf(req) });
+  const result = await P.savePurchaseBill(billInput(req.body, { companyId, branchId }), await actorOf(req), { lockOverride: lockOverrideOf(req), acknowledge: acknowledgedOf(req) });
   res.status(201).json({ result, document: await P.getPurchaseBill(result.id, companyId) });
 }));
 purchaseRouter.put("/bills/:id", wrap(async (req, res) => {
   refuseAdditionalBill(req.body);
   const id = idOf(req), companyId = companyOf(req), b = await owned("bill", id, companyId);
-  const result = await P.savePurchaseBill(billInput(req.body, { companyId, branchId: b.branchId, id }), await actorOf(req), { lockOverride: lockOverrideOf(req) });
+  const result = await P.savePurchaseBill(billInput(req.body, { companyId, branchId: b.branchId, id }), await actorOf(req), { lockOverride: lockOverrideOf(req), acknowledge: acknowledgedOf(req) });
   res.json({ result, document: await P.getPurchaseBill(id, companyId) });
 }));
 purchaseRouter.delete("/bills/:id", wrap(async (req, res) => {

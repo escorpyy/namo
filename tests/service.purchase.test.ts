@@ -336,6 +336,25 @@ describe.skipIf(!DB_READY)("purchase service layer", () => {
       });
     });
 
+    it("Entry Control: mandatory bill fields and due days beyond the vendor's payment terms", async () => {
+      await run(async (tx, W) => {
+        const set = (feature: string, cols: string) => tx.execute(sql.raw(`insert into "EntryControl" ("companyId", module, feature, ${cols.split("=")[0]}, "updatedAt") values (${W.co}, 'PURCHASE_BILL', '${feature}', ${cols.split("=")[1]}, now()) on conflict ("companyId", module, feature) do update set ${cols.split("=")[0]} = excluded.${cols.split("=")[0]}`));
+        await set("vendorInvoiceNo", '"isMandatory"=true');
+        await rejects(tx, svc.savePurchaseBill(billIn(W), ACTOR, { tx }), 409, /Vendor invoice no is mandatory/);
+        await svc.savePurchaseBill(billIn(W, { vendorInvoiceNo: "V-7" }), ACTOR, { tx });
+        await set("vendorInvoiceNo", '"isMandatory"=false');
+
+        const party = await ins(tx, "Party", { companyId: W.co, generalLedgerId: W.vendor, updatedAt: NOW });
+        await ins(tx, "VendorDetail", { partyId: party, paymentTermDays: 30, updatedAt: NOW });
+        await rejects(tx, svc.savePurchaseBill(billIn(W, { dueDays: 45 }), ACTOR, { tx }), 409, /payment term days/); // the default is Warn
+        await svc.savePurchaseBill(billIn(W, { dueDays: 45 }), ACTOR, { tx, acknowledge: true });
+        await set("creditDays", '"ruleLevel"=\'BLOCK\'');
+        await expect(svc.savePurchaseBill(billIn(W, { dueDays: 45 }), ACTOR, { tx, acknowledge: true })).rejects.toMatchObject({ code: "ENTRY_BLOCKED" });
+        await set("creditDays", '"ruleLevel"=\'IGNORE\'');
+        await svc.savePurchaseBill(billIn(W, { dueDays: 45 }), ACTOR, { tx });
+      });
+    });
+
     it("a posted bill is immutable and cannot be posted twice", async () => {
       await run(async (tx, W) => {
         const s = await svc.savePurchaseBill(billIn(W), ACTOR, { tx });

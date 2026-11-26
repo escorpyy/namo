@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useEntryControl } from "../../lib/useEntryControl";
 import { Copy, Pencil, PencilRuler, Plus, RotateCcw, Save, Send, Trash2, Undo2, X } from "lucide-react";
 import { purchaseApi, type PDoc, type PListRow, type PLookups } from "../../api";
 import { type ComboOption } from "../../components/Combobox";
@@ -6,7 +7,7 @@ import { Dialog, useDialog } from "../../components/Dialog";
 import { ShortcutsOverlay } from "../../components/ShortcutsOverlay";
 import { COMMON_HELP, HINTS, formEnterKey, money } from "../../components/purchase/Bits";
 import { BillHeaderTable, BillRemarksTable, ImportDetailsButton, ImportDetailsDialog, IMPORT_FIELDS, importFilled, LinkedCostsTable, VendorBillsTable, useVendorBills } from "../../components/purchase/BillTables";
-import { LinesGrid } from "../../components/purchase/LinesGrid";
+import { LinesGrid, type ColKey } from "../../components/purchase/LinesGrid";
 import { ProductInfoPanel, useProductInfo } from "../../components/purchase/ProductInfo";
 import { RailPanel, useRail } from "../../components/purchase/Rails";
 import { useTermsDialog } from "../../components/purchase/TermsDialog";
@@ -287,6 +288,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   }, [doc?.id, doc?.importCostSources?.length]);
 
   // the vendor's other bills: shown in a table, and the source of the "vendor invoice number already used" warning in the header
+  const ec = useEntryControl(p.companyId, "PURCHASE_BILL");
   const vendorBills = useVendorBills(p.companyId, p.branchId, f?.vendorGLId ?? "", doc?.id, f?.vendorInvoiceNo ?? "");
 
   const vendor = lk?.vendors.find((v) => String(v.id) === (f?.vendorGLId ?? ""));
@@ -531,7 +533,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
           <div className="lg-scroll flex min-h-0 min-w-0 flex-1 flex-col overflow-auto [scrollbar-gutter:stable]">
           {/* the lines take whatever height is left */}
           <section aria-label="Lines" className="flex min-h-[240px] flex-1 flex-col [&>.lg-card]:min-h-0 [&>.lg-card]:flex-1 [&>.lg-card]:rounded-none">
-            <LinesGrid fill kind="bill" currency={foreignOn ? f.imp.currencyCode.trim().toUpperCase() : undefined} lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
+            <LinesGrid fill kind="bill" hideCols={[...(ec("lineAlt").show ? [] : ["aq", "au"]), ...(ec("lineTerms").show ? [] : ["terms", "net"]), ...(ec("lineMore").show ? [] : ["more"])] as ColKey[]} currency={foreignOn ? f.imp.currencyCode.trim().toUpperCase() : undefined} lines={f.lines} onChange={updateBillLines} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts
               onOpenTerms={(index, continueAfterApply) => T.open({ scope: "line", lineNumber: T.lineNumberAt(index), lineIndex: index, continueAfterApply })} termSummary={T.lineSummary} />
           </section>
           <div className="shrink-0"><BillRemarksTable f={f} readOnly={ro} companyId={p.companyId} err={s.err} patch={s.patch} /></div>

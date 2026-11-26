@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEntryControl } from "../../lib/useEntryControl";
 import { ChevronDown, ChevronRight, FileText, X } from "lucide-react";
 import { purchaseApi, type PDoc, type PListRow, type PLookups } from "../../api";
 import { formatImportCost } from "../../../shared/import-costing";
@@ -110,6 +111,7 @@ export function BillHeaderTable(p: BillHeaderProps) {
   const { f, lk, doc, readOnly: ro, err, patch, clearError, calendar: cal } = p;
   const ctx = String(p.companyId);
   const { vendor, vendors, subs, agents } = useVendorOptions(lk, f.vendorGLId);
+  const ec = useEntryControl(p.companyId, "PURCHASE_BILL");
   const service = f.purchaseType.startsWith("SERVICE_PURCHASE_");
   const noCost = ro || !f.importCostForBillId;
   const links = [f.challanNo && `Challan ${f.challanNo}`, f.orderNo && `Order ${f.orderNo}`].filter(Boolean).join(" · ");
@@ -136,8 +138,8 @@ export function BillHeaderTable(p: BillHeaderProps) {
     patch(due ? { invoiceDate: v, dueDate: due } : { invoiceDate: v });
     clearError("invoiceDate");
   }} />, { required: true, error: err("invoiceDate"), cellClass: DATE_CELL });
-  const h4 = field("h4", "Vendor Invoice No", <TextInput name="vendorInvoiceNo" label="Vendor Invoice No" value={f.vendorInvoiceNo} onChange={(v) => patch({ vendorInvoiceNo: v })} readOnly={ro} error={err("vendorInvoiceNo")} max={30} />, { error: err("vendorInvoiceNo") });
-  const h5 = field("h5", `Vendor Invoice Date (${cal})`, <DateInput fieldName="vendorInvoiceDate" value={f.vendorInvoiceDate} calendar={cal} hasError={!!err("vendorInvoiceDate")} onBlurField={() => {}} disabled={ro} onChange={(v) => { patch({ vendorInvoiceDate: v }); clearError("vendorInvoiceDate"); }} />, { error: err("vendorInvoiceDate"), cellClass: DATE_CELL });
+  const h4 = !ec("vendorInvoiceNo").show ? null : field("h4", "Vendor Invoice No", <TextInput name="vendorInvoiceNo" label="Vendor Invoice No" value={f.vendorInvoiceNo} onChange={(v) => patch({ vendorInvoiceNo: v })} readOnly={ro} error={err("vendorInvoiceNo")} max={30} />, { required: ec("vendorInvoiceNo").mandatory, error: err("vendorInvoiceNo") });
+  const h5 = !ec("vendorInvoiceDate").show ? null : field("h5", `Vendor Invoice Date (${cal})`, <DateInput fieldName="vendorInvoiceDate" value={f.vendorInvoiceDate} calendar={cal} hasError={!!err("vendorInvoiceDate")} onBlurField={() => {}} disabled={ro} onChange={(v) => { patch({ vendorInvoiceDate: v }); clearError("vendorInvoiceDate"); }} />, { required: ec("vendorInvoiceDate").mandatory, error: err("vendorInvoiceDate"), cellClass: DATE_CELL });
   const h6 = field("h6", "Vendor", <VendorPicker vendors={vendors} vendorGLId={f.vendorGLId} readOnly={ro} error={err("vendorGLId")} lockVendor={!!f.purchaseChallanId} contextKey={ctx}
     onChange={(c) => {
       const days = c.vendorGLId && c.vendorGLId !== f.vendorGLId && !f.dueDays ? lk.vendors.find((v) => String(v.id) === c.vendorGLId)?.paymentTermDays : null;
@@ -145,7 +147,7 @@ export function BillHeaderTable(p: BillHeaderProps) {
       clearError("vendorGLId", "subLedgerId");
     }} />, { required: true, error: err("vendorGLId"), span: p.wide ? 2 : 1, tableSpan: stacked ? 1 : 3 });
   const h7 = field("h7", vendor?.requiresSubLedger ? "Sub Ledger" : "Sub Ledger (not needed)", <SubLedgerPicker subs={subs} requiresSubLedger={!!vendor?.requiresSubLedger} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} readOnly={ro} error={err("subLedgerId")} contextKey={ctx} onChange={(c) => patch(c)} />, { required: !!vendor?.requiresSubLedger, error: err("subLedgerId"), span: p.wide ? 2 : 1, tableSpan: stacked ? 1 : 5 });
-  const h8 = field("h8", "Agent", <AgentPicker agents={agents} agentId={f.agentId} readOnly={ro} error={err("agentId")} contextKey={ctx} onChange={(c) => patch(c)} />, { error: err("agentId") });
+  const h8 = !ec("agent").show ? null : field("h8", "Agent", <AgentPicker agents={agents} agentId={f.agentId} readOnly={ro} error={err("agentId")} contextKey={ctx} onChange={(c) => patch(c)} />, { required: ec("agent").mandatory, error: err("agentId") });
   const h9 = field("h9", "Invoice Type", <SelectInput name="invoiceType" label="Invoice Type" disabled={ro} value={f.invoiceType} onChange={(v) => { patch({ invoiceType: v as BForm["invoiceType"] }); p.onInvoiceType(v as BForm["invoiceType"]); }}><option value="LOCAL">Local</option><option value="IMPORT">Import</option></SelectInput>, { span: 2, cellClass: "[&_.fld]:!h-9 [&_.fld]:!text-sm" });
   const h10 = field("h10", "Purchase Type", <SelectInput name="purchaseType" label="Purchase Type" disabled={ro} value={f.purchaseType} onChange={(purchaseType) => { patch({ purchaseType, importCostForBillId: purchaseType.startsWith("SERVICE_PURCHASE_") ? f.importCostForBillId : "" }); clearError("importCostForBillId"); }}>{PURCHASE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</SelectInput>);
   const h11 = field("h11", "Due Days", <TextInput name="dueDays" label="Due Days" value={f.dueDays} readOnly={ro} error={err("dueDays")} max={4} onChange={(v) => {
@@ -250,6 +252,8 @@ export function RemarksTable({ value, onChange, readOnly: ro, companyId, error }
   );
 }
 export function BillRemarksTable({ f, readOnly, companyId, err, patch }: { f: BForm; readOnly: boolean; companyId: number; err: (k: string) => string | undefined; patch: (c: Partial<BForm>) => void }) {
+  const ec = useEntryControl(companyId, "PURCHASE_BILL");
+  if (!ec("remarks").show) return null;
   return <RemarksTable value={f.remarks} onChange={(v) => patch({ remarks: v })} readOnly={readOnly} companyId={companyId} error={err("remarks")} />;
 }
 

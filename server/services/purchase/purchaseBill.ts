@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { assertMandatory, entryControlsOf, ruleOutcome } from "../entryControl";
 import { withInitialPostedChildInsert } from "../../db/audit";
 import * as S from "../../db/schema";
 import { HttpError } from "../../routes/_util";
@@ -238,6 +239,15 @@ export function savePurchaseBill(input: PurchaseBillInput, actor: Actor, opts: O
 
     await assertBranch(tx, input.companyId, input.branchId);
     await assertVendorLedger(tx, input.companyId, input.vendorGLId, input.subLedgerId);
+    // Entry Control (company settings): mandatory features, and due days beyond what the vendor allows
+    await assertMandatory(tx, input.companyId, "PURCHASE_BILL", { vendorInvoiceNo: input.vendorInvoiceNo, vendorInvoiceDate: input.vendorInvoiceDate, agent: input.agentId, remarks: input.remarks }, { agent: "agentId" });
+    {
+      const [vd] = await tx.select({ days: S.vendorDetail.paymentTermDays }).from(S.party).innerJoin(S.vendorDetail, eq(S.vendorDetail.partyId, S.party.id)).where(eq(S.party.generalLedgerId, input.vendorGLId));
+      if (vd?.days != null && dueDays > vd.days) {
+        const rule = (await entryControlsOf(tx, input.companyId)).PURCHASE_BILL.creditDays.rule;
+        ruleOutcome(rule, opts.acknowledge, `Due days (${dueDays}) are more than this vendor's payment term days (${vd.days}).`, "dueDays");
+      }
+    }
     const fy = await resolveFiscalYear(tx, input.companyId, invoiceDate, input.fiscalYear ?? null);
 
     const isAdditional = !!input.mainBillId;

@@ -19,7 +19,7 @@ export type EntryFeature = {
 export type EntryValues = { show: boolean; edit: boolean; mandatory: boolean; rule: EntryRuleLevel };
 export const ENTRY_DEFAULTS: EntryValues = { show: true, edit: true, mandatory: false, rule: "WARN" };
 
-export type EntryModuleKey = "CASH_BANK_VOUCHER" | "JOURNAL_VOUCHER" | "SALES_INVOICE";
+export type EntryModuleKey = "CASH_BANK_VOUCHER" | "JOURNAL_VOUCHER" | "SALES_INVOICE" | "PURCHASE_BILL";
 export type EntryModule = { key: EntryModuleKey; label: string; features: EntryFeature[] };
 
 export const ENTRY_MODULES: EntryModule[] = [
@@ -56,6 +56,20 @@ ENTRY_MODULES.push({
     { key: "lineMore", label: "Location, batch and expiry (lines)", group: "Lines", controls: ["show"] },
     { key: "creditDays", label: "Due days beyond the customer's credit days", hint: "Checked when the invoice is saved.", group: "Rules", controls: ["rule"], defaults: { rule: "WARN" } },
     { key: "zeroStock", label: "Selling stock that is not on hand", hint: "Checked when the invoice is posted. Ignore lets the stock go negative.", group: "Rules", controls: ["rule"], defaults: { rule: "BLOCK" } },
+  ],
+});
+
+ENTRY_MODULES.push({
+  key: "PURCHASE_BILL", label: "Purchase Bill",
+  features: [
+    { key: "vendorInvoiceNo", label: "Vendor invoice no", group: "Header", controls: ["show", "mandatory"] },
+    { key: "vendorInvoiceDate", label: "Vendor invoice date", group: "Header", controls: ["show", "mandatory"] },
+    { key: "agent", label: "Agent", group: "Header", controls: ["show", "mandatory"] },
+    { key: "remarks", label: "Remarks", group: "Header", controls: ["show", "mandatory"] },
+    { key: "lineAlt", label: "Alternate qty and unit (lines)", group: "Lines", controls: ["show"] },
+    { key: "lineTerms", label: "Line terms and net amount (lines)", group: "Lines", controls: ["show"] },
+    { key: "lineMore", label: "Location, batch and expiry (lines)", group: "Lines", controls: ["show"] },
+    { key: "creditDays", label: "Due days beyond the vendor's payment term days", hint: "Checked when the bill is saved.", group: "Rules", controls: ["rule"], defaults: { rule: "WARN" } },
   ],
 });
 
