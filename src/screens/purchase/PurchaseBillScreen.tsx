@@ -129,6 +129,7 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
   const lkRef = useMemo(() => ({ current: null as ReturnType<typeof useDocScreen>["lookups"] }), []);
   const restored = useRef(p.hookSnapRef.current);
   const localDirty = useRef(false);
+  const ecReturn = useEntryControl(p.companyId, "PURCHASE_RETURN");
   const s = useDocScreen<BForm>(cfg, { companyId: p.companyId, branchId: p.branchId, fyCode: p.fyCode, userId: p.userId, calendar: p.calendar }, {
     setStatus: p.setStatus, dirtyRef: localDirty, externalMessage: p.externalMessage, hints: BILL_HINTS,
     sharedLookups: p.lookups, skipList: true, initialDocId: p.docId, initialForm: p.initialForm, restore: restored.current, snapshotRef: p.hookSnapRef,
@@ -373,8 +374,8 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
             </tbody>
           </table>
           <label className="block text-[12px]">Return date (AD, YYYY-MM-DD)<input defaultValue={rt.returnDate} onChange={(e) => { rt.returnDate = e.target.value.trim(); }} className="fld mt-0.5" /></label>
-          <label className="block text-[12px]">Vendor's debit / credit note no. (optional)<input maxLength={30} onChange={(e) => { rt.debitNoteNo = e.target.value; }} className="fld mt-0.5" /></label>
-          <label className="block text-[12px]">Reason<input maxLength={200} onChange={(e) => { rt.reason = e.target.value; }} className="fld mt-0.5" /></label>
+          {ecReturn("debitNoteNo").show && <label className="block text-[12px]">Vendor's debit / credit note no.{ecReturn("debitNoteNo").mandatory ? " *" : " (optional)"}<input maxLength={30} onChange={(e) => { rt.debitNoteNo = e.target.value; }} className="fld mt-0.5" /></label>}
+          {ecReturn("reason").show && <label className="block text-[12px]">Reason{ecReturn("reason").mandatory ? " *" : ""}<input maxLength={200} onChange={(e) => { rt.reason = e.target.value; }} className="fld mt-0.5" /></label>}
         </div>
       ),
       done: (d, r) => `Return ${r.invoiceNumber} posted for ${money(r.totalAmount)} (voucher ${r.voucherNumber})`,

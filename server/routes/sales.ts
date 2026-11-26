@@ -118,7 +118,7 @@ salesRouter.delete("/challans/:id", wrap(async (req, res) => {
 }));
 salesRouter.post("/challans/:id/confirm", wrap(async (req, res) => {
   const id = idOf(req), companyId = companyOf(req); await ownedChallan(id, companyId);
-  const result = await SC.confirmSalesChallan(id, await actorOf(req));
+  const result = await SC.confirmSalesChallan(id, await actorOf(req), { acknowledge: acknowledgedOf(req) });
   res.json({ result, document: await SC.getSalesChallan(id, companyId) });
 }));
 // A ready-to-edit invoice draft body for the still-unbilled part of a confirmed challan (nothing is saved).

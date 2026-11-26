@@ -56,7 +56,7 @@ describe.skipIf(!DB_READY)("Entry Control (API)", () => {
   it("lists the modules and answers defaults when nothing is saved", async () => {
     const r = await call("GET", `/api/entry-control?companyId=${companyId}`);
     expect(r.status).toBe(200);
-    expect(r.body.modules.map((m: any) => m.key)).toEqual(["CASH_BANK_VOUCHER", "JOURNAL_VOUCHER", "SALES_INVOICE", "PURCHASE_BILL"]);
+    expect(r.body.modules.map((m: any) => m.key)).toEqual(["CASH_BANK_VOUCHER", "JOURNAL_VOUCHER", "SALES_INVOICE", "PURCHASE_BILL", "SALES_CHALLAN", "PURCHASE_CHALLAN", "PURCHASE_RETURN"]);
     expect(r.body.controls.JOURNAL_VOUCHER.remarks).toMatchObject({ show: true, mandatory: false });
   });
 

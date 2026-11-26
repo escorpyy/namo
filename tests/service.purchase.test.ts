@@ -985,4 +985,102 @@ describe.skipIf(!DB_READY)("purchase service layer", () => {
       });
     });
   });
+
+  // =====================================================================================================
+  describe("Entry Control: challans and purchase return", () => {
+    // The company's saved choice for one feature (inside the test's own transaction, so nothing leaks to other files).
+    const setEntry = (tx: any, W: W, module: string, feature: string, v: { show?: boolean; mandatory?: boolean; rule?: string }) =>
+      ins(tx, "EntryControl", { companyId: W.co, module, feature, isShown: v.show ?? true, isEditable: true, isMandatory: v.mandatory ?? false, ruleLevel: v.rule ?? "WARN", updatedAt: NOW });
+    const stock = async (tx: any, W: W, productId: number) => Number((await stockBalance(tx, { companyId: W.co, productId })).reduce((a: number, r: any) => a + Number(r.qty), 0));
+    const codeOf = async (p: Promise<unknown>) => { try { await p; } catch (e: any) { return { status: e.status, code: e.code, field: e.field }; } return null; };
+
+    it("the three modules start with the old behaviour: Block on both challan rules, Warn on a refund-type return", async () => {
+      const { ENTRY_MODULES, resolveEntry, featureOf } = await import("../shared/entryControl");
+      expect(ENTRY_MODULES.map((m) => m.key)).toEqual(expect.arrayContaining(["SALES_CHALLAN", "PURCHASE_CHALLAN", "PURCHASE_RETURN"]));
+      const rule = (m: string, f: string) => resolveEntry(featureOf(m, f)!).rule;
+      expect(rule("SALES_CHALLAN", "zeroStock")).toBe("BLOCK");
+      expect(rule("PURCHASE_CHALLAN", "overReceipt")).toBe("BLOCK");
+      expect(rule("PURCHASE_CHALLAN", "orderNotApproved")).toBe("BLOCK");
+      expect(rule("PURCHASE_RETURN", "returnAfterPayment")).toBe("WARN");
+    });
+
+    it("purchase challan: receiving more than ordered follows Block / Warn / Ignore", async () => {
+      await run(async (tx, W) => {
+        const o = await mkOrder(tx, W);
+        const [l1] = await olines(tx, o.id);
+        const over = () => svc.savePurchaseChallan(challanIn(W, { purchaseOrderId: o.id, lines: [{ productId: W.rice.id, qty: 12, purchaseOrderLineId: l1.id }] }), ACTOR, { tx });
+        const c = await over();
+        expect(await codeOf(svc.confirmPurchaseChallan(c.id, ACTOR, { tx }))).toMatchObject({ status: 409, code: "ENTRY_BLOCKED" }); // default
+        await setEntry(tx, W, "PURCHASE_CHALLAN", "overReceipt", { rule: "WARN" });
+        expect(await codeOf(svc.confirmPurchaseChallan(c.id, ACTOR, { tx }))).toMatchObject({ status: 409, code: "ENTRY_WARNING" });
+        await svc.confirmPurchaseChallan(c.id, ACTOR, { tx, acknowledge: true }); // the user accepted the warning
+        expect(await stock(tx, W, W.rice.id)).toBe(12);
+        const c2 = await over();
+        await tx.execute(sql`update "EntryControl" set "ruleLevel" = 'IGNORE' where "companyId" = ${W.co} and feature = 'overReceipt'`);
+        await svc.confirmPurchaseChallan(c2.id, ACTOR, { tx }); // Ignore: no question asked
+      });
+    });
+
+    it("purchase challan: an order that is not approved follows the rule on save and on confirm", async () => {
+      await run(async (tx, W) => {
+        const draft = await mkOrder(tx, W, {}, false);
+        const [l1] = await olines(tx, draft.id);
+        const save = () => svc.savePurchaseChallan(challanIn(W, { purchaseOrderId: draft.id, lines: [{ productId: W.rice.id, qty: 2, purchaseOrderLineId: l1.id }] }), ACTOR, { tx });
+        expect(await codeOf(save())).toMatchObject({ status: 409, code: "ENTRY_BLOCKED", field: "purchaseOrderId" });
+        await setEntry(tx, W, "PURCHASE_CHALLAN", "orderNotApproved", { rule: "WARN" });
+        expect(await codeOf(save())).toMatchObject({ code: "ENTRY_WARNING" });
+        const c = await svc.savePurchaseChallan(challanIn(W, { purchaseOrderId: draft.id, lines: [{ productId: W.rice.id, qty: 2, purchaseOrderLineId: l1.id }] }), ACTOR, { tx, acknowledge: true });
+        expect(await codeOf(svc.confirmPurchaseChallan(c.id, ACTOR, { tx }))).toMatchObject({ code: "ENTRY_WARNING" });
+        await svc.confirmPurchaseChallan(c.id, ACTOR, { tx, acknowledge: true });
+      });
+    });
+
+    it("purchase challan: a mandatory vendor challan / remarks is enforced; hidden is never mandatory", async () => {
+      await run(async (tx, W) => {
+        await setEntry(tx, W, "PURCHASE_CHALLAN", "vendorChallan", { mandatory: true });
+        await setEntry(tx, W, "PURCHASE_CHALLAN", "remarks", { mandatory: true });
+        const save = (over: any = {}) => svc.savePurchaseChallan(challanIn(W, over), ACTOR, { tx });
+        expect(await codeOf(save())).toMatchObject({ status: 409, field: "vendorChallanNo" });
+        expect(await codeOf(save({ vendorChallanNo: "VC-1" }))).toMatchObject({ status: 409, field: "vendorChallanNo" }); // number without a date is not enough
+        expect(await codeOf(save({ vendorChallanNo: "VC-1", vendorChallanDate: "2025-10-09" }))).toMatchObject({ status: 409, field: "remarks" });
+        await save({ vendorChallanNo: "VC-1", vendorChallanDate: "2025-10-09", remarks: "ok" });
+        await tx.execute(sql`update "EntryControl" set "isShown" = false where "companyId" = ${W.co} and module = 'PURCHASE_CHALLAN'`);
+        await save({ vendorChallanNo: "VC-2" }); // hidden, so nothing is demanded (resolveEntry drops mandatory when a field is not shown)
+      });
+    });
+
+    it("sales challan: stock not on hand follows the rule on confirm; a mandatory salesperson / remarks is enforced on save", async () => {
+      const SC = await import("../server/services/salesChallan");
+      await run(async (tx, W) => {
+        const customer = await ins(tx, "GeneralLedger", { companyId: W.co, code: `CUS${uniq()}`.slice(0, 20), name: "Customer", accountGroupId: (await q(tx, sql`select "accountGroupId" as g from "GeneralLedger" where id = ${W.vendor}`))[0].g, accountSubGroupId: (await q(tx, sql`select "accountSubGroupId" as g from "GeneralLedger" where id = ${W.vendor}`))[0].g, normalBalance: "DEBIT", glType: "CUSTOMER", updatedAt: NOW });
+        const input = (over: any = {}) => ({ companyId: W.co, branchId: W.br, challanDate: "2025-10-10", customerGLId: customer, lines: [{ productId: W.rice.id, qty: 3, rate: 50 }], ...over });
+        const c = await SC.saveSalesChallan(input(), ACTOR, { tx });
+        expect(await codeOf(SC.confirmSalesChallan(c.id, ACTOR, { tx }))).toMatchObject({ status: 409, code: "ENTRY_BLOCKED" }); // no stock, default Block
+        await setEntry(tx, W, "SALES_CHALLAN", "zeroStock", { rule: "WARN" });
+        expect(await codeOf(SC.confirmSalesChallan(c.id, ACTOR, { tx }))).toMatchObject({ code: "ENTRY_WARNING" });
+        await SC.confirmSalesChallan(c.id, ACTOR, { tx, acknowledge: true });
+        expect(await stock(tx, W, W.rice.id)).toBe(-3);
+        const c2 = await SC.saveSalesChallan(input(), ACTOR, { tx });
+        await tx.execute(sql`update "EntryControl" set "ruleLevel" = 'IGNORE' where "companyId" = ${W.co} and module = 'SALES_CHALLAN' and feature = 'zeroStock'`);
+        await SC.confirmSalesChallan(c2.id, ACTOR, { tx });
+        await setEntry(tx, W, "SALES_CHALLAN", "agent", { mandatory: true });
+        await setEntry(tx, W, "SALES_CHALLAN", "remarks", { mandatory: true });
+        expect(await codeOf(SC.saveSalesChallan(input(), ACTOR, { tx }))).toMatchObject({ status: 409, field: "agentId" });
+      });
+    });
+
+    it("purchase return: a mandatory reason and vendor note number are enforced", async () => {
+      await run(async (tx, W) => {
+        const s = await svc.savePurchaseBill(billIn(W, { terms: standardTerms(W) }), ACTOR, { tx });
+        await svc.postPurchaseBill(s.id, ACTOR, { tx });
+        const [l1] = await blines(tx, s.id);
+        await setEntry(tx, W, "PURCHASE_RETURN", "reason", { mandatory: true });
+        await setEntry(tx, W, "PURCHASE_RETURN", "debitNoteNo", { mandatory: true });
+        const ret = (over: any = {}) => svc.createPurchaseReturn({ companyId: W.co, billId: s.id, returnDate: "2025-10-20", lines: [{ billLineId: l1.id, qty: 2 }], ...over }, ACTOR, { tx });
+        expect(await codeOf(ret())).toMatchObject({ status: 409, field: "reason" });
+        expect(await codeOf(ret({ reason: "damaged" }))).toMatchObject({ status: 409, field: "debitNoteNo" });
+        await ret({ reason: "damaged", debitNoteNo: "DN-77" });
+      });
+    });
+  });
 });

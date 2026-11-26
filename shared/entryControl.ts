@@ -19,7 +19,7 @@ export type EntryFeature = {
 export type EntryValues = { show: boolean; edit: boolean; mandatory: boolean; rule: EntryRuleLevel };
 export const ENTRY_DEFAULTS: EntryValues = { show: true, edit: true, mandatory: false, rule: "WARN" };
 
-export type EntryModuleKey = "CASH_BANK_VOUCHER" | "JOURNAL_VOUCHER" | "SALES_INVOICE" | "PURCHASE_BILL";
+export type EntryModuleKey = "CASH_BANK_VOUCHER" | "JOURNAL_VOUCHER" | "SALES_INVOICE" | "PURCHASE_BILL" | "SALES_CHALLAN" | "PURCHASE_CHALLAN" | "PURCHASE_RETURN";
 export type EntryModule = { key: EntryModuleKey; label: string; features: EntryFeature[] };
 
 export const ENTRY_MODULES: EntryModule[] = [
@@ -70,6 +70,36 @@ ENTRY_MODULES.push({
     { key: "lineTerms", label: "Line terms and net amount (lines)", group: "Lines", controls: ["show"] },
     { key: "lineMore", label: "Location, batch and expiry (lines)", group: "Lines", controls: ["show"] },
     { key: "creditDays", label: "Due days beyond the vendor's payment term days", hint: "Checked when the bill is saved.", group: "Rules", controls: ["rule"], defaults: { rule: "WARN" } },
+  ],
+});
+
+// Delivery notes, goods receipts and purchase returns. The rules here used to be fixed refusals; their default is Block, so a company that changes nothing sees no difference.
+ENTRY_MODULES.push({
+  key: "SALES_CHALLAN", label: "Sales Challan",
+  features: [
+    { key: "agent", label: "Salesperson", group: "Header", controls: ["show", "mandatory"] },
+    { key: "transport", label: "Transport details (transporter, vehicle, LR)", group: "Header", controls: ["show"] },
+    { key: "remarks", label: "Remarks", group: "Header", controls: ["show", "mandatory"] },
+    { key: "lineMore", label: "Location, batch and expiry (lines)", hint: "A batch-tracked or expiring product always asks for them.", group: "Lines", controls: ["show"] },
+    { key: "zeroStock", label: "Delivering stock that is not on hand", hint: "Checked when the challan is confirmed. Ignore lets the stock go negative.", group: "Rules", controls: ["rule"], defaults: { rule: "BLOCK" } },
+  ],
+}, {
+  key: "PURCHASE_CHALLAN", label: "Purchase Challan",
+  features: [
+    { key: "agent", label: "Agent", group: "Header", controls: ["show", "mandatory"] },
+    { key: "vendorChallan", label: "Vendor challan no and date", group: "Header", controls: ["show", "mandatory"] },
+    { key: "transport", label: "Transport details (transporter, vehicle, LR)", group: "Header", controls: ["show"] },
+    { key: "remarks", label: "Remarks", group: "Header", controls: ["show", "mandatory"] },
+    { key: "lineMore", label: "Location, batch, manufacture and expiry (lines)", hint: "A batch-tracked or expiring product always asks for them.", group: "Lines", controls: ["show"] },
+    { key: "overReceipt", label: "Receiving more than the order (beyond the tolerance)", hint: "Checked when the challan is confirmed.", group: "Rules", controls: ["rule"], defaults: { rule: "BLOCK" } },
+    { key: "orderNotApproved", label: "Receiving against an order that is not approved", hint: "Checked when the challan is saved and when it is confirmed.", group: "Rules", controls: ["rule"], defaults: { rule: "BLOCK" } },
+  ],
+}, {
+  key: "PURCHASE_RETURN", label: "Purchase Return",
+  features: [
+    { key: "reason", label: "Reason", group: "Header", controls: ["show", "mandatory"] },
+    { key: "debitNoteNo", label: "Vendor's debit / credit note no", group: "Header", controls: ["show", "mandatory"] },
+    { key: "returnAfterPayment", label: "Returning goods the bill's payments already cover", hint: "The return is more than what is still outstanding on the bill, so the vendor owes a refund. Checked when the return is made.", group: "Rules", controls: ["rule"], defaults: { rule: "WARN" } },
   ],
 });
 

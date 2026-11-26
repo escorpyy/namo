@@ -232,20 +232,21 @@ export function VendorRow({ lk, vendorGLId, subLedgerId, readOnly, err, lockVend
   );
 }
 /** Agent label | value pair. */
-export function AgentCells({ lk, agentId, readOnly, err, contextKey, onChange }: { lk: PLookups; agentId: string; readOnly: boolean; err: Errs; contextKey: string; onChange: (c: VendorChange) => void }) {
+export function AgentCells({ lk, agentId, readOnly, err, contextKey, onChange, hidden, required }: { lk: PLookups; agentId: string; readOnly: boolean; err: Errs; contextKey: string; onChange: (c: VendorChange) => void; hidden?: boolean; required?: boolean }) {
   const { agents } = useVendorOptions(lk, "");
-  return (<><FLabel>Agent</FLabel><FCell error={err("agentId")}><AgentPicker agents={agents} agentId={agentId} readOnly={readOnly} error={err("agentId")} contextKey={contextKey} onChange={onChange} /></FCell></>);
+  if (hidden) return (<><FLabel>{""}</FLabel><FCell>{null}</FCell></>); // Entry Control: the field is off for this company
+  return (<><FLabel required={required}>Agent</FLabel><FCell error={err("agentId")}><AgentPicker agents={agents} agentId={agentId} readOnly={readOnly} error={err("agentId")} contextKey={contextKey} onChange={onChange} /></FCell></>);
 }
 
 /** Remarks: a one-row table that sits right under the lines grid (shared by the purchase and sales documents). */
-export function RemarksTable({ value, onChange, readOnly: ro, companyId, error }: { value: string; onChange: (v: string) => void; readOnly: boolean; companyId: number; error?: string }) {
+export function RemarksTable({ value, onChange, readOnly: ro, companyId, error, required }: { value: string; onChange: (v: string) => void; readOnly: boolean; companyId: number; error?: string; required?: boolean }) {
   return (
     <FormTable label="Remarks" pairs={1}>
       <tr>
-        <FLabel>Remarks</FLabel>
+        <FLabel required={required}>Remarks</FLabel>
         <FCell error={error}>
           <NarrationInput multiline rows={1} companyId={companyId} data-field="remarks" maxLength={1024} disabled={ro} value={value} onText={onChange}
-            placeholder="Optional note…" className={`fld min-h-8 resize-y py-1.5 ${error ? "fld-err" : ""}`} aria-label="Remarks" />
+            placeholder={required ? "Required note…" : "Optional note…"} className={`fld min-h-8 resize-y py-1.5 ${error ? "fld-err" : ""}`} aria-label="Remarks" />
         </FCell>
       </tr>
     </FormTable>

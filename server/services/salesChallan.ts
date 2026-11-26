@@ -6,6 +6,7 @@ import { type Actor, type Opts, type Tx, assertBranch, inActorTx, inTx, optDate,
 import { resolveLines, type LineInput } from "./purchase/lines";
 import { ZERO, fmt, toMicro, type Micro } from "./purchase/money";
 import { assertStockCovers, recordMovements } from "./stockLedger";
+import { assertMandatory, entryControlsOf, ruleOutcome } from "./entryControl";
 
 // SALES CHALLAN (delivery note). Posts nothing to the ledger; the accounting happens when an invoice bills it.
 //   draft ──confirm──▶ confirmed (goods are out; the challan is now immutable)
@@ -55,6 +56,7 @@ export function saveSalesChallan(input: SalesChallanInput, actor: Actor, opts: O
       if (existing.isConfirmed) throw new HttpError(409, "A confirmed challan cannot be edited.");
     }
     await assertBranch(tx, input.companyId, input.branchId);
+    await assertMandatory(tx, input.companyId, "SALES_CHALLAN", { agent: input.agentId, remarks: input.remarks }, { agent: "agentId" });
     const [gl] = await tx.select().from(S.generalLedger).where(and(eq(S.generalLedger.id, input.customerGLId), eq(S.generalLedger.companyId, input.companyId)));
     if (!gl) throw new HttpError(404, "Customer ledger not found in this company.", "customerGLId");
     if (!gl.isActive) throw new HttpError(409, `Ledger ${gl.code} is not active.`, "customerGLId");
@@ -112,7 +114,9 @@ export function confirmSalesChallan(id: number, actor: Actor, opts: Opts = {}) {
       if (sd?.tracksBatch && !l.batchNo) throw new HttpError(409, `Line ${l.lineNumber}: this product is batch-tracked; choose the batch it is taken from.`);
       if (sd?.tracksExpiry && !l.expiryDate) throw new HttpError(409, `Line ${l.lineNumber}: this product expires; enter the expiry date of the batch.`);
     }
-    await assertStockCovers(tx, { companyId: c.companyId, branchId: c.branchId }, lines);
+    // Entry Control: Block (the default) refuses, Warn asks once, Ignore lets the stock go negative.
+    const stockRule = (await entryControlsOf(tx, c.companyId)).SALES_CHALLAN.zeroStock.rule;
+    await assertStockCovers(tx, { companyId: c.companyId, branchId: c.branchId }, lines, (message) => ruleOutcome(stockRule, opts.acknowledge, message, "lines"));
     await tx.update(S.salesChallan).set({ isConfirmed: true, confirmedAt: new Date(), confirmedBy: actor.userId, updatedAt: new Date() }).where(eq(S.salesChallan.id, id));
     await recordMovements(tx, { companyId: c.companyId, branchId: c.branchId, date: c.challanDate, source: "SALES_CHALLAN", sourceId: id, direction: "OUT" }, lines);
     return { id, isConfirmed: true as const };

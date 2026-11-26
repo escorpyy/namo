@@ -4,7 +4,8 @@ import { salesChallanApi, type PDoc, type PLookups } from "../../api";
 import type { EntryTabProps } from "../../components/purchase/DocWorkspace";
 import { COMMON_HELP, DocShell, HINTS, Pill } from "../../components/purchase/Bits";
 import { AgentCells, DateCell, FCell, FLabel, FormTable, RemarksTable, TextInput, VendorRow } from "../../components/purchase/BillTables";
-import { LinesGrid } from "../../components/purchase/LinesGrid";
+import { LinesGrid, type ColKey } from "../../components/purchase/LinesGrid";
+import { useEntryControl } from "../../lib/useEntryControl";
 import { NumberField } from "../../components/purchase/NumberField";
 import { blankLine, dateErr, defaultDate, isBlankLine, lineFromDoc, lineToPayload, str, validateLines, type LineRow } from "../../lib/purchaseForm";
 import { useDocScreen, type DocApi, type DocConfig, type Errors } from "../purchase/useDocScreen";
@@ -75,6 +76,7 @@ export default function SalesChallanEntry(p: SalesScreenProps & EntryTabProps<CF
   }), [p.fyCode, api]);
   const restored = useRef(p.hookSnapRef.current);
   const localDirty = useRef(false);
+  const ec = useEntryControl(p.companyId, "SALES_CHALLAN");
   const s = useDocScreen<CForm>(cfg, { companyId: p.companyId, branchId: p.branchId, fyCode: p.fyCode, userId: p.userId, calendar: p.calendar }, {
     setStatus: p.setStatus, dirtyRef: localDirty, externalMessage: p.externalMessage, hints: HINTS,
     sharedLookups: p.lookups, skipList: true, initialDocId: p.docId, initialForm: p.initialForm, restore: restored.current, snapshotRef: p.hookSnapRef,
@@ -106,22 +108,22 @@ export default function SalesChallanEntry(p: SalesScreenProps & EntryTabProps<CF
               <FLabel>Challan No</FLabel>
               <FCell><NumberField bare label="Challan No" documentType="SALES_CHALLAN" companyId={p.companyId} branchId={p.branchId} fyCode={p.fyCode} userId={p.userId} existingNumber={doc ? String(doc.challanNumber) : undefined} readOnly={ro} seriesId={f.numberSeriesId} number={f.docNumber} onChange={(c) => s.patch(c)} /></FCell>
               <DateCell name="challanDate" label="Challan Date" value={f.challanDate} onChange={(v) => { s.patch({ challanDate: v }); s.clearError("challanDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("challanDate")} />
-              <FLabel>Transporter</FLabel>
-              <FCell error={s.err("transporterName")}><TextInput name="transporterName" label="Transporter" value={f.transporterName} onChange={(v) => s.patch({ transporterName: v })} readOnly={ro} error={s.err("transporterName")} /></FCell>
-              <FLabel>Vehicle No</FLabel>
-              <FCell error={s.err("vehicleNo")}><TextInput name="vehicleNo" label="Vehicle No" value={f.vehicleNo} onChange={(v) => s.patch({ vehicleNo: v })} readOnly={ro} error={s.err("vehicleNo")} /></FCell>
+              {!ec("transport").show ? <><FLabel>{""}</FLabel><FCell>{null}</FCell></> : <><FLabel>Transporter</FLabel>
+              <FCell error={s.err("transporterName")}><TextInput name="transporterName" label="Transporter" value={f.transporterName} onChange={(v) => s.patch({ transporterName: v })} readOnly={ro} error={s.err("transporterName")} /></FCell></>}
+              {!ec("transport").show ? <><FLabel>{""}</FLabel><FCell>{null}</FCell></> : <><FLabel>Vehicle No</FLabel>
+              <FCell error={s.err("vehicleNo")}><TextInput name="vehicleNo" label="Vehicle No" value={f.vehicleNo} onChange={(v) => s.patch({ vehicleNo: v })} readOnly={ro} error={s.err("vehicleNo")} /></FCell></>}
             </tr>
             <VendorRow lk={lk} vendorGLId={f.customerGLId} subLedgerId={f.subLedgerId} readOnly={ro} err={(k) => s.err(k === "vendorGLId" ? "customerGLId" : k)} contextKey={String(p.companyId)} onChange={(c: any) => { const { vendorGLId, ...rest } = c; s.patch({ ...rest, ...(vendorGLId !== undefined ? { customerGLId: vendorGLId } : {}) }); s.clearError("customerGLId", "subLedgerId"); }} />
             <tr>
-              <AgentCells lk={lk} agentId={f.agentId} readOnly={ro} err={s.err} contextKey={String(p.companyId)} onChange={(c) => s.patch(c)} />
-              <FLabel>LR No</FLabel>
+              <AgentCells hidden={!ec("agent").show} required={ec("agent").mandatory} lk={lk} agentId={f.agentId} readOnly={ro} err={s.err} contextKey={String(p.companyId)} onChange={(c) => s.patch(c)} />
+              {!ec("transport").show ? <><FLabel>{""}</FLabel><FCell>{null}</FCell><FLabel>{""}</FLabel><FCell>{null}</FCell></> : <><FLabel>LR No</FLabel>
               <FCell error={s.err("lrNo")}><TextInput name="lrNo" label="LR No" value={f.lrNo} onChange={(v) => s.patch({ lrNo: v })} readOnly={ro} error={s.err("lrNo")} /></FCell>
-              <DateCell name="lrDate" label="LR Date" value={f.lrDate} onChange={(v) => { s.patch({ lrDate: v }); s.clearError("lrDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("lrDate")} />
+              <DateCell name="lrDate" label="LR Date" value={f.lrDate} onChange={(v) => { s.patch({ lrDate: v }); s.clearError("lrDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("lrDate")} /></>}
             </tr>
           </FormTable>
           <h2 className="text-[13px] font-semibold">Goods delivered</h2>
-          <LinesGrid kind="sales" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={stockLookups} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} />
-          <RemarksTable value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} companyId={p.companyId} error={s.err("remarks")} />
+          <LinesGrid kind="sales" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={stockLookups} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} hideCols={(ec("lineMore").show ? [] : ["more"]) as ColKey[]} />
+          {ec("remarks").show && <RemarksTable required={ec("remarks").mandatory} value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} companyId={p.companyId} error={s.err("remarks")} />}
           {ro && doc && doc.lines.length > 0 && (
             <p className="text-[12px] text-slate-600">Billed so far: {doc.lines.map((l: any) => `line ${l.lineNumber}: ${Number(l.billedQty)} of ${Number(l.qty)}`).join(" · ")}</p>
           )}

@@ -6,6 +6,8 @@ import { guardPeriod } from "../periodLock";
 import { assertGlEntryAllowed } from "../glEntryControl";
 import { assertStockCovers, recordMovements } from "../stockLedger";
 import { type Actor, type Opts, type Tx, inActorTx, parseDate, resolveFiscalYear, today } from "./common";
+import { assertMandatory, entryControlsOf, ruleOutcome } from "../entryControl";
+import { openDocuments } from "../billSettlement";
 import { assertVendorReferenceFree, type JvRow, type LockOpts, writeVoucher } from "./purchaseBill";
 import { ZERO, fmt, roundTo, toMicro, type Micro } from "./money";
 
@@ -74,6 +76,7 @@ export function createPurchaseReturn(input: PurchaseReturnInput, actor: Actor, o
     if (reversed) throw new HttpError(409, "This bill has been reversed.");
     if (!input.lines?.length) throw new HttpError(400, "Choose at least one line to return.", "lines");
     const debitNoteNo = input.debitNoteNo?.trim() || null;
+    await assertMandatory(tx, orig.companyId, "PURCHASE_RETURN", { reason: input.reason, debitNoteNo }, { reason: "reason", debitNoteNo: "debitNoteNo" });
     if (debitNoteNo) await assertVendorReferenceFree(tx, { companyId: orig.companyId, vendorGLId: orig.vendorGLId, subLedgerId: orig.subLedgerId, reference: debitNoteNo, excludeId: null, label: "Vendor credit note", field: "debitNoteNo" });
 
     const date = input.returnDate ? parseDate(input.returnDate, "returnDate") : today();
@@ -116,6 +119,13 @@ export function createPurchaseReturn(input: PurchaseReturnInput, actor: Actor, o
     const termNet = scaled.reduce((a, x) => a + (x.t.nature === "ADDITIVE" ? x.amount : -x.amount), ZERO);
     const total = basicBack + termNet;
     if (total <= ZERO) throw new HttpError(409, "The return total must be more than zero.");
+    // Entry Control: a return bigger than what is still outstanding means payments already made cover goods that go back, so the vendor owes a refund.
+    const open = (await openDocuments(tx, { companyId: orig.companyId, kind: "PURCHASE_BILL", generalLedgerId: orig.vendorGLId })).find((d) => d.id === orig.id);
+    const outstanding = open ? toMicro(open.outstanding) : ZERO;
+    if (total > outstanding) {
+      ruleOutcome((await entryControlsOf(tx, orig.companyId)).PURCHASE_RETURN.returnAfterPayment.rule, opts.acknowledge,
+        `This return (${fmt(total, 2)}) is more than the ${fmt(outstanding, 2)} still outstanding on bill ${orig.invoiceNumber}; payments already made cover some of these goods, so the vendor owes a refund.`, "lines");
+    }
 
     // journal: the posting of the bill, mirrored
     const rows: JvRow[] = [];

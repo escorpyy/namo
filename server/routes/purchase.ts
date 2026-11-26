@@ -122,12 +122,12 @@ purchaseRouter.get("/challans/:id", wrap(async (req, res) => { res.json(await P.
 
 purchaseRouter.post("/challans", wrap(async (req, res) => {
   const companyId = whole(req.body?.companyId ?? q(req, "companyId"), "companyId"), branchId = whole(req.body?.branchId, "branchId");
-  const result = await P.savePurchaseChallan(challanInput(req.body, { companyId, branchId }), await actorOf(req));
+  const result = await P.savePurchaseChallan(challanInput(req.body, { companyId, branchId }), await actorOf(req), { acknowledge: acknowledgedOf(req) });
   res.status(201).json({ result, document: await P.getPurchaseChallan(result.id, companyId) });
 }));
 purchaseRouter.put("/challans/:id", wrap(async (req, res) => {
   const id = idOf(req), companyId = companyOf(req), c = await owned("challan", id, companyId);
-  const result = await P.savePurchaseChallan(challanInput(req.body, { companyId, branchId: c.branchId, id }), await actorOf(req));
+  const result = await P.savePurchaseChallan(challanInput(req.body, { companyId, branchId: c.branchId, id }), await actorOf(req), { acknowledge: acknowledgedOf(req) });
   res.json({ result, document: await P.getPurchaseChallan(id, companyId) });
 }));
 purchaseRouter.delete("/challans/:id", wrap(async (req, res) => {
@@ -136,7 +136,7 @@ purchaseRouter.delete("/challans/:id", wrap(async (req, res) => {
 }));
 purchaseRouter.post("/challans/:id/confirm", wrap(async (req, res) => {
   const id = idOf(req), companyId = companyOf(req); await owned("challan", id, companyId);
-  const result = await P.confirmPurchaseChallan(id, await actorOf(req));
+  const result = await P.confirmPurchaseChallan(id, await actorOf(req), { acknowledge: acknowledgedOf(req) });
   res.json({ result, document: await P.getPurchaseChallan(id, companyId) });
 }));
 
@@ -199,7 +199,7 @@ purchaseRouter.post("/bills/:id/return", wrap(async (req, res) => {
   const id = idOf(req), companyId = companyOf(req); await owned("bill", id, companyId);
   const o = pick(req.body ?? {}, { returnDate: "date", reason: "str", debitNoteNo: "str" }, "Return");
   const lines = rows(req.body?.lines, { billLineId: "int", qty: "num" }, "lines", MAX_LINES, "Line") as { billLineId: number; qty: number | string }[];
-  const result = await P.createPurchaseReturn({ companyId, billId: id, returnDate: o.returnDate || undefined, reason: o.reason?.trim() || undefined, debitNoteNo: o.debitNoteNo?.trim() || null, lines }, await actorOf(req), { lockOverride: lockOverrideOf(req) });
+  const result = await P.createPurchaseReturn({ companyId, billId: id, returnDate: o.returnDate || undefined, reason: o.reason?.trim() || undefined, debitNoteNo: o.debitNoteNo?.trim() || null, lines }, await actorOf(req), { lockOverride: lockOverrideOf(req), acknowledge: acknowledgedOf(req) });
   res.status(201).json({ result, document: await P.getPurchaseBill(id, companyId) });
 }));
 // Correct a posted bill: reverse it and get a draft copy to fix and post.

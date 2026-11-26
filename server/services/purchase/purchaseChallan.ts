@@ -6,6 +6,7 @@ import { numberForSave } from "../numberSeries";
 import { resolveLines, type LineInput } from "./lines";
 import { ZERO, fmt, toMicro, type Micro } from "./money";
 import { recordMovements } from "../stockLedger";
+import { assertMandatory, entryControlsOf, ruleOutcome } from "../entryControl";
 import { billedByChallanLine, pending, receivedByOrderLine, withTolerance } from "./quantities";
 
 // PURCHASE CHALLAN (goods receipt). Posts nothing to the ledger; the accounting happens when a bill closes it.
@@ -63,12 +64,13 @@ export function savePurchaseChallan(input: PurchaseChallanInput, actor: Actor, o
 
     await assertBranch(tx, input.companyId, input.branchId);
     await assertVendorLedger(tx, input.companyId, input.vendorGLId, input.subLedgerId);
+    await assertMandatory(tx, input.companyId, "PURCHASE_CHALLAN", { agent: input.agentId, vendorChallan: input.vendorChallanNo && input.vendorChallanDate ? "set" : null, remarks: input.remarks }, { agent: "agentId", vendorChallan: "vendorChallanNo" });
     const fy = await resolveFiscalYear(tx, input.companyId, challanDate, input.fiscalYear ?? null);
 
     if (input.purchaseOrderId) {
       const [o] = await tx.select().from(S.purchaseOrder).where(and(eq(S.purchaseOrder.id, input.purchaseOrderId), eq(S.purchaseOrder.companyId, input.companyId)));
       if (!o) throw new HttpError(404, "Purchase order not found in this company.", "purchaseOrderId");
-      if (o.status !== "APPROVED") throw new HttpError(409, `Order ${o.orderNumber} is ${o.status}; goods can only be received against an APPROVED order.`, "purchaseOrderId");
+      if (o.status !== "APPROVED") ruleOutcome((await entryControlsOf(tx, input.companyId)).PURCHASE_CHALLAN.orderNotApproved.rule, opts.acknowledge, `Order ${o.orderNumber} is ${o.status}; goods are normally received against an APPROVED order.`, "purchaseOrderId");
     } else if (input.lines.some((l) => l.purchaseOrderLineId)) {
       throw new HttpError(400, "Lines refer to order lines but the challan has no purchase order.", "purchaseOrderId");
     }
@@ -132,7 +134,7 @@ export function confirmPurchaseChallan(id: number, actor: Actor, opts: Opts & { 
     if (c.purchaseOrderId) {
       // Lock the order row so two challans confirming at once take turns and cannot both squeeze under the limit.
       const [o] = await tx.select().from(S.purchaseOrder).where(eq(S.purchaseOrder.id, c.purchaseOrderId)).for("update");
-      if (o.status !== "APPROVED") throw new HttpError(409, `Order ${o.orderNumber} is ${o.status}; goods can only be received against an APPROVED order.`);
+      if (o.status !== "APPROVED") ruleOutcome((await entryControlsOf(tx, c.companyId)).PURCHASE_CHALLAN.orderNotApproved.rule, opts.acknowledge, `Order ${o.orderNumber} is ${o.status}; goods are normally received against an APPROVED order.`);
       const olIds = [...new Set(lines.map((l) => l.purchaseOrderLineId).filter((x): x is number => !!x))];
       const ols = olIds.length ? await tx.select().from(S.purchaseOrderLine).where(inArray(S.purchaseOrderLine.id, olIds)) : [];
       const ordered = new Map(ols.map((l) => [l.id, l]));
@@ -144,7 +146,7 @@ export function confirmPurchaseChallan(id: number, actor: Actor, opts: Opts & { 
         const limit = withTolerance(toMicro(ol.qty), opts.tolerancePercent);
         const already = received.get(olId) ?? ZERO;
         if (already + q > limit) {
-          throw new HttpError(409, `Order line ${ol.lineNumber}: receiving ${fmt(q)} would exceed the ordered ${fmt(toMicro(ol.qty))} (already received ${fmt(already)}). Pending: ${fmt(pending(limit, already))}.`);
+          ruleOutcome((await entryControlsOf(tx, c.companyId)).PURCHASE_CHALLAN.overReceipt.rule, opts.acknowledge, `Order line ${ol.lineNumber}: receiving ${fmt(q)} would exceed the ordered ${fmt(toMicro(ol.qty))} (already received ${fmt(already)}). Pending: ${fmt(pending(limit, already))}.`);
         }
       }
     }

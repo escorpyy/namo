@@ -6,7 +6,8 @@ import type { EntryTabProps } from "../../components/purchase/DocWorkspace";
 import { Combobox, type ComboOption } from "../../components/Combobox";
 import { COMMON_HELP, DocShell, HINTS, Pill, focusStep } from "../../components/purchase/Bits";
 import { AgentCells, DateCell, FCell, FLabel, FormTable, RemarksTable, TextInput, VendorRow } from "../../components/purchase/BillTables";
-import { LinesGrid } from "../../components/purchase/LinesGrid";
+import { LinesGrid, type ColKey } from "../../components/purchase/LinesGrid";
+import { useEntryControl } from "../../lib/useEntryControl";
 import { blankLine, dateErr, defaultDate, isBlankLine, lineFromDoc, lineToPayload, str, trimDec, validateLines, type LineRow } from "../../lib/purchaseForm";
 import type { PurchaseScreenProps } from "./PurchaseOrderScreen";
 import { useDocScreen, type DocConfig, type Errors } from "./useDocScreen";
@@ -61,6 +62,7 @@ export default function PurchaseChallanEntry(p: PurchaseScreenProps & EntryTabPr
   const lkRef = useMemo(() => ({ current: null as ReturnType<typeof useDocScreen>["lookups"] }), []);
   const restored = useRef(p.hookSnapRef.current);
   const localDirty = useRef(false);
+  const ec = useEntryControl(p.companyId, "PURCHASE_CHALLAN");
   const s = useDocScreen<CForm>(cfg, { companyId: p.companyId, branchId: p.branchId, fyCode: p.fyCode, userId: p.userId, calendar: p.calendar }, {
     setStatus: p.setStatus, dirtyRef: localDirty, externalMessage: p.externalMessage, hints: HINTS,
     sharedLookups: p.lookups, skipList: true, initialDocId: p.docId, initialForm: p.initialForm, restore: restored.current, snapshotRef: p.hookSnapRef,
@@ -121,25 +123,25 @@ export default function PurchaseChallanEntry(p: PurchaseScreenProps & EntryTabPr
               <DateCell name="challanDate" label="Challan Date" value={f.challanDate} onChange={(v) => { s.patch({ challanDate: v }); s.clearError("challanDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("challanDate")} />
               <FLabel>Against Order</FLabel>
               <FCell error={s.err("purchaseOrderId")}><Combobox fieldName="purchaseOrderId" placeholder="Approved order (optional)" value={f.purchaseOrderId} hasError={!!s.err("purchaseOrderId")} options={orderOpts} disabled={ro} onChange={(v) => void pickOrder(v)} onCommit={(el, dir) => focusStep(el, dir)} /></FCell>
-              <FLabel>Vendor Challan No</FLabel>
+              {!ec("vendorChallan").show ? <><><FLabel>{""}</FLabel><FCell>{null}</FCell></><><FLabel>{""}</FLabel><FCell>{null}</FCell></></> : <><FLabel required={ec("vendorChallan").mandatory}>Vendor Challan No</FLabel>
               <FCell error={s.err("vendorChallanNo")}><TextInput name="vendorChallanNo" label="Vendor Challan No" value={f.vendorChallanNo} onChange={(v) => s.patch({ vendorChallanNo: v })} readOnly={ro} error={s.err("vendorChallanNo")} /></FCell>
-              <DateCell name="vendorChallanDate" label="Vendor Challan Date" value={f.vendorChallanDate} onChange={(v) => { s.patch({ vendorChallanDate: v }); s.clearError("vendorChallanDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("vendorChallanDate")} />
+              <DateCell name="vendorChallanDate" label="Vendor Challan Date" value={f.vendorChallanDate} onChange={(v) => { s.patch({ vendorChallanDate: v }); s.clearError("vendorChallanDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("vendorChallanDate")} /></>}
             </tr>
             <VendorRow lk={lk} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} readOnly={ro} err={s.err} lockVendor={!!f.purchaseOrderId} contextKey={String(p.companyId)} onChange={(c) => { s.patch(c); s.clearError("vendorGLId", "subLedgerId"); }} />
             <tr>
-              <AgentCells lk={lk} agentId={f.agentId} readOnly={ro} err={s.err} contextKey={String(p.companyId)} onChange={(c) => s.patch(c)} />
-              <FLabel>Transporter</FLabel>
+              <AgentCells hidden={!ec("agent").show} required={ec("agent").mandatory} lk={lk} agentId={f.agentId} readOnly={ro} err={s.err} contextKey={String(p.companyId)} onChange={(c) => s.patch(c)} />
+              {!ec("transport").show ? <><><FLabel>{""}</FLabel><FCell>{null}</FCell></><><FLabel>{""}</FLabel><FCell>{null}</FCell></><><FLabel>{""}</FLabel><FCell>{null}</FCell></><><FLabel>{""}</FLabel><FCell>{null}</FCell></></> : <><FLabel>Transporter</FLabel>
               <FCell error={s.err("transporterName")}><TextInput name="transporterName" label="Transporter" value={f.transporterName} onChange={(v) => s.patch({ transporterName: v })} readOnly={ro} error={s.err("transporterName")} /></FCell>
               <FLabel>Vehicle No</FLabel>
               <FCell error={s.err("vehicleNo")}><TextInput name="vehicleNo" label="Vehicle No" value={f.vehicleNo} onChange={(v) => s.patch({ vehicleNo: v })} readOnly={ro} error={s.err("vehicleNo")} /></FCell>
               <FLabel>LR No</FLabel>
               <FCell error={s.err("lrNo")}><TextInput name="lrNo" label="LR No" value={f.lrNo} onChange={(v) => s.patch({ lrNo: v })} readOnly={ro} error={s.err("lrNo")} /></FCell>
-              <DateCell name="lrDate" label="LR Date" value={f.lrDate} onChange={(v) => { s.patch({ lrDate: v }); s.clearError("lrDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("lrDate")} />
+              <DateCell name="lrDate" label="LR Date" value={f.lrDate} onChange={(v) => { s.patch({ lrDate: v }); s.clearError("lrDate"); }} calendar={p.calendar} readOnly={ro} error={s.err("lrDate")} /></>}
             </tr>
           </FormTable>
           <h2 className="text-[13px] font-semibold">Lines received</h2>
-          <LinesGrid kind="challan" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts />
-          <RemarksTable value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} companyId={p.companyId} error={s.err("remarks")} />
+          <LinesGrid kind="challan" lines={f.lines} onChange={(lines) => s.patch({ lines })} lookups={lk} products={products} readOnly={ro} errors={s.errors} calendar={p.calendar} clearError={s.clearError} contextKey={String(p.companyId)} lockProducts hideCols={(ec("lineMore").show ? [] : ["more"]) as ColKey[]} />
+          {ec("remarks").show && <RemarksTable required={ec("remarks").mandatory} value={f.remarks} onChange={(v) => s.patch({ remarks: v })} readOnly={ro} companyId={p.companyId} error={s.err("remarks")} />}
           {ro && doc && doc.lines.length > 0 && (
             <p className="text-[12px] text-slate-600">Billed so far: {doc.lines.map((l) => `line ${l.lineNumber}: ${l.billed} of ${l.qty}`).join(" · ")}</p>
           )}
