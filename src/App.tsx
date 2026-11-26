@@ -256,6 +256,7 @@ export default function App() {
           <CashFlowScreen
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyName={co.name} companyId={companyId} branchId={branchId} fyCode={currentFy?.code ?? "-"}
             fyStart={currentFy?.startDate ?? ""} fyEnd={currentFy?.endDate ?? ""} calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef}
+            previousFy={previousFy ? { code: previousFy.code, startDate: previousFy.startDate, endDate: previousFy.endDate } : undefined}
           />
         ) : screen === "nfrs-sme-changes-equity" ? (
           <ChangesInEquityScreen

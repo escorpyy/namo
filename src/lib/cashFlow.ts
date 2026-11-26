@@ -4,6 +4,7 @@ import type { FinancialReportRow } from "../api";
 // Every non-cash ledger falls in exactly one section, so the statement reconciles to the movement of the cash/bank ledgers (GL "Cash or bank" flag).
 // The section a line lands in follows the company's own account group / ledger names; change the patterns below to change the policy.
 export const INVESTING_GROUP = /non.?current|fixed|investment|long.?term|intangible|capital work|property|equipment/i;
+export const FIXED_ASSET_GROUP = /fixed|property|plant|equipment/i;
 export const FINANCING_LIABILITY = /loan|borrow|overdraft|debenture|finance lease|non.?current|long.?term/i;
 export const NON_CASH_EXPENSE = /depreciation|amorti[sz]ation/i;
 
@@ -38,10 +39,21 @@ export function buildCashFlow(bsRows: FinancialReportRow[], plRows: FinancialRep
     ...byGroup(operatingAssets).map((g) => ({ label: `(Increase) / decrease in ${g.name}`, amount: -g.v })),
     ...byGroup(operatingLiabs).map((g) => ({ label: `Increase / (decrease) in ${g.name}`, amount: -g.v })),
   ].filter((l) => Math.abs(l.amount) >= 0.005);
-  const investingLines: CashLine[] = byGroup(investingAssets).map((g) => ({ label: `Net (acquisition) / disposal of ${g.name}`, amount: -g.v })).filter((l) => Math.abs(l.amount) >= 0.005);
-  // Depreciation lowers fixed assets without using cash, so the add-back above is matched by taking it out of the movement here.
-  if (investingLines.length && depreciation) investingLines[0] = { ...investingLines[0], amount: investingLines[0].amount - depreciation };
-  else if (depreciation) investingLines.push({ label: "Net (acquisition) / disposal of fixed assets", amount: -depreciation });
+  // Depreciation lowers fixed assets without using cash, so the add-back above is matched by taking it out of the movement of the group it belongs to:
+  // first what each group's accumulated depreciation / amortisation ledgers moved by, then any rest (written off the asset directly, or removed on a disposal)
+  // from the fixed-asset group. Account group codes play no part.
+  const groups = byGroup(investingAssets).map((g) => ({ name: g.name, amount: -g.v }));
+  let unallocated = depreciation;
+  for (const g of groups) {
+    const own = -investingAssets.filter((r) => r.accountGroupName === g.name && NON_CASH_EXPENSE.test(r.name)).reduce((s, r) => s + n(r.closing) - n(r.opening), 0);
+    g.amount -= own; unallocated -= own;
+  }
+  if (Math.abs(unallocated) >= 0.005) {
+    const target = groups.find((g) => FIXED_ASSET_GROUP.test(g.name));
+    if (target) target.amount -= unallocated;
+    else groups.push({ name: "fixed assets", amount: -unallocated });
+  }
+  const investingLines: CashLine[] = groups.map((g) => ({ label: `Net (acquisition) / disposal of ${g.name}`, amount: g.amount })).filter((l) => Math.abs(l.amount) >= 0.005);
 
   // Equity: everything except the period profit (capital introduced, drawings, dividends, transfers).
   const equityMove = -equity.reduce((s, r) => s + n(r.closing) - n(r.opening), 0) + (bsResult - priorResult) - profit;
@@ -56,4 +68,15 @@ export function buildCashFlow(bsRows: FinancialReportRow[], plRows: FinancialRep
   const openingCash = cash.reduce((s, r) => s + n(r.opening), 0), closingCash = cash.reduce((s, r) => s + n(r.closing), 0);
   void plResult;
   return { profit, adjustments, workingCapital, operating, investingLines, investing, financingLines, financing, netChange, openingCash, closingCash, difference: closingCash - openingCash - netChange };
+}
+
+export type ComparativeLine = { label: string; amount: number; prior: number };
+// Lines of both years side by side; a line that exists in only one year shows nil in the other.
+export function withPrior(current: CashLine[], prior: CashLine[] = []): ComparativeLine[] {
+  const before = new Map(prior.map((l) => [l.label, l.amount]));
+  const labels = new Set(current.map((l) => l.label));
+  return [
+    ...current.map((l) => ({ ...l, prior: before.get(l.label) ?? 0 })),
+    ...prior.filter((l) => !labels.has(l.label)).map((l) => ({ label: l.label, amount: 0, prior: l.amount })),
+  ];
 }
