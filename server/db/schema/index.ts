@@ -22,3 +22,4 @@ export * from "./narration";
 export * from "./relations";
 export * from "./numberSeries";
 export * from "./yearEndClose";
+export * from "./statementTemplates";

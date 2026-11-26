@@ -25,6 +25,7 @@ import {
     "fs-trial-balance",
     "fs-profit-loss",
     "fs-balance-sheet",
+    "fs-statement-templates",
     "nfrs-sme-reporting",
     "nfrs-sme-trial-balance",
     "nfrs-sme-profit-loss",
@@ -133,6 +134,7 @@ const sections: Section[] = [
       { id: "fs-balance-sheet", label: "Balance Sheet" },
       { id: "fs-cash-flow", label: "Cash Flow Statement" },
       { id: "fs-owners-equity", label: "Statement of Changes in Owner's Equity" },
+      { id: "fs-statement-templates", label: "Statement Templates" },
     ],
   },
   {

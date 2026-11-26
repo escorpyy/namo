@@ -21,6 +21,7 @@ import FinancialStatementScreen from "./screens/reports/FinancialStatementScreen
 import ChangesInEquityScreen from "./screens/reports/ChangesInEquityScreen";
 import CashFlowScreen from "./screens/reports/CashFlowScreen";
 import NfrsSmeReportingScreen from "./screens/reports/NfrsSmeReportingScreen";
+import StatementTemplatesScreen from "./screens/reports/StatementTemplatesScreen";
 import SalesInvoiceWorkspace from "./screens/sales/SalesInvoiceWorkspace";
 import SalesChallanWorkspace from "./screens/sales/SalesChallanWorkspace";
 import PurchaseBillWorkspace from "./screens/purchase/PurchaseBillWorkspace";
@@ -237,6 +238,12 @@ export default function App() {
             fyStart={co.fiscalYears.find((y) => y.id === fyId)?.startDate ?? ""} fyEnd={co.fiscalYears.find((y) => y.id === fyId)?.endDate ?? ""}
             calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} onOpenSource={openSource}
           />
+        ) : screen === "fs-statement-templates" ? (
+          <StatementTemplatesScreen
+            key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId} userId={ctx.user.id} companyName={co.name}
+            branchName={co.branches.find((b) => b.id === branchId)?.name ?? "-"} fyCode={currentFy?.code ?? "-"}
+            fyStart={currentFy?.startDate ?? ""} fyEnd={currentFy?.endDate ?? ""} setStatus={setStatus} dirtyRef={dirtyRef}
+          />
         ) : screen === "fs-trial-balance" || screen === "fs-profit-loss" || screen === "fs-balance-sheet" || screen === "nfrs-sme-trial-balance" || screen === "nfrs-sme-profit-loss" || screen === "nfrs-sme-balance-sheet" ? (
           <FinancialStatementScreen companyName={co.name} calendar={calendar}
             key={`${screen}:${companyId}:${branchId}:${fyId}`} kind={screen === "fs-trial-balance" || screen === "nfrs-sme-trial-balance" ? "trial-balance" : screen === "fs-profit-loss" || screen === "nfrs-sme-profit-loss" ? "profit-loss" : "balance-sheet"}
@@ -258,7 +265,7 @@ export default function App() {
         ) : screen === "nfrs-sme-reporting" ? (
           <NfrsSmeReportingScreen
             key={`${screen}:${companyId}:${branchId}:${fyId}`} companyId={companyId} branchId={branchId}
-            fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"} setStatus={setStatus} dirtyRef={dirtyRef}
+            fyCode={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"} setStatus={setStatus} dirtyRef={dirtyRef} onNavigate={(target) => void navigate(target)}
           />
         ) : screen === "sales-challans" ? (
           <SalesChallanWorkspace

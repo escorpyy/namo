@@ -465,6 +465,65 @@ export const financialReportsApi = {
   get: (kind: FinancialReportKind, p: { companyId: number; branchId: number; fiscalYear: string; from: string; to: string }) =>
     req<FinancialReportResult>(`/api/financial-reports/${kind}?${qstr(p)}`),
 };
+export type StatementTemplateStatement = "PL" | "BS" | "CFS" | "SCOE";
+export type StatementTemplateLineType = "HEADING" | "MAPPED" | "COMPUTED";
+export type StatementAccountType = FinancialReportRow["accountType"];
+export interface StatementTemplateLineDefinition {
+  statement: StatementTemplateStatement; code: string; label: string; parentCode?: string | null; sortOrder: number;
+  axis?: "LINE" | "ROW" | "COLUMN"; lineType: StatementTemplateLineType; nature?: "DEBIT" | "CREDIT" | null;
+  role?: string | null; allowedTypes?: StatementAccountType[]; noteNo?: string | null;
+  drillDepth?: "NONE" | "GROUP" | "SUBGROUP" | "LEDGER"; showWhenZero?: boolean;
+}
+export interface StatementTemplateFormulaDefinition { statement: StatementTemplateStatement; lineCode: string; termCode: string; sign: -1 | 1; sortOrder: number }
+export interface StatementTemplateMappingDefinition {
+  statement: StatementTemplateStatement; lineCode: string; accountGroupId?: number | null; accountSubGroupId?: number | null;
+  generalLedgerId?: number | null; glSetupRole?: string | null; fallbackGeneralLedgerId?: number | null;
+  accountFlag?: "IS_CASH_OR_BANK" | null; cfsSource?: "BS_MOVEMENT" | "PL_ADDBACK" | "CASH_FLAG" | null;
+  movementKind?: "DRAWINGS" | "DIVIDENDS" | "CAPITAL_INTRODUCED" | "TRANSFER" | "OTHER" | null; sortOrder?: number;
+}
+export interface StatementTemplateDefinition {
+  lines: StatementTemplateLineDefinition[]; formulas: StatementTemplateFormulaDefinition[]; mappings: StatementTemplateMappingDefinition[];
+}
+export interface StatementTemplateSummary {
+  id: number; companyId: number; name: string; description: string | null; isSystem: boolean; isDefault: boolean; isActive: boolean;
+  statementsPresent?: StatementTemplateStatement[]; statementsComplete?: boolean;
+}
+export interface StatementTemplate extends StatementTemplateSummary {
+  lines: (StatementTemplateLineDefinition & { id: number; parentLineId: number | null; parentCode: string | null })[];
+  formulas: (StatementTemplateFormulaDefinition & { id: number; lineId: number; termLineId: number })[];
+  mappings: (StatementTemplateMappingDefinition & { id: number; lineId: number })[];
+}
+export interface StatementEngineLineResult {
+  id: number; code: string; label: string; parentLineId: number | null; lineType: StatementTemplateLineType;
+  role: string | null; amount: string | null; visible: boolean; children: StatementEngineLineResult[];
+}
+export interface StatementTemplateReport {
+  template: Pick<StatementTemplateSummary, "id" | "name" | "isSystem" | "isDefault">; statement: "PL" | "BS";
+  fiscalYear: string; from: string; to: string; periodMode: "SELECTED_PERIOD" | "AS_OF_END";
+  rows: StatementEngineLineResult[]; roles: Record<string, string>;
+  unmapped: { id: number; code: string; name: string; accountType: StatementAccountType; amount: string }[];
+  warnings: string[]; stockOpeningMismatches?: { branchId: number; branch: string; ledger: string; stock: string; ledgerBalance: string }[];
+  checks?: unknown[];
+}
+export type StatementTemplateReportQuery = { companyId: number; templateId: number; statement: "PL" | "BS"; branchId: number; fiscalYear: string; from: string; to: string };
+export const statementTemplatesApi = {
+  list: (companyId: number) => req<StatementTemplateSummary[]>(`/api/statement-templates?${qstr({ companyId })}`),
+  get: (companyId: number, id: number) => req<StatementTemplate>(`/api/statement-templates/${id}?${qstr({ companyId })}`),
+  create: (companyId: number, userId: number, name: string, description?: string) =>
+    req<StatementTemplateSummary>(`/api/statement-templates?${qstr({ companyId })}`, { method: "POST", body: JSON.stringify({ name, description, userId }) }),
+  copy: (companyId: number, userId: number, id: number, name: string) =>
+    req<StatementTemplate>(`/api/statement-templates/${id}/copy?${qstr({ companyId })}`, { method: "POST", body: JSON.stringify({ name, userId }) }),
+  update: (companyId: number, userId: number, id: number, patch: { name?: string; description?: string | null; isActive?: boolean }) =>
+    req<StatementTemplateSummary>(`/api/statement-templates/${id}?${qstr({ companyId })}`, { method: "PATCH", body: JSON.stringify({ ...patch, userId }) }),
+  replaceDefinition: (companyId: number, userId: number, id: number, definition: StatementTemplateDefinition) =>
+    req<StatementTemplate>(`/api/statement-templates/${id}/definition?${qstr({ companyId })}`, { method: "PUT", body: JSON.stringify({ ...definition, userId }) }),
+  setDefault: (companyId: number, userId: number, id: number) =>
+    req<StatementTemplateSummary>(`/api/statement-templates/${id}/default?${qstr({ companyId })}`, { method: "PATCH", body: JSON.stringify({ userId }) }),
+  remove: (companyId: number, userId: number, id: number) =>
+    req<{ deleted: true; id: number }>(`/api/statement-templates/${id}?${qstr({ companyId, userId })}`, { method: "DELETE" }),
+  report: (p: StatementTemplateReportQuery) => req<StatementTemplateReport>(`/api/statement-templates/${p.templateId}/report?${qstr({ companyId: p.companyId, statement: p.statement, branchId: p.branchId, fiscalYear: p.fiscalYear, from: p.from, to: p.to })}`),
+  unmapped: (p: StatementTemplateReportQuery) => req<Pick<StatementTemplateReport, "statement" | "fiscalYear" | "from" | "to" | "unmapped">>(`/api/statement-templates/${p.templateId}/unmapped?${qstr({ companyId: p.companyId, statement: p.statement, branchId: p.branchId, fiscalYear: p.fiscalYear, from: p.from, to: p.to })}`),
+};
 export type YearEndClosePreview = {
   fiscalYear: string; from: string; to: string; fiscalYearClosed: boolean;
   existingClose: { id: number; status: string } | null;

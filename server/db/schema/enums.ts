@@ -191,3 +191,15 @@ export const purchaseOrderStatusEnum = pgEnum("PurchaseOrderStatus", [
   "CLOSED",
   "CANCELLED",
 ]);
+
+// User-designed financial statement templates and their mappings.
+export const statementKindEnum = pgEnum("StatementKind", ["PL", "BS", "CFS", "SCOE"]);
+export const statementLineTypeEnum = pgEnum("StatementLineType", ["HEADING", "MAPPED", "COMPUTED"]);
+export const statementLineNatureEnum = pgEnum("StatementLineNature", ["DEBIT", "CREDIT"]);
+export const statementDrillDepthEnum = pgEnum("StatementDrillDepth", ["NONE", "GROUP", "SUBGROUP", "LEDGER"]);
+export const statementLineAxisEnum = pgEnum("StatementLineAxis", ["LINE", "ROW", "COLUMN"]);
+export const statementCfsSourceEnum = pgEnum("StatementCfsSource", ["BS_MOVEMENT", "PL_ADDBACK", "CASH_FLAG"]);
+export const statementMovementKindEnum = pgEnum("StatementMovementKind", [
+  "DRAWINGS", "DIVIDENDS", "CAPITAL_INTRODUCED", "TRANSFER", "OTHER",
+]);
+export const statementAccountFlagEnum = pgEnum("StatementAccountFlag", ["IS_CASH_OR_BANK"]);

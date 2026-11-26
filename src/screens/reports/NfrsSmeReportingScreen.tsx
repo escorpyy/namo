@@ -6,12 +6,13 @@ type Module = {
   title: string;
   description: string;
   icon: typeof Landmark;
-  status: "Foundation ready" | "Planned";
+  status: "Foundation ready" | "Available" | "Planned";
+  screen?: string;
 };
 
 const modules: Module[] = [
-  { title: "SME Reporting Setup", description: "Configure statement templates, note numbering, tax assumptions, and reporting preferences.", icon: Settings2, status: "Planned" },
-  { title: "Account Mapping", description: "Map General Ledger accounts to NFRS statement lines and disclosure notes.", icon: SlidersHorizontal, status: "Planned" },
+  { title: "SME Reporting Setup", description: "Manage company statement templates and their reporting definitions.", icon: Settings2, status: "Available", screen: "fs-statement-templates" },
+  { title: "Account Mapping", description: "Define ledger mapping selectors and formulas for statement lines.", icon: SlidersHorizontal, status: "Available", screen: "fs-statement-templates" },
   { title: "Trial Balance", description: "Review posted ledger balances and confirm debit/credit integrity for the selected period.", icon: ListChecks, status: "Foundation ready" },
   { title: "Statement of Financial Position", description: "Generate assets, liabilities, and equity with NFRS classifications.", icon: Landmark, status: "Foundation ready" },
   { title: "Profit or Loss and OCI", description: "Generate income, expenses, profit, and other comprehensive income.", icon: BarChart3, status: "Foundation ready" },
@@ -23,7 +24,7 @@ const modules: Module[] = [
   { title: "Validation & Close", description: "Check mappings, balance-sheet equality, cash-flow reconciliation, and period readiness.", icon: FileCheck2, status: "Planned" },
 ];
 
-export default function NfrsSmeReportingScreen(p: { companyId: number; branchId: number; fyCode: string; setStatus: (s: StatusInfo) => void; dirtyRef: MutableRefObject<boolean> }) {
+export default function NfrsSmeReportingScreen(p: { companyId: number; branchId: number; fyCode: string; setStatus: (s: StatusInfo) => void; dirtyRef: MutableRefObject<boolean>; onNavigate: (screen: string) => void }) {
   useEffect(() => {
     p.dirtyRef.current = false;
     p.setStatus({ mode: "view", count: modules.length, shown: modules.length, message: "NFRS SME reporting workspace ready", kind: "info", hints: ["Start with account mapping", "Reports use posted transactions"] });
@@ -49,12 +50,12 @@ export default function NfrsSmeReportingScreen(p: { companyId: number; branchId:
     <div className="p-6">
       <div className="mb-4 flex items-center justify-between">
         <div><h2 className="font-semibold text-slate-800">SME reporting modules</h2><p className="text-xs text-slate-500">The foundation reports reuse the current accounting engine; the remaining modules will be added in sequence.</p></div>
-        <span className="text-xs text-slate-500">{modules.filter((m) => m.status === "Foundation ready").length} connected · {modules.filter((m) => m.status === "Planned").length} planned</span>
+        <span className="text-xs text-slate-500">{modules.filter((m) => m.status === "Foundation ready").length} foundation reports · {modules.filter((m) => m.status === "Available").length} available · {modules.filter((m) => m.status === "Planned").length} planned</span>
       </div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {modules.map((module) => { const Icon = module.icon; const ready = module.status === "Foundation ready"; return <article key={module.title} className="rounded-lg border bg-white p-4 shadow-sm">
+        {modules.map((module) => { const Icon = module.icon; const ready = module.status !== "Planned"; return <article key={module.title} className="rounded-lg border bg-white p-4 shadow-sm">
           <div className="flex items-start gap-3"><div className={`rounded-md p-2 ${ready ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}><Icon size={18} /></div><div className="min-w-0 flex-1"><h3 className="font-medium text-slate-800">{module.title}</h3><p className="mt-1 text-xs leading-5 text-slate-500">{module.description}</p></div></div>
-          <div className="mt-4 flex items-center justify-between border-t pt-3"><span className={`text-[11px] font-medium ${ready ? "text-emerald-700" : "text-slate-500"}`}>{ready ? <><CheckCircle2 size={13} className="mr-1 inline" />{module.status}</> : module.status}</span><ArrowRight size={14} className="text-slate-400" /></div>
+          <div className="mt-4 flex items-center justify-between border-t pt-3">{module.screen ? <button type="button" className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-700 hover:text-blue-900" onClick={() => p.onNavigate(module.screen!)}>Available · Open templates <ArrowRight size={13} /></button> : <span className={`text-[11px] font-medium ${ready ? "text-emerald-700" : "text-slate-500"}`}>{ready ? <><CheckCircle2 size={13} className="mr-1 inline" />{module.status}</> : module.status}</span>}{!module.screen && <ArrowRight size={14} className="text-slate-400" />}</div>
         </article>; })}
       </div>
     </div>
