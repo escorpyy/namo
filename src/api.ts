@@ -458,6 +458,7 @@ export interface FinancialReportResult {
   kind: FinancialReportKind; fiscalYear: string; from: string; to: string;
   rows: FinancialReportRow[];
   resultLedger?: { id: number; code: string; name: string } | null;
+  stockOpeningMismatches?: { branch: string; ledger: string; stock: string; ledgerBalance: string }[];
   totals: { opening: number; debit: number; credit: number; closing: number; currentResult: string; balanced?: boolean };
 }
 export const financialReportsApi = {

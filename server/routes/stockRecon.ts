@@ -28,6 +28,7 @@ export async function stockMismatches(companyId: number, fyId: number) {
   const glNames = new Map((await db.select({ id: S.generalLedger.id, code: S.generalLedger.code }).from(S.generalLedger).where(eq(S.generalLedger.companyId, companyId))).map((g) => [g.id, g.code]));
   const brNames = new Map((await db.select({ id: S.branch.id, name: S.branch.name }).from(S.branch).where(eq(S.branch.companyId, companyId))).map((b) => [b.id, b.name]));
   return bad.map((x) => ({
+    branchId: x.branchId,
     branch: brNames.get(x.branchId) ?? String(x.branchId),
     ledger: x.glId ? (glNames.get(x.glId) ?? String(x.glId)) : "(products without Closing Stock GL)",
     stock: fmt(x.stock), ledgerBalance: fmt(x.ledger),
