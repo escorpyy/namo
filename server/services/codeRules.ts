@@ -11,7 +11,7 @@ const TABLE: Record<string, any> = {
   "account-groups": S.accountGroup, "account-sub-groups": S.accountSubGroup, "general-ledger": S.generalLedger, party: S.generalLedger,
   "sub-ledger": S.subLedger, areas: S.area, "sub-areas": S.subArea, agents: S.agent, "product-groups": S.productGroup,
   "product-sub-groups": S.productSubGroup, products: S.product, "product-units": S.productUnit,
-  "stock-categories": S.stockCategory, locations: S.location, "purchase-terms": S.purchaseTerm, "sales-terms": S.salesTerm,
+  "stock-categories": S.stockCategory, locations: S.location, narrations: S.narration, "purchase-terms": S.purchaseTerm, "sales-terms": S.salesTerm,
 };
 
 const specOf = (key: string): CodeSpec => {

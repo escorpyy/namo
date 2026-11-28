@@ -49,7 +49,14 @@ describe.skipIf(!DB_READY)("Create company: default data or blank (API)", () => 
     expect((await rows(sql`select role, "branchId" from "UserCompanyAccess" where "companyId" = ${id} and "userId" = ${userId}`))).toEqual([{ role: "ADMIN", branchId: null }]);
 
     const codes = await rows(sql`select code from "GeneralLedger" where "companyId" = ${id} order by code`);
-    expect(codes.map((c) => c.code)).toEqual(["GL001", "GL003", "GL019", "GL020", "GL021", "GL040", "GL041", "GL050", "GL051", "GL070", "GL071", "GL072"]);
+    const series = (p: string, n: number) => Array.from({ length: n }, (_, i) => `${p}${String(i + 1).padStart(3, "0")}`);
+    expect(codes.map((c) => c.code)).toEqual(series("GL", 12));
+    expect((await rows(sql`select code from "AccountGroup" where "companyId" = ${id} order by code`)).map((g) => g.code)).toEqual(series("AG", 5));
+    const subs = await rows(sql`select g.code g, s.code s from "AccountSubGroup" s join "AccountGroup" g on g.id = s."accountGroupId" where g."companyId" = ${id} order by 1, 2`);
+    for (const g of series("AG", 5)) { const mine = subs.filter((x) => x.g === g).map((x) => x.s); expect(mine).toEqual(series("AS", mine.length)); }
+    // the next code the rules suggest carries straight on
+    expect((await call("POST", "/api/code-rules/general-ledger/suggest", { companyId: id })).body.code).toBe("GL013");
+    expect((await call("POST", "/api/code-rules/narrations/suggest", { companyId: id, name: "x" })).body.code).toBe("NR001");
     expect(await count("AccountGroup", id)).toBe(5);
     // no group or sub group is left without a ledger
     expect(await rows(sql`select g.code from "AccountGroup" g where g."companyId" = ${id} and not exists (select 1 from "GeneralLedger" l where l."accountGroupId" = g.id)`)).toEqual([]);
@@ -57,9 +64,9 @@ describe.skipIf(!DB_READY)("Create company: default data or blank (API)", () => 
     for (const t of ["Party", "PurchaseTerm", "SalesTerm", "Product"]) expect(await count(t, id)).toBe(0);
     const setup = await rows(sql`select s.role, l.code from "GeneralLedgerSetup" s join "GeneralLedger" l on l.id = s."generalLedgerId" where s."companyId" = ${id}`);
     expect(setup).toHaveLength(12);
-    expect(Object.fromEntries(setup.map((s) => [s.role, s.code]))).toMatchObject({ CASH_BOOK: "GL001", PROFIT_AND_LOSS: "GL019", SALES_ACCOUNT: "GL020", INPUT_VAT: "GL070" });
+    expect(Object.fromEntries(setup.map((s) => [s.role, s.code]))).toMatchObject({ CASH_BOOK: "GL001", PROFIT_AND_LOSS: "GL006", SALES_ACCOUNT: "GL007", INPUT_VAT: "GL003" });
     // Year-end close needs the Profit and Loss ledger to be an Equity ledger.
-    const pl = await rows(sql`select g.type from "GeneralLedger" l join "AccountGroup" g on g.id = l."accountGroupId" where l."companyId" = ${id} and l.code = 'GL019'`);
+    const pl = await rows(sql`select g.type from "GeneralLedger" l join "AccountGroup" g on g.id = l."accountGroupId" where l."companyId" = ${id} and l.code = 'GL006'`);
     expect(pl[0].type).toBe("EQUITY");
   });
 
@@ -98,7 +105,7 @@ describe.skipIf(!DB_READY)("Create company: default data or blank (API)", () => 
   it("running the defaults again fills what is missing but never overwrites a role the user changed", async () => {
     const { seedCompanyDefaults } = await import("../server/services/companyDefaults");
     const id = made[0];
-    const [gl2] = await rows(sql`select id from "GeneralLedger" where "companyId" = ${id} and code = 'GL003'`);
+    const [gl2] = await rows(sql`select id from "GeneralLedger" where "companyId" = ${id} and code = 'GL002'`);
     await db.execute(sql`update "GeneralLedgerSetup" set "generalLedgerId" = ${gl2.id} where "companyId" = ${id} and role = 'CASH_BOOK'`);
     await db.execute(sql`delete from "GeneralLedgerSetup" where "companyId" = ${id} and role = 'OUTPUT_VAT'`);
     const ledgersBefore = await count("GeneralLedger", id);
@@ -106,8 +113,8 @@ describe.skipIf(!DB_READY)("Create company: default data or blank (API)", () => 
     await db.transaction((tx: any) => seedCompanyDefaults(tx, id, "MANDATORY"));
 
     const after = Object.fromEntries((await rows(sql`select s.role, l.code from "GeneralLedgerSetup" s join "GeneralLedger" l on l.id = s."generalLedgerId" where s."companyId" = ${id}`)).map((s) => [s.role, s.code]));
-    expect(after.CASH_BOOK).toBe("GL003"); // the user's choice is kept
-    expect(after.OUTPUT_VAT).toBe("GL071"); // the missing role is filled in again
+    expect(after.CASH_BOOK).toBe("GL002"); // the user's choice is kept
+    expect(after.OUTPUT_VAT).toBe("GL005"); // the missing role is filled in again
     expect(Object.keys(after)).toHaveLength(12);
     expect(await count("GeneralLedger", id)).toBe(ledgersBefore);
   });

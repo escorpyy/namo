@@ -10,6 +10,23 @@ import { inActorTx, type Actor, type Tx } from "./purchase/common";
 // groups and sub groups those ledgers sit in; everything else is left empty for the user to create.
 export type ChartScope = "FULL" | "MANDATORY";
 
+// A new company's codes run in unbroken series (AG001.., GL001..), as the Code Numbering rules would give them, not with the gaps left by the
+// full catalogue. Keys are the catalogue codes (a sub group as "group/sub"); sub groups count from AS001 inside each group.
+const MANDATORY_CODES: Record<string, string> = {
+  AG001: "AG001", AG003: "AG002", AG004: "AG003", AG005: "AG004", AG007: "AG005",
+  "AG001/AS001": "AS001", "AG001/AS003": "AS002", "AG001/AS005": "AS003", "AG003/AS006": "AS001", "AG004/AS005": "AS001",
+  "AG005/AS001": "AS001", "AG005/AS002": "AS002", "AG007/AS001": "AS001", "AG007/AS002": "AS002",
+  GL001: "GL001", GL003: "GL002", GL070: "GL003", GL072: "GL004", GL071: "GL005", GL019: "GL006",
+  GL020: "GL007", GL021: "GL008", GL051: "GL009", GL040: "GL010", GL041: "GL011", GL050: "GL012",
+};
+// The code a catalogue entry gets in a company of this scope.
+const codeIn = (scope: ChartScope, key: string) => {
+  if (scope === "FULL") return key.split("/").pop()!;
+  const code = MANDATORY_CODES[key];
+  if (!code) throw new Error(`No new-company code is set for ${key}.`);
+  return code;
+};
+
 export async function seedChartOfAccounts(tx: Tx, companyId: number, scope: ChartScope = "FULL") {
   // Chart of Accounts: ensure each group/subgroup independently on every run.
   // Codes are stable identifiers; descriptions/types are corrected in place.
@@ -76,7 +93,7 @@ export async function seedChartOfAccounts(tx: Tx, companyId: number, scope: Char
   const createGroups = async () => {
   for (const [code, description, type] of groupDefinitions) {
     if (scope === "MANDATORY" && !usedGroups.has(code)) continue;
-    await ensureGroup(code, description, type);
+    await ensureGroup(codeIn(scope, code), description, type);
   }
   };
 
@@ -203,7 +220,7 @@ export async function seedChartOfAccounts(tx: Tx, companyId: number, scope: Char
   const createSubGroups = async () => {
     for (const [groupCode, subCode, description] of subgroupDefinitions) {
       if (scope === "MANDATORY" && !usedGroups.has(`${groupCode}/${subCode}`)) continue;
-      await ensureSub(groupCode, subCode, description);
+      await ensureSub(codeIn(scope, groupCode), codeIn(scope, `${groupCode}/${subCode}`), description);
     }
   };
 
@@ -290,8 +307,9 @@ export async function seedChartOfAccounts(tx: Tx, companyId: number, scope: Char
   for (const [, , groupCode, subCode] of ledgers) usedGroups.add(groupCode).add(`${groupCode}/${subCode}`);
   await createGroups();
   await createSubGroups();
-  for (const [code, name, groupCode, subCode, normalBalance, flags] of ledgers)
-    await ensureLedger(code, name, groupCode, subCode, normalBalance, flags);
+  // in the order of their new codes, so the list reads in series
+  for (const [code, name, groupCode, subCode, normalBalance, flags] of [...ledgers].sort((x, y) => codeIn(scope, x[0]).localeCompare(codeIn(scope, y[0]))))
+    await ensureLedger(codeIn(scope, code), name, codeIn(scope, groupCode), codeIn(scope, `${groupCode}/${subCode}`), normalBalance, flags);
 }
 
 // GL Setup role -> ledger code. The codes are the ones seedChartOfAccounts creates, so keep the two in step.
@@ -310,12 +328,12 @@ export const DEFAULT_GL_SETUP: Record<GlRoleKey, string> = {
   CLOSING_STOCK_BS: "GL003",
 };
 
-export async function seedGlSetup(tx: Tx, companyId: number) {
+export async function seedGlSetup(tx: Tx, companyId: number, scope: ChartScope = "FULL") {
   const ledgers = await tx.select({ id: S.generalLedger.id, code: S.generalLedger.code })
     .from(S.generalLedger).where(eq(S.generalLedger.companyId, companyId));
   const idByCode = new Map(ledgers.map((l) => [l.code, l.id]));
   for (const role of GL_SETUP_ROLES) {
-    const code = DEFAULT_GL_SETUP[role.key];
+    const code = codeIn(scope, DEFAULT_GL_SETUP[role.key]);
     const generalLedgerId = idByCode.get(code);
     if (!generalLedgerId) throw new Error(`GL Setup: ledger ${code} is missing for role ${role.key}.`);
     await tx.insert(S.generalLedgerSetup)
@@ -328,7 +346,7 @@ export async function seedGlSetup(tx: Tx, companyId: number) {
 // One call for a new (or existing) company: chart of accounts first, then the GL Setup that points into it.
 export async function seedCompanyDefaults(tx: Tx, companyId: number, scope: ChartScope = "FULL") {
   await seedChartOfAccounts(tx, companyId, scope);
-  await seedGlSetup(tx, companyId);
+  await seedGlSetup(tx, companyId, scope);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
