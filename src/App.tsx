@@ -309,7 +309,7 @@ export default function App() {
         ) : screen === "code-numbering" ? (
           <CodeNumberingScreen key={`${screen}:${companyId}`} companyId={companyId} userId={ctx.user.id} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} />
         ) : screen === "company-new" ? (
-          <NewCompanyScreen key={screen} userId={ctx.user.id} setStatus={setStatus} dirtyRef={dirtyRef} onCreated={onCompanyCreated} />
+          <NewCompanyScreen key={screen} userId={ctx.user.id} calendar={calendar} setStatus={setStatus} dirtyRef={dirtyRef} onCreated={onCompanyCreated} />
         ) : screen === "company-trash" ? (
           <CompanyTrashScreen key={screen} setStatus={setStatus} onRestored={refreshCtx} />
         ) : screen === "number-series" ? (

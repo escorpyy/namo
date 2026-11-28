@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState, type MutableRefObject } from "react";
 import { Building2 } from "lucide-react";
 import { ApiError, companyApi, type CompanySetupMode } from "../api";
+import { DateInput } from "../components/DateInput";
 import { useDialog } from "../components/Dialog";
 import { adToBs, bsToAd } from "../lib/nepaliDate";
 import type { MsgKind, StatusInfo } from "../types";
 
 interface Props {
   userId: number;
+  /** The header's BS / AD switch: dates are typed in this calendar (and always sent as AD). */
+  calendar: "BS" | "AD";
   setStatus: (status: StatusInfo) => void;
   dirtyRef: MutableRefObject<boolean>;
   /** Called after the company exists: the app reloads its company list and switches to the new company. */
@@ -43,7 +46,7 @@ function currentFiscalYear() {
 
 const HINTS = ["Ctrl+S create company"];
 
-export default function NewCompanyScreen({ userId, setStatus, dirtyRef, onCreated }: Props) {
+export default function NewCompanyScreen({ userId, calendar, setStatus, dirtyRef, onCreated }: Props) {
   const dlg = useDialog();
   const fy = useMemo(currentFiscalYear, []);
   const [code, setCode] = useState("");
@@ -64,6 +67,10 @@ export default function NewCompanyScreen({ userId, setStatus, dirtyRef, onCreate
 
   const create = async () => {
     if (busy) return;
+    // The date field holds "" while empty and "?..." while what was typed is not a real date in the chosen calendar.
+    for (const [field, value] of [["startDate", startDate], ["endDate", endDate]]) {
+      if (!value || value.startsWith("?")) return setErr({ field, message: `Enter a valid ${calendar} date (YYYY-MM-DD).` });
+    }
     if (setup === "BLANK" && !(await dlg.confirm(
       "A blank company has no account groups, ledgers or GL Setup. You will have to create them yourself before posting any entry.",
       { title: "Create a blank company?", variant: "warning", confirmLabel: "Create blank company" },
@@ -88,7 +95,6 @@ export default function NewCompanyScreen({ userId, setStatus, dirtyRef, onCreate
   });
 
   const fieldErr = (f: string) => (err?.field === f ? <p role="alert" className="mt-0.5 text-[12px] text-red-700">{err.message}</p> : null);
-  const bsOf = (ad: string) => (ad ? adToBs(ad) : null);
 
   const option = (value: CompanySetupMode, title: string, text: string, badge?: string) => (
     <label className={`flex cursor-pointer gap-3 rounded border p-3 ${setup === value ? "border-blue-700 bg-blue-50" : "border-slate-300 bg-white hover:bg-slate-50"}`}>
@@ -129,15 +135,13 @@ export default function NewCompanyScreen({ userId, setStatus, dirtyRef, onCreate
         </div>
         <div />
         <div>
-          <label className="text-[12px] font-medium text-slate-600">Starts (AD) *</label>
-          <input type="date" className={`fld ${err?.field === "startDate" ? "fld-err" : ""}`} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-          <p className="mt-0.5 text-[11px] text-slate-500">{bsOf(startDate) ? `BS ${bsOf(startDate)}` : ""}</p>
+          <label className="text-[12px] font-medium text-slate-600">Starts ({calendar}) *</label>
+          <DateInput fieldName="startDate" value={startDate} onChange={setStartDate} calendar={calendar} hasError={err?.field === "startDate"} onBlurField={() => {}} />
           {fieldErr("startDate")}
         </div>
         <div>
-          <label className="text-[12px] font-medium text-slate-600">Ends (AD) *</label>
-          <input type="date" className={`fld ${err?.field === "endDate" ? "fld-err" : ""}`} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-          <p className="mt-0.5 text-[11px] text-slate-500">{bsOf(endDate) ? `BS ${bsOf(endDate)}` : ""}</p>
+          <label className="text-[12px] font-medium text-slate-600">Ends ({calendar}) *</label>
+          <DateInput fieldName="endDate" value={endDate} onChange={setEndDate} calendar={calendar} hasError={err?.field === "endDate"} onBlurField={() => {}} />
           {fieldErr("endDate")}
         </div>
       </div>
