@@ -40,6 +40,16 @@ async function taken(tx: Tx, docType: DocumentType, branchId: number, fiscalYear
   return r.length > 0;
 }
 
+/** Check a user-typed number without consuming a series counter. */
+export async function numberAvailability(tx: Tx, o: { documentType: string; branchId: number; fiscalYear: string; number: string }): Promise<{ available: boolean; scope: "BRANCH" | "BRANCH_FY" }> {
+  const docType = o.documentType as DocumentType;
+  if (!DOC_TABLE[docType]) throw new HttpError(400, "Unknown document type.", "documentType");
+  const number = o.number.trim();
+  if (!number) return { available: true, scope: docType === "JOURNAL_VOUCHER" ? "BRANCH" : "BRANCH_FY" };
+  const isTaken = await taken(tx, docType, o.branchId, o.fiscalYear, number);
+  return { available: !isTaken, scope: docType === "JOURNAL_VOUCHER" ? "BRANCH" : "BRANCH_FY" };
+}
+
 async function branchCode(tx: Tx, branchId: number) {
   const [b] = await tx.select({ code: S.branch.code }).from(S.branch).where(eq(S.branch.id, branchId));
   return b?.code ?? "";

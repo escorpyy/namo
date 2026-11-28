@@ -179,9 +179,24 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
   }, [peekTarget, form]);
 
   // ---------- editing ----------
-  const patch = (c: Partial<CbForm>) => setForm((f) => (f ? { ...f, ...c } : f));
+  const patch = (c: Partial<CbForm>) => {
+    if (!form) return;
+    const next = { ...form, ...c };
+    setForm(next);
+    const checked = validate(next);
+    const changed = Object.keys(c);
+    setErrors((previous) => {
+      const out = { ...previous };
+      for (const key of Object.keys(out).concat(Object.keys(checked))) {
+        const relevant = changed.includes(key) || (changed.includes("lines") && (key === "lines" || key.startsWith("lines.")));
+        if (!relevant) continue;
+        if (checked[key]) out[key] = checked[key]; else delete out[key];
+      }
+      return out;
+    });
+  };
   const clear = (...ks: string[]) => setErrors((e) => { const n = { ...e }; ks.forEach((k) => delete n[k]); return n; });
-  const patchLine = (key: number, c: Partial<Line>) => { clear("lines"); setForm((f) => (f ? { ...f, lines: f.lines.map((l) => (l.key === key ? { ...l, ...c } : l)) } : f)); };
+  const patchLine = (key: number, c: Partial<Line>) => { if (form) patch({ lines: form.lines.map((l) => (l.key === key ? { ...l, ...c } : l)) }); };
   const setAmount = (key: number, side: "receipt" | "payment", v: string) => {
     if (!amountOk(v)) return;
     const other = side === "receipt" ? "payment" : "receipt";
@@ -194,12 +209,11 @@ export default function CashBankVoucherEntry(p: CashBankScreenProps & EntryTabPr
   const showSubCol = ec("lineSubLedger").show || needsSubColumn, showNarrCol = ec("lineNarration").show;
   const TEMPLATE = lineTemplate(showSubCol, showNarrCol);
   const focusField = (name: string, delay = 40) => window.setTimeout(() => document.querySelector<HTMLElement>(`[data-field="${name}"]:not(:disabled)`)?.focus(), delay);
-  const addLine = () => { setForm((f) => (f ? { ...f, lines: [...f.lines, blankLine()] } : f)); if (form) focusField(`L.${form.lines.length}.a`); };
+  const addLine = () => { if (form) { patch({ lines: [...form.lines, blankLine()] }); focusField(`L.${form.lines.length}.a`); } };
   const removeLineAt = (i: number, fromRowMode = false) => {
     if (!form) return;
     const left = form.lines.filter((_, k) => k !== i);
-    setForm({ ...form, lines: left.length ? left : [blankLine()] });
-    clear("lines", ...Object.keys(errors).filter((k) => k.startsWith("lines.")));
+    patch({ lines: left.length ? left : [blankLine()] });
     if (!fromRowMode) focusField(`L.${Math.min(i, Math.max(0, left.length - 1))}.a`, 30);
   };
   // Ctrl+D: the cell above (or the whole line above in row mode), so a run of similar lines is a few key presses.

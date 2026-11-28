@@ -73,6 +73,7 @@ export const codeRulesApi = {
 
 // Number series (shared/numberSeries.ts): the settings, and what a document form offers
 export interface AvailableSeries { id: number; name: string; mode: SeriesMode; assignAt: "DRAFT" | "POST"; isDefault: boolean; next: string | null; left: number | null; problem?: string }
+export interface NumberAvailability { available: boolean; scope: "BRANCH" | "BRANCH_FY" }
 export const numberSeriesApi = {
   list: (companyId: number) => req<SeriesRow[]>(`/api/number-series?companyId=${companyId}`),
   users: () => req<{ id: number; name: string }[]>(`/api/number-series/users`),
@@ -80,6 +81,8 @@ export const numberSeriesApi = {
     req<SeriesRow>(id ? `/api/number-series/${id}` : `/api/number-series`, { method: id ? "PUT" : "POST", body: JSON.stringify({ companyId, userId, ...v }) }),
   available: (companyId: number, documentType: string, branchId: number, fiscalYear: string, userId?: number) =>
     req<AvailableSeries[]>(`/api/number-series/available?companyId=${companyId}&documentType=${documentType}&branchId=${branchId}&fiscalYear=${encodeURIComponent(fiscalYear)}${userId ? `&userId=${userId}` : ""}`),
+  check: (documentType: string, branchId: number, fiscalYear: string, number: string) =>
+    req<NumberAvailability>(`/api/number-series/check?documentType=${encodeURIComponent(documentType)}&branchId=${branchId}&fiscalYear=${encodeURIComponent(fiscalYear)}&number=${encodeURIComponent(number)}`),
 };
 
 export type GLSetupRole = {

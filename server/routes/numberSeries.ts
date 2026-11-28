@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import * as S from "../db/schema";
 import { availableSeries, listSeries, saveSeries } from "../services/numberSeriesAdmin";
+import { numberAvailability } from "../services/numberSeries";
 import { HttpError, wrap } from "./_util";
 
 // Number series (shared/numberSeries.ts). Like every route, the company and user come from the request (no login yet, ERP-002).
@@ -35,6 +36,21 @@ numberSeriesRouter.get("/available", wrap(async (req, res) => {
   const fy = q(req.query.fiscalYear);
   if (!fy || fy.length > 15) throw new HttpError(400, "fiscalYear is required.", "fiscalYear");
   res.json(await availableSeries(whole(q(req.query.companyId), "companyId"), q(req.query.documentType) ?? "", await actor(q(req.query.userId)), whole(q(req.query.branchId), "branchId"), fy));
+}));
+
+// Live check for a manually typed document number. This never consumes a counter;
+// the unique database index remains the final concurrency-safe guard at save time.
+numberSeriesRouter.get("/check", wrap(async (req, res) => {
+  const fy = q(req.query.fiscalYear), number = q(req.query.number);
+  if (!fy || fy.length > 15) throw new HttpError(400, "fiscalYear is required.", "fiscalYear");
+  if (number === undefined || number.length > 30) throw new HttpError(400, "number must be at most 30 characters.", "number");
+  const result = await db.transaction((tx) => numberAvailability(tx, {
+    documentType: q(req.query.documentType) ?? "",
+    branchId: whole(q(req.query.branchId), "branchId"),
+    fiscalYear: fy,
+    number,
+  }));
+  res.json(result);
 }));
 
 // the people a series can be limited to

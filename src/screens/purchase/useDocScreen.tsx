@@ -180,7 +180,32 @@ export function useDocScreen<F extends object>(cfg: DocConfig<F>, ctx: Ctx, extr
   }, [dirty]);
 
   const setForm = (f: F) => { setFormState(f); };
-  const patch = (p: Partial<F>) => setFormState((f) => (f ? { ...f, ...p } : f));
+  const patch = (p: Partial<F>) => {
+    if (!form) return;
+    const next = { ...form, ...p };
+    setFormState(next);
+    if (mode === "view" || !lookups) return;
+    // Validate only the field(s) being edited and their direct cross-field
+    // neighbours. This gives instant feedback without showing every required
+    // error on a brand-new blank document.
+    const checked = cfg.validate(next, lookups);
+    const changed = Object.keys(p);
+    const related = (key: string) => changed.includes(key)
+      || (changed.includes("lines") && (/^(L\.|lines\.)/.test(key) || key === "lines"))
+      || (changed.includes("terms") && (/^(T\.|terms)/.test(key) || key === "terms"))
+      || (changed.some((k) => /Date$/.test(k)) && /Date$/.test(key))
+      || (changed.some((k) => ["vendorGLId", "customerGLId", "subLedgerId"].includes(k)) && ["vendorGLId", "customerGLId", "subLedgerId"].includes(key))
+      || (changed.includes("exp") && key.startsWith("exp."));
+    setErrors((previous) => {
+      const nextErrors = { ...previous };
+      for (const key of Object.keys(nextErrors).concat(Object.keys(checked))) {
+        if (!related(key)) continue;
+        if (checked[key]) nextErrors[key] = checked[key];
+        else delete nextErrors[key];
+      }
+      return nextErrors;
+    });
+  };
   const refreshList = () => { void loadList(); extra.onListChanged?.(); };
   const clearError = (...keys: string[]) => setErrors((e) => { const n = { ...e }; for (const k of keys) delete n[k]; return n; });
 
