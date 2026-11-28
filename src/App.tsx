@@ -5,6 +5,7 @@ import { useDialog } from "./components/Dialog";
 import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
+import { GlobalCalculator } from "./components/GlobalCalculator";
 import { LedgerJobWatcher } from "./components/LedgerJobWatcher";
 import { QuickCreateHost } from "./components/QuickCreate";
 import MasterScreen from "./screens/MasterScreen";
@@ -117,7 +118,7 @@ export default function App() {
       if (event.repeat || event.isComposing) return;
       const target = event.target;
       if (target instanceof Element && target.closest("[data-shortcut-capture]")) return;
-      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      if (document.querySelector('[aria-modal="true"]')) return;
       const combination = getShortcutCombination(event);
       if (!combination) return;
       const bindings = readShortcutBindings(getBrowserShortcutStorage(), activeUserId, SHORTCUT_ACTIONS);
@@ -313,6 +314,7 @@ export default function App() {
         branch={co.branches.find((b) => b.id === branchId)?.name ?? "-"}
         fy={co.fiscalYears.find((y) => y.id === fyId)?.code ?? "-"}
       />
+      <GlobalCalculator />
     </div>
     </QuickCreateHost>
   );

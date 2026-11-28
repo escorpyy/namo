@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { useEntryControl } from "../../lib/useEntryControl";
 import { Copy, Pencil, PencilRuler, Plus, RotateCcw, Save, Send, Trash2, Undo2, X } from "lucide-react";
 import { purchaseApi, type PDoc, type PListRow, type PLookups } from "../../api";
@@ -9,7 +9,8 @@ import { COMMON_HELP, HINTS, formEnterKey, money } from "../../components/purcha
 import { BillHeaderTable, BillRemarksTable, ImportDetailsButton, ImportDetailsDialog, IMPORT_FIELDS, importFilled, LinkedCostsTable, VendorBillsTable, useVendorBills } from "../../components/purchase/BillTables";
 import { LinesGrid, type ColKey } from "../../components/purchase/LinesGrid";
 import { ProductInfoPanel, useProductInfo } from "../../components/purchase/ProductInfo";
-import { RailPanel, useRail } from "../../components/purchase/Rails";
+import { RailPanel, useRail, useRailWidth } from "../../components/purchase/Rails";
+import { VendorLedgerPeek } from "../../components/purchase/VendorLedgerPeek";
 import { useTermsDialog } from "../../components/purchase/TermsDialog";
 import { PurchaseInvoiceTotals } from "../../components/purchase/PurchaseInvoiceTotals";
 import {
@@ -32,11 +33,12 @@ const HELP: [string, string][] = [
   ["F3 / Ctrl+N", "New bill in a new tab"],
   ["F6", "Add a line"],
   ["Alt+Shift+V / Alt+Shift+L", "Jump to the vendor / to the first line"],
-  ["Esc", "Cancel editing; in the terms dialog, close it"],
+  ["Alt+Shift+G", "Peek at the vendor ledger; press again or Esc to return"],
+  ["Esc", "Close the vendor-ledger peek; otherwise cancel editing or close the terms dialog"],
   ["Alt+, / Alt+.", "Previous / next tab"],
   ["Alt+W", "Close this tab"],
   ["Alt+1 / Alt+2", "Sidebar / the form"],
-  ["Alt+Shift+H / V / S", "Toggle the header or show/hide the Vendor / Stock rail"],
+  ["Alt+Shift+H / S", "Toggle the header / show or hide the Stock panel"],
   ["Alt+Shift+T", "Open header terms"],
   ["Post", "Writes the journal voucher; a posted bill cannot be edited, only reversed"],
 ];
@@ -303,15 +305,56 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
     catch { return "vendor"; }
   });
   useEffect(() => { try { localStorage.setItem("bill.right.tab", rightTab); } catch { /* storage is optional */ } }, [rightTab]);
+  const [ledgerPeek, setLedgerPeek] = useState(false);
+  const ledgerReturnTab = useRef<"vendor" | "stock">("vendor");
+  const ledgerReturnCollapsed = useRef(false);
+  const ledgerReturnFocus = useRef<HTMLElement | null>(null);
+  const [vendorWidth, setVendorWidth] = useRailWidth("bill.vendor");
+  const [stockWidth, setStockWidth] = useRailWidth("bill.stock");
+  const [ledgerWidth, setLedgerWidth] = useRailWidth("bill.ledger");
+  const ledgerFiscalYear = lk?.fiscalYears.find((y) => f && y.startDate <= f.invoiceDate && f.invoiceDate <= y.endDate)?.code ?? p.fyCode;
+  const closeLedgerPeek = useCallback((restoreFocus: boolean) => {
+    setLedgerPeek(false);
+    setRightTab(ledgerReturnTab.current);
+    setRightOff(ledgerReturnCollapsed.current);
+    if (restoreFocus) window.requestAnimationFrame(() => {
+      const el = ledgerReturnFocus.current;
+      if (el?.isConnected) el.focus();
+    });
+  }, [setRightOff]);
+  const openLedgerPeek = useCallback(() => {
+    ledgerReturnTab.current = rightTab;
+    ledgerReturnCollapsed.current = rightOff;
+    ledgerReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setLedgerPeek(true);
+    setRightOff(false);
+  }, [rightTab, rightOff, setRightOff]);
+  const toggleLedgerPeek = useCallback(() => {
+    if (ledgerPeek) closeLedgerPeek(true);
+    else openLedgerPeek();
+  }, [ledgerPeek, closeLedgerPeek, openLedgerPeek]);
+  const selectPanel = useCallback((tab: "vendor" | "stock") => {
+    setLedgerPeek(false);
+    setRightTab(tab);
+    setRightOff(false);
+  }, [setRightOff]);
   useEffect(() => { setHdrOff(!!doc); setHeaderFlowPassed(!!doc); }, [doc?.id]);
   const [focusLine, setFocusLine] = useState(0); // the line the cursor is on drives the stock panel
   const focusProduct = f?.lines[focusLine]?.productId ?? "";
   const productInfo = useProductInfo(p.companyId, p.branchId, focusProduct);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement | null)?.closest?.('[role="dialog"]')) return;
       if (!e.altKey || !e.shiftKey || e.ctrlKey || e.metaKey) return;
+      if (e.code === "KeyG") {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleLedgerPeek();
+        return;
+      }
       if (e.code === "KeyV" || e.code === "KeyL") {
         e.preventDefault();
+        e.stopPropagation();
         setHdrOff(false);
         const sel = e.code === "KeyV" ? '[data-field="vendorGLId"], [data-bill-header-field] [role="combobox"]' : '[data-field="L.0.p"]';
         window.setTimeout(() => document.querySelector<HTMLElement>(`${sel}:not(:disabled)`)?.focus(), 50);
@@ -319,24 +362,37 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
       }
       if (e.code === "KeyT") {
         e.preventDefault();
+        e.stopPropagation();
         termsRef.current.open({ scope: "header" });
         return;
       }
-      if (e.code === "KeyV" || e.code === "KeyS") {
+      if (e.code === "KeyS") {
         e.preventDefault();
-        const tab = e.code === "KeyV" ? "vendor" : "stock";
-        if (!rightOff && rightTab === tab) setRightOff(true);
-        else { setRightTab(tab); setRightOff(false); }
+        e.stopPropagation();
+        if (!rightOff && !ledgerPeek && rightTab === "stock") setRightOff(true);
+        else selectPanel("stock");
         return;
       }
       if (e.code !== "KeyH") return;
       e.preventDefault();
+      e.stopPropagation();
       setHeaderFlowPassed(true);
       setHdrOff((v) => !v);
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [rightOff, rightTab, setRightOff]);
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [rightOff, rightTab, ledgerPeek, toggleLedgerPeek]);
+  useEffect(() => {
+    if (!ledgerPeek) return;
+    const onEscape = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || (e.target as HTMLElement | null)?.closest?.('[role="dialog"]')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeLedgerPeek(true);
+    };
+    document.addEventListener("keydown", onEscape, true);
+    return () => document.removeEventListener("keydown", onEscape, true);
+  }, [ledgerPeek, closeLedgerPeek]);
   // a save that found a problem in a header field opens the header again, so the field can be seen and fixed
   useEffect(() => {
     if (Object.entries(s.errors).some(([key, message]) => message && !/^(L\.|T\.|imp\.)/.test(key) && key !== "lines" && key !== "terms")) setHdrOff(false);
@@ -548,19 +604,27 @@ export default function PurchaseBillEntry(p: BillEntryProps) {
 
           </div>
 
-          <RailPanel side="right" label="Vendor / Stock" collapsed={rightOff} onToggle={() => setRightOff((v) => !v)} shortcut="Alt+Shift+V / S" className="h-full min-h-0 !rounded-none !border-slate-200">
+          <RailPanel side="right" label="Purchase context" collapsed={rightOff} onToggle={() => setRightOff((v) => !v)} shortcut="Alt+Shift+S / G"
+            width={ledgerPeek ? ledgerWidth : rightTab === "vendor" ? vendorWidth : stockWidth}
+            onWidthChange={ledgerPeek ? setLedgerWidth : rightTab === "vendor" ? setVendorWidth : setStockWidth}
+            className="h-full min-h-0 !rounded-none !border-slate-200">
             <div className="flex min-h-full flex-col">
-              <div role="group" aria-label="Right panel views" className="flex shrink-0 border-b border-slate-200">
-                <button type="button" data-nav aria-pressed={rightTab === "vendor"} onClick={() => setRightTab("vendor")}
-                  className={`flex min-w-0 flex-1 items-center justify-between gap-1 border-b-2 px-2 py-1.5 text-left text-[12px] ${rightTab === "vendor" ? "border-cobalt-700 bg-cobalt-50 text-cobalt-900" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>
-                  <span className="truncate font-semibold">Vendor</span><span className="kbd shrink-0">Alt+Shift+V</span>
+              <div role="group" aria-label="Purchase context views" className="flex shrink-0 border-b border-slate-200">
+                <button type="button" data-nav aria-pressed={!ledgerPeek && rightTab === "vendor"} onClick={() => selectPanel("vendor")} title="Vendor panel; Alt+Shift+V jumps to the vendor field"
+                  className={`min-w-0 flex-1 border-b-2 px-1 py-1.5 text-center text-[11.5px] ${!ledgerPeek && rightTab === "vendor" ? "border-cobalt-700 bg-cobalt-50 font-semibold text-cobalt-900" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>
+                  <span className="truncate">Vendor</span>
                 </button>
-                <button type="button" data-nav aria-pressed={rightTab === "stock"} onClick={() => setRightTab("stock")}
-                  className={`flex min-w-0 flex-1 items-center justify-between gap-1 border-b-2 px-2 py-1.5 text-left text-[12px] ${rightTab === "stock" ? "border-cobalt-700 bg-cobalt-50 text-cobalt-900" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>
-                  <span className="truncate font-semibold">Stock</span><span className="kbd shrink-0">Alt+Shift+S</span>
+                <button type="button" data-nav aria-pressed={!ledgerPeek && rightTab === "stock"} onClick={() => selectPanel("stock")} title="Stock and product details (Alt+Shift+S)"
+                  className={`min-w-0 flex-1 border-b-2 px-1 py-1.5 text-center text-[11.5px] ${!ledgerPeek && rightTab === "stock" ? "border-cobalt-700 bg-cobalt-50 font-semibold text-cobalt-900" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>
+                  <span className="truncate">Stock</span>
+                </button>
+                <button type="button" data-nav aria-pressed={ledgerPeek} onClick={toggleLedgerPeek} title="Vendor ledger peek (Alt+Shift+G; press again or Esc to return)"
+                  className={`min-w-0 flex-1 border-b-2 px-1 py-1.5 text-center text-[11.5px] ${ledgerPeek ? "border-cobalt-700 bg-cobalt-50 font-semibold text-cobalt-900" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>
+                  <span className="truncate">Ledger</span>
                 </button>
               </div>
-              {rightTab === "vendor" ? <div className="min-h-0 flex-1">
+              {ledgerPeek ? <VendorLedgerPeek companyId={p.companyId} branchId={p.branchId} branchName={p.branchName} fiscalYear={ledgerFiscalYear} date={f.invoiceDate} vendorGLId={f.vendorGLId} subLedgerId={f.subLedgerId} calendar={p.calendar} />
+                : rightTab === "vendor" ? <div className="min-h-0 flex-1">
                 {vendor && (
                   <div className="space-y-0.5 border-b border-slate-200 px-2 py-1.5 text-[12px]">
                     <div className="truncate font-semibold text-ink" title={vendor.name}>{vendor.name}</div>

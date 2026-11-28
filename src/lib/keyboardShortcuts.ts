@@ -49,6 +49,7 @@ export function getShortcutActions(screens: readonly ReadyScreenOption[]): Short
 }
 
 const RESERVED_COMBINATIONS: Record<string, string> = {
+  "Ctrl+0": "the built-in Global calculator shortcut",
   "Ctrl+B": "the built-in Toggle sidebar shortcut",
   "Ctrl+S": "the built-in Save / Update shortcut",
   "Ctrl+N": "the built-in New shortcut",
