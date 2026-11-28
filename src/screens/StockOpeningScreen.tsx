@@ -117,7 +117,11 @@ export default function StockOpeningScreen({ companyId, branchId, fyId, branchNa
   const locOpts = useMemo<ReferenceOption[]>(() => (data?.locations ?? []).map((l) => ({ value: String(l.id), label: `${l.code} — ${l.name}`, code: l.code, name: l.name, isActive: l.isActive })), [data]);
 
   // ---- edit helpers ----
-  const patch = (key: string, p: Partial<Row>) => { setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r))); setErrs((e) => { const n = { ...e }; delete n[key]; return n; }); };
+  const patch = (key: string, p: Partial<Row>) => {
+    const nextRows = rows.map((r) => (r.key === key ? { ...r, ...p } : r));
+    setRows(nextRows);
+    setErrs(validateRows(nextRows));
+  };
   const pickProduct = (r: Row, sd: string) => {
     const p = prodBy.get(sd);
     const qtyOk = p && (r.qty.split(".")[1]?.length ?? 0) <= p.decimals ? r.qty : r.qty.split(".")[0];
@@ -130,10 +134,17 @@ export default function StockOpeningScreen({ companyId, branchId, fyId, branchNa
   const addRow = () => {
     const last = rows[rows.length - 1];
     const nr = blankRow(last?.loc ?? ""); // pichli row ki location aage badhti hai (visible)
-    setRows((rs) => [...rs, nr]);
+    const nextRows = [...rows, nr];
+    setRows(nextRows);
+    setErrs(validateRows(nextRows));
     setTimeout(() => gridRef.current?.querySelector<HTMLElement>(`[data-field="L.${rows.length}.p"]`)?.focus(), 40);
   };
-  const removeRow = (r: Row) => setRows((rs) => { const n = rs.filter((x) => x.key !== r.key); return n.length ? n : [blankRow()]; });
+  const removeRow = (r: Row) => {
+    const nextRows = rows.filter((x) => x.key !== r.key);
+    const kept = nextRows.length ? nextRows : [blankRow()];
+    setRows(kept);
+    setErrs(validateRows(kept));
+  };
 
   // ---- keyboard ----
   const cells = () => Array.from(gridRef.current?.querySelectorAll<HTMLInputElement>('[data-field^="L."]') ?? []).filter((el) => !el.disabled);
@@ -157,10 +168,10 @@ export default function StockOpeningScreen({ companyId, branchId, fyId, branchNa
   };
 
   // ---- save ----
-  const validateRows = () => {
+  const validateRows = (source = rows) => {
     const out: Record<string, { col: string; msg: string }> = {};
     const seen = new Map<string, string>();
-    live.forEach((r) => {
+    source.filter((r) => !isBlank(r)).forEach((r) => {
       const p = prodBy.get(r.sd);
       const bad = (col: string, msg: string) => { if (!out[r.key]) out[r.key] = { col, msg }; };
       if (!p) return bad("p", "Select a product.");
@@ -240,7 +251,7 @@ export default function StockOpeningScreen({ companyId, branchId, fyId, branchNa
   // Row mode (click a row number, or Esc in a cell): Delete removes the row, Ctrl+D copies the row / cell above. Rows are counted as shown.
   const realOf = (n: number) => shown[n]?.i ?? -1;
   // fillDown* work on the rows as shown (so "the row above" is the one you can see); put the changed ones back into the full list
-  const applyFill = (changed: Row[] | null) => { if (!changed) return; const by = new Map(changed.map((r) => [r.key, r])); setRows((rs) => rs.map((r) => by.get(r.key) ?? r)); setErrs({}); };
+  const applyFill = (changed: Row[] | null) => { if (!changed) return; const by = new Map(changed.map((r) => [r.key, r])); const nextRows = rows.map((r) => by.get(r.key) ?? r); setRows(nextRows); setErrs(validateRows(nextRows)); };
   const gridRows = useGridRows({
     count: shown.length, readOnly,
     firstCell: (grid, n) => grid.querySelector<HTMLElement>(`[data-field^="L.${realOf(n)}."]:not(:disabled)`),

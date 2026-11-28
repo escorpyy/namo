@@ -209,21 +209,24 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
       terms: source.terms.length ? source.terms.map((t) => ({ ...t, key: Math.random().toString(36).slice(2), allocationMode: "AUTO" as const, manual: {} })) : [blankTerm()],
     });
   };
-  const updateTerm = (index: number, patch: Partial<AssessmentTerm>) => setForm((f) => f ? ({ ...f, terms: f.terms.map((t, i) => i === index ? { ...t, ...patch } : t) }) : f);
+  const updateTerm = (index: number, patch: Partial<AssessmentTerm>) => {
+    if (!form) return;
+    applyLive({ ...form, terms: form.terms.map((t, i) => i === index ? { ...t, ...patch } : t) }, "terms");
+  };
   const addCharge = () => {
     if (!form || !editing || busy || stage !== "work") return;
     const index = form.terms.length;
     setWorkTab("charges");
-    setForm({ ...form, terms: [...form.terms, blankTerm()] });
+    applyLive({ ...form, terms: [...form.terms, blankTerm()] }, "terms");
     focusLater(`[data-field="terms.${index}.termId"]`, 0);
   };
   const masterBasis = (id: string): Basis | null => { const b = (termById.get(id) as any)?.allocationBasis; return b === "QUANTITY" || b === "VALUE" ? b : null; };
   // Split mode: SAME gives every charge one split; DIFFERENT starts each charge from its term master and lets the user change it per charge.
-  const setSplitMode = (mode: Form["splitMode"]) => setForm((f) => f && ({
-    ...f, splitMode: mode,
-    terms: f.terms.map((t) => ({ ...t, allocationBasis: mode === "SAME" ? f.sameBasis : (t.termId ? masterBasis(t.termId) ?? t.allocationBasis : t.allocationBasis) })),
-  }));
-  const setSameBasis = (basis: Basis) => setForm((f) => f && ({ ...f, sameBasis: basis, terms: f.terms.map((t) => ({ ...t, allocationBasis: basis })) }));
+  const setSplitMode = (mode: Form["splitMode"]) => form && applyLive({
+    ...form, splitMode: mode,
+    terms: form.terms.map((t) => ({ ...t, allocationBasis: mode === "SAME" ? form.sameBasis : (t.termId ? masterBasis(t.termId) ?? t.allocationBasis : t.allocationBasis) })),
+  }, "terms");
+  const setSameBasis = (basis: Basis) => form && applyLive({ ...form, sameBasis: basis, terms: form.terms.map((t) => ({ ...t, allocationBasis: basis })) }, "terms");
   const selectTerm = (i: number, id: string) => {
     const m: any = termById.get(id);
     const against = m?.lastAgainstLedgerId ?? m?.defaultAgainstLedgerId;
@@ -276,6 +279,27 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
     if (!f.assessmentDate) e.assessmentDate = "Assessment date is required";
     else if (f.assessmentDate.startsWith("?")) e.assessmentDate = "Enter a complete, valid date";
     return e;
+  };
+  const applyLive = (next: Form, scope: "header" | "terms") => {
+    setForm(next);
+    setErrors((previous) => {
+      const out = { ...previous };
+      if (scope === "header") {
+        const h = headerErrors(next);
+        for (const key of HEADER_KEYS) { if (h[key]) out[key] = h[key]; else delete out[key]; }
+      } else {
+        const active = next.terms.filter((t) => t.termId);
+        const problem = active.find((t) => {
+          const value = (t.calcType === "PERCENT" ? t.rate : t.inputAmount).trim();
+          return !t.againstLedgerId || (value !== "" && !/^\d+(\.\d+)?$/.test(value));
+        });
+        if (!active.length) out.terms = "Add at least one charge term";
+        else if (problem && !problem.againstLedgerId) out.terms = "Each charge needs an against ledger (cash, bank, or party)";
+        else if (problem) out.terms = "Charge rate/amount must be a valid non-negative number";
+        else delete out.terms;
+      }
+      return out;
+    });
   };
   const confirmHeader = () => {
     if (!form) return false;
@@ -541,7 +565,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                 <div className="grid grid-cols-1 gap-x-4 gap-y-3.5 md:grid-cols-2">
                   <div className="block lg-label [&>div]:mt-1">Assessment date
                     <DateInput fieldName="assessmentDate" value={form.assessmentDate} calendar={p.calendar} hasError={!!errors.assessmentDate} disabled={!editing || busy}
-                      onChange={(v) => setForm((cur) => (cur ? { ...cur, assessmentDate: v } : cur))} onBlurField={() => {}} />
+                      onChange={(v) => form && applyLive({ ...form, assessmentDate: v }, "header")} onBlurField={() => {}} />
                     {errors.assessmentDate && <span className="block text-[11.5px] font-normal text-rose-700" role="alert">{errors.assessmentDate}</span>}
                   </div>
                   <div data-assessment-field>
@@ -551,7 +575,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                       onChange={(v) => {
                         if (v === form.importBillId) return;
                         const hadManualAmounts = form.terms.some((term) => Object.values(term.manual).some((amount) => amount.trim() !== ""));
-                        setForm({ ...form, importBillId: v, terms: form.terms.map((term) => ({ ...term, manual: {} })) });
+                        applyLive({ ...form, importBillId: v, terms: form.terms.map((term) => ({ ...term, manual: {} })) }, "header");
                         if (hadManualAmounts) setMessage("Source bill changed; previous product allocations were cleared.");
                       }} disabled={!editing || busy || !!doc} hasError={!!errors.importBillId}
                       scopeKey="purchase-bills" contextKey={`${p.companyId}:${p.branchId}`} placeholder="Choose a goods bill…"
@@ -559,14 +583,14 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                     {errors.importBillId && <p className="mt-0.5 text-[11px] text-red-700" role="alert">{errors.importBillId}</p>}
                   </div>
                   <label className="block lg-label [&>input]:mt-1 [&>textarea]:mt-1">{isImport ? "Customs / reference no" : "Reference no"}
-                    <input data-assessment-field data-field="referenceNo" className={fieldClass} maxLength={60} disabled={!editing || busy} value={form.referenceNo} onChange={(e) => setForm({ ...form, referenceNo: e.target.value })} />
+                    <input data-assessment-field data-field="referenceNo" className={fieldClass} maxLength={60} disabled={!editing || busy} value={form.referenceNo} onChange={(e) => applyLive({ ...form, referenceNo: e.target.value }, "header")} />
                   </label>
                   <label className="block lg-label [&>input]:mt-1 [&>textarea]:mt-1">Linked goods invoice
                     <input className={`${fieldClass} bg-slate-100`} readOnly aria-readonly="true" value={billLabel || "Choose a posted goods bill"} />
                   </label>
                   <label className="block lg-label [&>input]:mt-1 [&>textarea]:mt-1 md:col-span-2">Remarks
                     <NarrationInput multiline companyId={p.companyId} id="assessment-remarks" data-assessment-field data-field="remarks" className="fld min-h-[64px] w-full resize-y py-2" rows={2} maxLength={1024}
-                      disabled={!editing || busy} value={form.remarks} onText={(v) => setForm({ ...form, remarks: v })} placeholder="Add a note for this assessment" />
+                      disabled={!editing || busy} value={form.remarks} onText={(v) => applyLive({ ...form, remarks: v }, "header")} placeholder="Add a note for this assessment" />
                   </label>
                 </div>
               </FormSection>
@@ -718,7 +742,7 @@ export default function ImportCostAssessmentEntry(p: AssessmentEntryProps) {
                               <td className="px-2 py-2 text-right font-medium tabular-nums">{result ? safeMoney(result.finalAmount ?? result.amount) : "—"}</td>
                               <td className="p-1 pt-2 text-right">
                                 <button type="button" className="btn h-8 w-8 justify-center px-0 text-slate-500 hover:text-rose-700" disabled={!editing || busy || form.terms.length === 1}
-                                  title="Remove charge (Delete when the row is selected)" aria-label={`Remove charge ${i + 1}`} onClick={() => setForm({ ...form, terms: form.terms.filter((_, n) => n !== i) })}>
+                                  title="Remove charge (Delete when the row is selected)" aria-label={`Remove charge ${i + 1}`} onClick={() => applyLive({ ...form, terms: form.terms.filter((_, n) => n !== i) }, "terms")}>
                                   <Trash2 size={13} />
                                 </button>
                               </td>
