@@ -30,7 +30,8 @@ import { glSetupRouter } from "./routes/glSetup";
 import { entryControlRouter } from "./routes/entryControl";
 import { productGlDefaultsRouter } from "./routes/productGlDefaults";
 import { yearEndCloseRouter } from "./routes/yearEndClose";
-import { HttpError, pgError } from "./routes/_util";
+import { HttpError, pgError, wrap } from "./routes/_util";
+import { isTrashed } from "./services/companyTrash";
 
 export const app = express();
 // CORS: off by default. The React app is served by this server in production and proxied by Vite in development, so it is same-origin and
@@ -49,6 +50,13 @@ app.get("/api/health", async (_req, res) => {
     res.status(500).json({ ok: false, message: "Database not reachable" });
   }
 });
+// A company in the Trash is closed: no screen or API call can read or change its data until it is restored.
+app.use("/api", wrap(async (req, res, next) => {
+  const id = Number(req.query.companyId ?? req.body?.companyId);
+  if (Number.isInteger(id) && id > 0 && id <= 2_000_000_000 && (await isTrashed(id)))
+    return void res.status(409).json({ message: "This company is in the Trash. Restore it first." });
+  next();
+}));
 app.use("/api/context", contextRouter);
 app.use("/api/companies", companiesRouter);
 app.use("/api/opening-balance", openingBalanceRouter);

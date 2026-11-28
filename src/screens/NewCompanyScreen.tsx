@@ -145,7 +145,7 @@ export default function NewCompanyScreen({ userId, setStatus, dirtyRef, onCreate
       <fieldset className="mt-5">
         <legend className="text-[12px] font-medium text-slate-600">How should this company start? *</legend>
         <div className="mt-1.5 grid gap-2">
-          {option("DEFAULT", "Start with default data", "Standard chart of accounts (groups, sub groups and ledgers) and GL Setup are ready, so you can post entries right away.", "Recommended")}
+          {option("DEFAULT", "Start with default data", "Only the required ledgers (cash, stock, sales, purchase, VAT, profit and loss) with their groups and sub groups, mapped in GL Setup. Everything else starts empty.", "Recommended")}
           {option("BLANK", "Blank company", "Only the company, its Head Office and the fiscal year. You create the account groups, ledgers and GL Setup yourself.")}
         </div>
         {fieldErr("setup")}

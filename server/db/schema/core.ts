@@ -55,6 +55,8 @@ export const company = pgTable(
     defaultCalendarPref: calendarPreferenceEnum().notNull().default("BS"),
 
     isActive: boolean().notNull().default(true),
+    // In the Trash since this moment (null = a live company). Restorable for 30 days, then erased (server/services/companyTrash.ts).
+    deletedAt: timestamp({ withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

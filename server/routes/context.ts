@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { db } from "../db";
 import { branch, company, fiscalYear, user } from "../db/schema";
 import { wrap } from "./_util";
@@ -11,7 +11,7 @@ contextRouter.get(
   "/",
   wrap(async (_req, res) => {
     const [companies, branches, years, users] = await Promise.all([
-      db.select().from(company).where(eq(company.isActive, true)).orderBy(asc(company.name)),
+      db.select().from(company).where(and(eq(company.isActive, true), isNull(company.deletedAt))).orderBy(asc(company.name)),
       db.select().from(branch).where(eq(branch.isActive, true)).orderBy(asc(branch.name)),
       db.select().from(fiscalYear).orderBy(desc(fiscalYear.startDate)),
       db.select().from(user).where(eq(user.isActive, true)).orderBy(asc(user.id)).limit(1),

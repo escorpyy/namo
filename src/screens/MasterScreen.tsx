@@ -308,23 +308,25 @@ export default function MasterScreen({ def, companyId, setStatus, dirtyRef, exte
   const askDelete = () => {
     if (mode !== "view" || !selected) return;
     if (def.noDelete) return flash(def.noDelete, "err", "Cannot delete");
-    const blocker = def.counts?.find((c) => (selected[c.key] ?? 0) > 0);
+    const blocker = def.trash ? undefined : def.counts?.find((c) => (selected[c.key] ?? 0) > 0);
     if (blocker) return flash(`Cannot delete: ${selected[blocker.key]} ${blocker.label} linked to this ${def.singular}.`, "err", "Cannot delete");
     const target = selected;
     setDialog({
-      title: `Delete ${def.singular}?`,
-      body: <><span className="font-mono font-semibold">{recordTitle(def, target)}</span><br /><span className="text-slate-600">This cannot be undone.</span></>,
+      title: def.trash ? `Move ${def.singular} to Trash?` : `Delete ${def.singular}?`,
+      body: <><span className="font-mono font-semibold">{recordTitle(def, target)}</span><br /><span className="text-slate-600">{def.trash
+        ? "It is hidden with all its data. You can restore it from Company Trash for 30 days; after that it is deleted permanently."
+        : "This cannot be undone."}</span></>,
       buttons: [
         { label: "Cancel", kind: "neutral", autoFocus: true, onClick: () => setDialog(null) },
         {
-          label: "Delete", kind: "danger",
+          label: def.trash ? "Move to Trash" : "Delete", kind: "danger",
           onClick: async () => {
             setDialog(null);
             try {
               await api.remove(target.id, companyId, userId);
               setItems((p) => p.filter((i) => i.id !== target.id));
               resetToNew();
-              flash(`Deleted ${recordLabel(def, target)}`, "ok");
+              flash(def.trash ? `Moved ${recordLabel(def, target)} to Trash` : `Deleted ${recordLabel(def, target)}`, "ok");
               if (def.refreshContext) onContextChanged();
             } catch (e) { flash((e as Error).message, "err"); }
           },

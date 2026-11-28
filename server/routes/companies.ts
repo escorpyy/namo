@@ -1,12 +1,27 @@
 import { Router } from "express";
 import { z } from "zod";
 import { createCompany } from "../services/companyDefaults";
+import { listTrash, purgeCompany, restoreCompany } from "../services/companyTrash";
 import { HttpError, wrap } from "./_util";
-import { actorOf } from "./_input";
+import { actorOf, idOf } from "./_input";
 
 // POST /api/companies   { code, name, businessType, fiscalYearCode, startDate, endDate, setup: "DEFAULT" | "BLANK", userId? }
 //   setup DEFAULT -> chart of accounts + GL Setup are filled in; BLANK -> only the company, Head Office and fiscal year.
+// Deleting is DELETE /api/masters/companies/:id and only moves the company to the Trash. Then:
+//   GET    /api/companies/trash
+//   POST   /api/companies/:id/restore
+//   DELETE /api/companies/:id/permanent   { confirmCode }   erases everything of that company; cannot be undone
 export const companiesRouter = Router();
+
+companiesRouter.get("/trash", wrap(async (_req, res) => { res.json(await listTrash()); }));
+companiesRouter.post("/:id/restore", wrap(async (req, res) => {
+  await restoreCompany(idOf(req));
+  res.json({ ok: true });
+}));
+companiesRouter.delete("/:id/permanent", wrap(async (req, res) => {
+  await purgeCompany(idOf(req), String(req.body?.confirmCode ?? ""));
+  res.json({ ok: true });
+}));
 
 const isoDate = z.string({ required_error: "Date is required." }).refine((v) => {
   const d = new Date(`${v}T00:00:00Z`);

@@ -96,7 +96,11 @@ export interface NewCompanyBody {
   code: string; name: string; businessType: string; fiscalYearCode: string; startDate: string; endDate: string;
   setup: CompanySetupMode; userId: number;
 }
+export interface TrashedCompany { id: number; code: string; name: string; deletedAt: string; daysLeft: number }
 export const companyApi = {
+  trash: () => req<TrashedCompany[]>("/api/companies/trash"),
+  restore: (id: number) => req<{ ok: true }>(`/api/companies/${id}/restore`, { method: "POST" }),
+  purge: (id: number, confirmCode: string) => req<{ ok: true }>(`/api/companies/${id}/permanent`, { method: "DELETE", body: JSON.stringify({ confirmCode }) }),
   create: (body: NewCompanyBody) => req<{ id: number; code: string; name: string; setup: CompanySetupMode }>("/api/companies", { method: "POST", body: JSON.stringify(body) }),
 };
 

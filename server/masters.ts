@@ -7,6 +7,7 @@ import { HttpError } from "./routes/_util";
 import { assertAgent, assertLedgerGroup, assertSubArea } from "./routes/links";
 import { partyRouter } from "./routes/party";
 import { productRouter } from "./routes/product";
+import { trashCompany } from "./services/companyTrash";
 
 // "Always show" (isMandatory) is for GENERAL and ROUNDED terms only: a costing charge (duty, freight...) is never on every document.
 function checkTermFlags(data: { isMandatory?: boolean; category?: string }) {
@@ -110,6 +111,7 @@ const CFG: Record<string, ServerCfg> = {
   companies: {
     table: S.company,
     scope: "global",
+    trash: trashCompany,
     counts: {
       branchCount: { table: S.branch, column: "companyId" },
       fiscalYearCount: { table: S.fiscalYear, column: "companyId" },

@@ -6,7 +6,11 @@ import { inActorTx, type Actor, type Tx } from "./purchase/common";
 
 // Defaults every company needs, kept apart from demo data. Everything here is idempotent: re-running it only adds what is missing.
 
-export async function seedChartOfAccounts(tx: Tx, companyId: number) {
+// FULL is the whole demo catalogue (pnpm db:seed). MANDATORY is what a new company gets: only the ledgers GL Setup points at, with the
+// groups and sub groups those ledgers sit in; everything else is left empty for the user to create.
+export type ChartScope = "FULL" | "MANDATORY";
+
+export async function seedChartOfAccounts(tx: Tx, companyId: number, scope: ChartScope = "FULL") {
   // Chart of Accounts: ensure each group/subgroup independently on every run.
   // Codes are stable identifiers; descriptions/types are corrected in place.
   const ensureGroup = async (
@@ -64,9 +68,17 @@ export async function seedChartOfAccounts(tx: Tx, companyId: number) {
     ["AG013", "Non-current Assets", "ASSET"],
   ] as const;
 
+  const mandatoryCodes = new Set<string>(Object.values(DEFAULT_GL_SETUP));
+  const wanted = (code: string) => scope === "FULL" || mandatoryCodes.has(code);
+  // "AG001" and "AG001/AS001" of every wanted ledger. Filled in once the ledger list is known (below).
+  const usedGroups = new Set<string>();
+
+  const createGroups = async () => {
   for (const [code, description, type] of groupDefinitions) {
+    if (scope === "MANDATORY" && !usedGroups.has(code)) continue;
     await ensureGroup(code, description, type);
   }
+  };
 
   // `named` is the description to give the sub group; without it an existing sub group is left as it is (the ledger catalogue only needs to find it).
   const ensureSub = async (groupCode: string, subCode: string, named?: string) => {
@@ -188,9 +200,12 @@ export async function seedChartOfAccounts(tx: Tx, companyId: number) {
     ["AG013", "AS004", "Long-term Deposits"],
   ] as const;
 
-  for (const [groupCode, subCode, description] of subgroupDefinitions) {
-    await ensureSub(groupCode, subCode, description);
-  }
+  const createSubGroups = async () => {
+    for (const [groupCode, subCode, description] of subgroupDefinitions) {
+      if (scope === "MANDATORY" && !usedGroups.has(`${groupCode}/${subCode}`)) continue;
+      await ensureSub(groupCode, subCode, description);
+    }
+  };
 
   // Demo General Ledgers: stable codes are preserved, while missing ledgers are added on every seed run.
   // The catalogue follows the Class 11/12 pattern: balance-sheet families first, then trading, income and expense heads.
@@ -271,7 +286,11 @@ export async function seedChartOfAccounts(tx: Tx, companyId: number) {
     ["GL073", "Customs Duty", "AG007", "AS004", "DEBIT", {}],
     ["GL074", "Excise Duty", "AG007", "AS004", "DEBIT", {}],
   ];
-  for (const [code, name, groupCode, subCode, normalBalance, flags] of ledgerDefinitions)
+  const ledgers = ledgerDefinitions.filter(([code]) => wanted(code));
+  for (const [, , groupCode, subCode] of ledgers) usedGroups.add(groupCode).add(`${groupCode}/${subCode}`);
+  await createGroups();
+  await createSubGroups();
+  for (const [code, name, groupCode, subCode, normalBalance, flags] of ledgers)
     await ensureLedger(code, name, groupCode, subCode, normalBalance, flags);
 }
 
@@ -307,8 +326,8 @@ export async function seedGlSetup(tx: Tx, companyId: number) {
 }
 
 // One call for a new (or existing) company: chart of accounts first, then the GL Setup that points into it.
-export async function seedCompanyDefaults(tx: Tx, companyId: number) {
-  await seedChartOfAccounts(tx, companyId);
+export async function seedCompanyDefaults(tx: Tx, companyId: number, scope: ChartScope = "FULL") {
+  await seedChartOfAccounts(tx, companyId, scope);
   await seedGlSetup(tx, companyId);
 }
 
@@ -324,8 +343,10 @@ export type NewCompanyInput = {
 
 export async function createCompany(input: NewCompanyInput, actor: Actor) {
   return inActorTx(actor, undefined, async (tx) => {
-    const [taken] = await tx.select({ id: S.company.id }).from(S.company).where(eq(S.company.code, input.code));
-    if (taken) throw new HttpError(409, `Company code ${input.code} is already in use.`, "code");
+    const [taken] = await tx.select({ id: S.company.id, deletedAt: S.company.deletedAt }).from(S.company).where(eq(S.company.code, input.code));
+    if (taken) throw new HttpError(409, taken.deletedAt
+      ? `Company code ${input.code} belongs to a company in the Trash. Restore it or delete it permanently first.`
+      : `Company code ${input.code} is already in use.`, "code");
 
     const [company] = await tx.insert(S.company).values({ code: input.code, name: input.name, businessType: input.businessType }).returning();
     await tx.insert(S.branch).values({ companyId: company.id, code: "HO", name: "Head Office", isHeadOffice: true });
@@ -335,7 +356,7 @@ export async function createCompany(input: NewCompanyInput, actor: Actor) {
     // The creator becomes the company's Admin (all branches), like the seeded companies.
     if (actor.userId) await tx.insert(S.userCompanyAccess).values({ userId: actor.userId, companyId: company.id, branchId: null, role: "ADMIN" });
 
-    if (input.setup === "DEFAULT") await seedCompanyDefaults(tx, company.id);
+    if (input.setup === "DEFAULT") await seedCompanyDefaults(tx, company.id, "MANDATORY");
     return { id: company.id, code: company.code, name: company.name, setup: input.setup };
   });
 }

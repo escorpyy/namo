@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { and, asc, eq, getTableColumns, getTableName, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, getTableName, inArray, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { HttpError, idParam, sameCompany, wrap } from "./_util";
@@ -23,6 +23,9 @@ export interface ServerCfg {
   validate?: (data: Record<string, any>, ctx: { companyId: number; id?: number }) => Promise<void>;
   afterWrite?: (data: Record<string, any>, id: number) => Promise<void>; // save ke baad related rows sync karne ke liye
   beforeDelete?: (row: Record<string, any>) => Promise<void>;
+  // Delete moves the record to a Trash instead of removing it (companies): this replaces the delete and its "linked records" guard, and
+  // rows with deletedAt set are not listed or editable.
+  trash?: (id: number) => Promise<void>;
 }
 
 const fieldOf = (def: MasterDef, name: string) => def.fields.find((f) => f.name === name)!;
@@ -130,6 +133,7 @@ export function masterRouter(def: MasterDef, cfg: ServerCfg) {
     }
     const conds: any[] = [];
     if (o.id != null) conds.push(eq(t.id, o.id));
+    if (cfg.trash) conds.push(isNull(t.deletedAt));
     if (o.companyId != null && !global) {
       conds.push(
         cfg.parent
@@ -189,7 +193,7 @@ export function masterRouter(def: MasterDef, cfg: ServerCfg) {
   r.put("/:id", wrap(async (req, res) => {
     const id = idParam(req.params.id, def.singular);
     const [existing] = await db.select().from(t).where(eq(t.id, id));
-    if (!existing) throw new HttpError(404, `${def.singular} not found.`);
+    if (!existing || (cfg.trash && existing.deletedAt)) throw new HttpError(404, `${def.singular} not found.`);
     const companyId: number = global ? id : cfg.parent ? (await parentCompany(existing[cfg.parent.column]))! : existing.companyId;
     if (!global) sameCompany(req.query.companyId, companyId, def.singular);
     const data = parse(req.body);
@@ -220,6 +224,10 @@ export function masterRouter(def: MasterDef, cfg: ServerCfg) {
     const [row] = await selectRows({ id });
     if (!row) throw new HttpError(404, `${def.singular} not found.`);
     if (!global) sameCompany(req.query.companyId, cfg.parent ? await parentCompany((row as any)[cfg.parent.column]) : (row as any).companyId, def.singular);
+    if (cfg.trash) {
+      await cfg.trash(id);
+      return void res.json({ ok: true });
+    }
     for (const c of def.counts ?? []) {
       const n = (row as any)[c.key] as number;
       if (n > 0) throw new HttpError(409, `Cannot delete: ${n} ${c.label} linked to this ${def.singular}.`);

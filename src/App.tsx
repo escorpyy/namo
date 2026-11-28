@@ -31,6 +31,7 @@ import PurchaseChallanWorkspace from "./screens/purchase/PurchaseChallanWorkspac
 import ImportCostAssessmentWorkspace from "./screens/purchase/ImportCostAssessmentWorkspace";
 import GLSetupScreen from "./screens/GLSetupScreen";
 import NewCompanyScreen from "./screens/NewCompanyScreen";
+import CompanyTrashScreen from "./screens/CompanyTrashScreen";
 import EntryControlScreen from "./screens/EntryControlScreen";
 import KeyboardShortcutsScreen from "./screens/KeyboardShortcutsScreen";
 import { READY_SCREEN_OPTIONS } from "./components/Sidebar";
@@ -309,6 +310,8 @@ export default function App() {
           <CodeNumberingScreen key={`${screen}:${companyId}`} companyId={companyId} userId={ctx.user.id} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} />
         ) : screen === "company-new" ? (
           <NewCompanyScreen key={screen} userId={ctx.user.id} setStatus={setStatus} dirtyRef={dirtyRef} onCreated={onCompanyCreated} />
+        ) : screen === "company-trash" ? (
+          <CompanyTrashScreen key={screen} setStatus={setStatus} onRestored={refreshCtx} />
         ) : screen === "number-series" ? (
           <NumberSeriesScreen key={`${screen}:${companyId}`} companyId={companyId} userId={ctx.user.id} company={co} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} />
         ) : screen === "opening-balance" ? (

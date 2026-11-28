@@ -72,6 +72,7 @@ export interface MasterDef {
   cols?: 1 | 2;
   uniqueScope?: "system"; // unique check company ke andar nahi, poore system me (jaise SubLedger.code)
   noDelete?: string; // delete allowed nahi: ye message dikhao
+  trash?: boolean; // delete moves the record to a Trash (restorable); linked records do not block it
   sortBy?: string;
   sortDir?: "asc" | "desc";
   refreshContext?: boolean; // save/delete ke baad header ke Company/Branch/FY switcher refresh
@@ -338,7 +339,7 @@ const list: MasterDef[] = [
     ],
   },
   {
-    key: "companies", title: "Company", singular: "Company", labelFields: ["code", "name"], cols: 2, refreshContext: true,
+    key: "companies", title: "Company", singular: "Company", labelFields: ["code", "name"], cols: 2, refreshContext: true, trash: true,
     fields: [
       { name: "code", label: "Code", type: "text", required: true, max: 15, upper: true, section: "Identity" },
       text("name", "Name", 200),

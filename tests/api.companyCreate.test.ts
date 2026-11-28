@@ -36,7 +36,7 @@ describe.skipIf(!DB_READY)("Create company: default data or blank (API)", () => 
     await close();
   });
 
-  it("with default data: company, Head Office, current fiscal year, Admin access, chart of accounts and every GL Setup role", async () => {
+  it("with default data: company, Head Office, fiscal year, Admin access, only the ledgers GL Setup needs (with their groups) and every role", async () => {
     const r = await call("POST", "/api/companies", body({ userId }));
     expect(r.status).toBe(201);
     expect(r.body).toMatchObject({ code: `ZC${tag}`, setup: "DEFAULT" });
@@ -48,8 +48,13 @@ describe.skipIf(!DB_READY)("Create company: default data or blank (API)", () => 
     expect((await rows(sql`select code, "isCurrent" from "FiscalYear" where "companyId" = ${id}`))).toEqual([{ code: "2083/084", isCurrent: true }]);
     expect((await rows(sql`select role, "branchId" from "UserCompanyAccess" where "companyId" = ${id} and "userId" = ${userId}`))).toEqual([{ role: "ADMIN", branchId: null }]);
 
-    expect(await count("AccountGroup", id)).toBe(13);
-    expect(await count("GeneralLedger", id)).toBeGreaterThan(40);
+    const codes = await rows(sql`select code from "GeneralLedger" where "companyId" = ${id} order by code`);
+    expect(codes.map((c) => c.code)).toEqual(["GL001", "GL003", "GL019", "GL020", "GL021", "GL040", "GL041", "GL050", "GL051", "GL070", "GL071", "GL072"]);
+    expect(await count("AccountGroup", id)).toBe(5);
+    // no group or sub group is left without a ledger
+    expect(await rows(sql`select g.code from "AccountGroup" g where g."companyId" = ${id} and not exists (select 1 from "GeneralLedger" l where l."accountGroupId" = g.id)`)).toEqual([]);
+    expect(await rows(sql`select s.code from "AccountSubGroup" s join "AccountGroup" g on g.id = s."accountGroupId" where g."companyId" = ${id} and not exists (select 1 from "GeneralLedger" l where l."accountSubGroupId" = s.id)`)).toEqual([]);
+    for (const t of ["Party", "PurchaseTerm", "SalesTerm", "Product"]) expect(await count(t, id)).toBe(0);
     const setup = await rows(sql`select s.role, l.code from "GeneralLedgerSetup" s join "GeneralLedger" l on l.id = s."generalLedgerId" where s."companyId" = ${id}`);
     expect(setup).toHaveLength(12);
     expect(Object.fromEntries(setup.map((s) => [s.role, s.code]))).toMatchObject({ CASH_BOOK: "GL001", PROFIT_AND_LOSS: "GL019", SALES_ACCOUNT: "GL020", INPUT_VAT: "GL070" });
@@ -93,15 +98,15 @@ describe.skipIf(!DB_READY)("Create company: default data or blank (API)", () => 
   it("running the defaults again fills what is missing but never overwrites a role the user changed", async () => {
     const { seedCompanyDefaults } = await import("../server/services/companyDefaults");
     const id = made[0];
-    const [gl2] = await rows(sql`select id from "GeneralLedger" where "companyId" = ${id} and code = 'GL002'`);
+    const [gl2] = await rows(sql`select id from "GeneralLedger" where "companyId" = ${id} and code = 'GL003'`);
     await db.execute(sql`update "GeneralLedgerSetup" set "generalLedgerId" = ${gl2.id} where "companyId" = ${id} and role = 'CASH_BOOK'`);
     await db.execute(sql`delete from "GeneralLedgerSetup" where "companyId" = ${id} and role = 'OUTPUT_VAT'`);
     const ledgersBefore = await count("GeneralLedger", id);
 
-    await db.transaction((tx: any) => seedCompanyDefaults(tx, id));
+    await db.transaction((tx: any) => seedCompanyDefaults(tx, id, "MANDATORY"));
 
     const after = Object.fromEntries((await rows(sql`select s.role, l.code from "GeneralLedgerSetup" s join "GeneralLedger" l on l.id = s."generalLedgerId" where s."companyId" = ${id}`)).map((s) => [s.role, s.code]));
-    expect(after.CASH_BOOK).toBe("GL002"); // the user's choice is kept
+    expect(after.CASH_BOOK).toBe("GL003"); // the user's choice is kept
     expect(after.OUTPUT_VAT).toBe("GL071"); // the missing role is filled in again
     expect(Object.keys(after)).toHaveLength(12);
     expect(await count("GeneralLedger", id)).toBe(ledgersBefore);

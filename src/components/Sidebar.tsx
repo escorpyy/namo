@@ -33,6 +33,7 @@ import {
     "nfrs-sme-changes-equity",
     "nfrs-sme-cash-flow",
     "company-new",
+    "company-trash",
     "code-numbering",
     "number-series",
     "gl-setup",
@@ -206,6 +207,7 @@ const sections: Section[] = [
     items: [
       { id: "companies", label: "Company" },
       { id: "company-new", label: "New Company" },
+      { id: "company-trash", label: "Company Trash" },
       { id: "branches", label: "Branch" },
       { id: "code-numbering", label: "Code Numbering" },
       { id: "number-series", label: "Number Series" },

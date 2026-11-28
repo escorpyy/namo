@@ -50,10 +50,8 @@ describe.skipIf(!DB_READY)("Company, Branch and Fiscal Year masters (API)", () =
   });
   afterAll(async () => {
     if (tc) {
-      if (tcGroup) await del("account-groups", tcGroup);
-      for (const f of await rows("fiscal-years", tc)) { await setClosed(f.id, false); await del("fiscal-years", f.id); }
-      for (const b of await rows("branches", tc)) await del("branches", b.id);
       await del("companies", tc);
+      await call("DELETE", `/api/companies/${tc}/permanent`, { confirmCode: coBody().code });
     }
     await close();
   });
@@ -338,29 +336,11 @@ describe.skipIf(!DB_READY)("Company, Branch and Fiscal Year masters (API)", () =
 
   // ------------------------------------------------------------------------------------------------ Company delete
   describe("Company delete", () => {
-    it("is blocked while the company has branches, fiscal years or account data, and works once it is empty", async () => {
+    it("is not blocked by branches or account data: it moves to the Trash, and leaves the list; unknown id is 404", async () => {
       expect((await del("companies", 999999)).status).toBe(404);
-      const b = await postBranch(brBody({ code: `DB${tag}`, name: `Del branch ${tag}` }));
-      const blockedBranch = await del("companies", tc);
-      expect(blockedBranch.status).toBe(409);
-      expect(blockedBranch.body.message).toMatch(/Branch\(es\)/);
-      expect((await del("branches", b.body.id)).status).toBe(200);
-
-      const f = await postFy(fyBody({ code: `DF${tag}` }));
-      const blockedFy = await del("companies", tc);
-      expect(blockedFy.status).toBe(409);
-      expect(blockedFy.body.message).toMatch(/Fiscal Year\(s\)/);
-      expect((await del("fiscal-years", f.body.id)).status).toBe(200);
-
-      const blockedGroup = await del("companies", tc);
-      expect(blockedGroup.status).toBe(409);
-      expect(blockedGroup.body.message).toMatch(/Account Group\(s\)/);
-      expect((await del("account-groups", tcGroup)).status).toBe(200);
-      tcGroup = 0;
-
       expect((await del("companies", tc)).status).toBe(200);
       expect((await companies()).some((c) => c.id === tc)).toBe(false);
-      tc = 0; // afterAll has nothing left to remove
+      expect((await del("companies", tc)).status).toBe(404); // already in the Trash
     });
   });
 });
