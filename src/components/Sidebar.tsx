@@ -32,6 +32,7 @@ import {
     "nfrs-sme-balance-sheet",
     "nfrs-sme-changes-equity",
     "nfrs-sme-cash-flow",
+    "company-new",
     "code-numbering",
     "number-series",
     "gl-setup",
@@ -204,6 +205,7 @@ const sections: Section[] = [
     id: "setup", label: "Setup", icon: SlidersHorizontal,
     items: [
       { id: "companies", label: "Company" },
+      { id: "company-new", label: "New Company" },
       { id: "branches", label: "Branch" },
       { id: "code-numbering", label: "Code Numbering" },
       { id: "number-series", label: "Number Series" },

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
 import { db } from "./db";
 import { contextRouter } from "./routes/context";
+import { companiesRouter } from "./routes/companies";
 import { masterRouters } from "./masters";
 import { openingBalanceRouter } from "./routes/openingBalance";
 import { stockOpeningRouter } from "./routes/stockOpening";
@@ -49,6 +50,7 @@ app.get("/api/health", async (_req, res) => {
   }
 });
 app.use("/api/context", contextRouter);
+app.use("/api/companies", companiesRouter);
 app.use("/api/opening-balance", openingBalanceRouter);
 app.use("/api/stock-opening", stockOpeningRouter);
 app.use("/api/purchase", purchaseRouter);

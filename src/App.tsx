@@ -30,6 +30,7 @@ import PurchaseOrderWorkspace from "./screens/purchase/PurchaseOrderWorkspace";
 import PurchaseChallanWorkspace from "./screens/purchase/PurchaseChallanWorkspace";
 import ImportCostAssessmentWorkspace from "./screens/purchase/ImportCostAssessmentWorkspace";
 import GLSetupScreen from "./screens/GLSetupScreen";
+import NewCompanyScreen from "./screens/NewCompanyScreen";
 import EntryControlScreen from "./screens/EntryControlScreen";
 import KeyboardShortcutsScreen from "./screens/KeyboardShortcutsScreen";
 import { READY_SCREEN_OPTIONS } from "./components/Sidebar";
@@ -155,6 +156,16 @@ export default function App() {
     if (!(await okToLeave("Unsaved changes will be lost. Switch company anyway?", "Switch company?", "Switch company"))) return;
     setCompanyId(id);
     pickDefaults(ctx.companies.find((c) => c.id === id)!);
+  };
+
+  // A company was just created from the New Company screen: reload the list, switch to it and open the first useful screen.
+  const onCompanyCreated = async (id: number, setup: "DEFAULT" | "BLANK") => {
+    const d = await api.context();
+    setCtx(d);
+    setCompanyId(id);
+    const created = d.companies.find((c) => c.id === id);
+    if (created) pickDefaults(created);
+    setScreen(setup === "DEFAULT" ? "gl-setup" : "account-groups");
   };
 
   const guarded = (fn: () => void) => async () => {
@@ -296,6 +307,8 @@ export default function App() {
           />
         ) : screen === "code-numbering" ? (
           <CodeNumberingScreen key={`${screen}:${companyId}`} companyId={companyId} userId={ctx.user.id} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} />
+        ) : screen === "company-new" ? (
+          <NewCompanyScreen key={screen} userId={ctx.user.id} setStatus={setStatus} dirtyRef={dirtyRef} onCreated={onCompanyCreated} />
         ) : screen === "number-series" ? (
           <NumberSeriesScreen key={`${screen}:${companyId}`} companyId={companyId} userId={ctx.user.id} company={co} setStatus={setStatus} dirtyRef={dirtyRef} externalMessage={note} />
         ) : screen === "opening-balance" ? (

@@ -91,6 +91,15 @@ export type GLSetupRole = {
   allowPurchaseBill: boolean; allowPurchaseReturn: boolean; allowOpeningBalance: boolean; allowStockOpening: boolean; isLocked: boolean;
 };
 export type GLSetupLedger = { id: number; code: string; name: string; normalBalance: "DEBIT" | "CREDIT"; isActive: boolean; isCashOrBank: boolean; requiresSubLedger: boolean };
+export type CompanySetupMode = "DEFAULT" | "BLANK";
+export interface NewCompanyBody {
+  code: string; name: string; businessType: string; fiscalYearCode: string; startDate: string; endDate: string;
+  setup: CompanySetupMode; userId: number;
+}
+export const companyApi = {
+  create: (body: NewCompanyBody) => req<{ id: number; code: string; name: string; setup: CompanySetupMode }>("/api/companies", { method: "POST", body: JSON.stringify(body) }),
+};
+
 export const glSetupApi = {
   get: (companyId: number) => req<{ roles: GLSetupRole[]; ledgers: GLSetupLedger[] }>(`/api/gl-setup?companyId=${companyId}`),
   save: (companyId: number, userId: number, roles: GLSetupRole[]) =>
